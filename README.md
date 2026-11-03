@@ -63,6 +63,20 @@ target-dir = "/home/<you>/.cache/notez/target"
 If `npm install` skips Electron's download (npm 11 blocks install scripts), run
 `node node_modules/electron/install.js`.
 
+## Releasing
+
+Packages are built by GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml))
+when a version tag is pushed. Bump `version` in `package.json` and
+`core/Cargo.toml`, commit, then:
+
+```sh
+git tag v0.4.0
+git push origin main v0.4.0
+```
+
+The AppImage, `.deb` and `.rpm` appear on the Releases page a few minutes later.
+An existing tag can be rebuilt from the Actions tab (Release → Run workflow).
+
 ## Layout
 
 - `electron/` — desktop shell: window, dialogs, file protocol, vault watcher
