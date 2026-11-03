@@ -9,6 +9,7 @@ import { fileSrc } from "../core/native";
 import { parseAttrs } from "./format";
 import { canRender, previewsEnabled } from "./widgets";
 import { TableWidget, rawTableField } from "./tables";
+import { PropertiesWidget } from "./properties";
 
 export interface LiveOptions {
   /** Open a link target (note name, path or URL). */
@@ -313,41 +314,6 @@ export function inlineHtml(src: string): string {
     .replace(/\[\[([^\]|]+)\|?([^\]]*)\]\]/g, (_, t, a) => `<span class="cm-nz-lp-link internal" data-target="${t}">${a || t}</span>`)
     .replace(/\[([^\]]+)\]\(([^)\s]+)[^)]*\)/g, '<span class="cm-nz-lp-link" data-target="$2">$1</span>')
     .replace(/\[([^\]]*)\]\{[^}]*\}/g, "$1");
-}
-
-class PropertiesWidget extends WidgetType {
-  constructor(readonly src: string) {
-    super();
-  }
-  eq(o: PropertiesWidget) {
-    return o.src === this.src;
-  }
-  toDOM() {
-    const wrap = document.createElement("div");
-    wrap.className = "cm-nz-lp-props";
-    const rows: string[] = [];
-    let key = "";
-    for (const line of this.src.split("\n").slice(1, -1)) {
-      const m = /^([\w-]+):\s*(.*)$/.exec(line);
-      if (m) {
-        key = m[1];
-        rows.push(`<div class="k">${escHtml(m[1])}</div><div class="v" dir="auto">${m[2] ? inlineHtml(m[2].replace(/^["']|["']$/g, "")) : ""}</div>`);
-      } else if (key && line.trim()) {
-        rows[rows.length - 1] = rows[rows.length - 1].replace(/<\/div>$/, ` <span class="more">${escHtml(line.trim())}</span></div>`);
-      }
-    }
-    wrap.innerHTML = `<div class="cm-nz-lp-props-title">Properties</div><div class="cm-nz-lp-props-grid">${rows.join("")}</div>`;
-    // The `title:` property is the document title: show it like the PDF does.
-    const title = /^title:\s*(.+)$/m.exec(this.src)?.[1].trim().replace(/^["']|["']$/g, "");
-    if (!title) return wrap;
-    const outer = document.createElement("div");
-    const t = document.createElement("div");
-    t.className = "cm-nz-lp-doc-title";
-    t.dir = "auto";
-    t.innerHTML = inlineHtml(title);
-    outer.append(wrap, t);
-    return outer;
-  }
 }
 
 class FenceWidget extends WidgetType {

@@ -78,3 +78,26 @@ export function setFrontmatter(view: EditorView, keyPath: string[], value: unkno
     view.dispatch({ changes: { from: 0, to: 0, insert: `---\n${yaml}---\n\n` } });
   }
 }
+
+/** Apply `edit` to the parsed frontmatter document and write it back (one undo step). */
+export function editFrontmatter(view: EditorView, edit: (doc: Document) => void) {
+  const text = view.state.doc.toString();
+  const r = frontmatterRange(text);
+  const doc: Document = r ? parseDocument(text.slice(r.from, r.to)) : new Document({});
+  edit(doc);
+  let yaml = doc.toString({ lineWidth: 0 });
+  if (yaml.trim() === "{}" || yaml.trim() === "null") yaml = "";
+  if (r) view.dispatch({ changes: { from: r.from, to: r.to, insert: yaml } });
+  else view.dispatch({ changes: { from: 0, to: 0, insert: `---\n${yaml}---\n\n` } });
+}
+
+/** Rename top-level key `from` to `to`, keeping its position and value. */
+export function renameFrontmatterKey(view: EditorView, from: string, to: string) {
+  if (!to || from === to) return;
+  editFrontmatter(view, (doc) => {
+    const map = doc.contents as any;
+    if (!map?.items || doc.has(to)) return;
+    const pair = map.items.find((p: any) => (p.key?.value ?? p.key) === from);
+    if (pair) pair.key = doc.createNode(to);
+  });
+}

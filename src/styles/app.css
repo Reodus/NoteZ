@@ -3390,3 +3390,126 @@ html.no-anim .sidebar-slot {
   opacity: 1 !important;
   color: var(--fg);
 }
+
+/* editable properties card */
+.cm-nz-lp-props {
+  cursor: default;
+}
+.cm-nz-lp-props-title {
+  display: flex;
+  align-items: center;
+}
+.cm-nz-lp-props-grid {
+  align-items: center;
+}
+.cm-nz-lp-props .v {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.nz-prop-edit {
+  min-height: 1.5em;
+  padding: 1px 6px;
+  margin-inline-start: -6px;
+  border-radius: 5px;
+  outline: none;
+  cursor: text;
+  overflow-wrap: anywhere;
+  flex: 1;
+  min-width: 2em;
+}
+.nz-prop-edit:hover {
+  background: var(--hover);
+}
+.nz-prop-edit:focus {
+  background: var(--surface);
+  box-shadow: 0 0 0 1.5px rgba(var(--accent-rgb), 0.55);
+}
+.nz-prop-edit:empty::before {
+  content: attr(data-placeholder);
+  color: var(--fg-faint);
+}
+.cm-nz-lp-props .k.nz-prop-edit {
+  flex: none;
+  color: var(--fg-muted);
+}
+.nz-prop-btn {
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.nz-prop-btn:hover {
+  background: var(--hover-strong);
+  color: var(--fg);
+}
+.nz-prop-raw {
+  margin-inline-start: auto;
+  font-family: var(--font-mono);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.nz-prop-del {
+  opacity: 0;
+  font-size: 15px;
+  line-height: 1;
+}
+.cm-nz-lp-props .v:hover .nz-prop-del,
+.nz-prop-del:focus-visible {
+  opacity: 1;
+}
+.nz-prop-add {
+  margin-top: 6px;
+  margin-inline-start: -6px;
+}
+.nz-prop-date,
+.nz-chip-input {
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+  color-scheme: light dark;
+}
+.nz-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+.nz-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px 1px 9px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--fg);
+  font-size: 12px;
+}
+.nz-chip button {
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 0 3px;
+  border-radius: 999px;
+}
+.nz-chip button:hover {
+  background: var(--hover-strong);
+}
+.nz-chip-input {
+  flex: 1;
+  min-width: 60px;
+  font-size: 12px;
+}
+.cm-nz-lp-doc-title.nz-prop-edit {
+  margin-inline-start: 0;
+  padding: 2px 8px;
+}
