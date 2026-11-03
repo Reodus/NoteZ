@@ -1,0 +1,7 @@
+{
+  "id": "progress-bars",
+  "name": "Progress bars",
+  "version": "1.0.0",
+  "description": "Adds ```progress blocks (label: percent) and a toolbar button that inserts today's date.",
+  "author": "NoteZ examples"
+}

@@ -1,0 +1,92 @@
+{
+  "name": "notez",
+  "version": "0.3.0",
+  "description": "Bilingual notes with beautiful PDF export",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run core && node electron/dev.mjs",
+    "web": "vite",
+    "core": "cargo build --release --manifest-path core/Cargo.toml",
+    "build": "vite build && npm run core",
+    "start": "electron .",
+    "dist": "npm run build && electron-builder --linux"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@codemirror/autocomplete": "^6.20.4",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@lezer/highlight": "^1.2.5",
+    "codemirror": "^6.0.2",
+    "d3-force": "^3.0.0",
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0",
+    "katex": "^0.18.10",
+    "lucide-solid": "^1.66.0",
+    "mermaid": "^12.2.0",
+    "solid-js": "^1.9.3",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16",
+    "vite-plugin-solid": "^2.11.12",
+    "yaml": "^2.9.1"
+  },
+  "allowScripts": {
+    "electron@45.2.1": true,
+    "electron-winstaller": false
+  },
+  "main": "electron/main.mjs",
+  "author": {
+    "name": "Reo",
+    "email": "reodus.official@gmail.com"
+  },
+  "build": {
+    "appId": "com.notez.app",
+    "productName": "NoteZ",
+    "executableName": "notez",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "core/target/release/notez-core",
+        "to": "notez-core"
+      },
+      {
+        "from": "core/typst-packages",
+        "to": "typst-packages"
+      }
+    ],
+    "asar": true,
+    "electronLanguages": [
+      "en-US",
+      "fa"
+    ],
+    "linux": {
+      "target": [
+        "deb",
+        "rpm",
+        "AppImage"
+      ],
+      "category": "Office",
+      "icon": "build/icon.png",
+      "synopsis": "Bilingual notes with beautiful PDF export",
+      "executableArgs": [
+        "--ozone-platform-hint=auto"
+      ]
+    }
+  },
+  "homepage": "https://notez.invalid"
+}

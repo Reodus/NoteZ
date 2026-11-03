@@ -1,0 +1,21 @@
+name: Report
+description: Formal report — header rule, underlined chapter headings, page x of y.
+lang: fa
+page:
+  paper: a4
+  margin: 2.5cm
+  numbering: "۱"
+  skip-first: true
+  header: { right: "{title}", left: "{date}", line: true }
+  footer: { center: "صفحه {page} از {total}", line: true }
+styles:
+  body: { font: Libertinus Serif, font-fa: Vazirmatn, size: 11pt, line-spacing: 1.5, align: justify, space-after: 0.9em }
+  title: { size: 26pt, weight: bold, color: "#0f3d5e", align: center, space-after: 2em }
+  subtitle: { size: 14pt, color: "#4d6a80" }
+  h1: { size: 17pt, weight: bold, color: "#0f3d5e", numbering: "۱.", border: "#0f3d5e", space-before: 1.6em, space-after: 0.9em }
+  h2: { size: 13.5pt, weight: bold, color: "#1f5f8b", numbering: "۱.۱.", space-before: 1.2em, space-after: 0.6em }
+  h3: { size: 12pt, weight: semibold, color: "#1f5f8b", space-before: 1em, space-after: 0.5em }
+  quote: { background: "#eef4f8", border: "#1f5f8b" }
+  code: { size: 9pt, background: "#f4f6f8", border: "#dde3e8" }
+  link: { color: "#1f5f8b" }
+  caption: { size: 9.5pt, color: "#4d6a80" }

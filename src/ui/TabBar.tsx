@@ -1,0 +1,87 @@
+import { For, Show } from "solid-js";
+import { X, FileText, FileCode2, PanelLeft, Columns2, PanelRight, Square, BookOpen, Code2 } from "lucide-solid";
+import { state, setState, isDirty, closeTab, prefs, setPrefs, sidebarOpen, setSidebarOpen } from "../core/store";
+import { stem } from "../core/ipc";
+import { openMenu } from "./primitives";
+
+export default function TabBar() {
+  let dragFrom = -1;
+  return (
+    <div class="tabbar">
+      <button class="icon-btn" title="Toggle sidebar (Ctrl+\\)" onClick={() => setSidebarOpen(!sidebarOpen())}>
+        <PanelLeft size={17} />
+      </button>
+      <div class="tabs">
+        <For each={state.tabs}>
+          {(path, i) => (
+            <div
+              class="tab"
+              classList={{ active: state.active === path, dirty: isDirty(path) }}
+              title={path}
+              draggable={true}
+              onDragStart={() => (dragFrom = i())}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => {
+                if (dragFrom < 0 || dragFrom === i()) return;
+                const tabs = [...state.tabs];
+                const [moved] = tabs.splice(dragFrom, 1);
+                tabs.splice(i(), 0, moved);
+                setState("tabs", tabs);
+                dragFrom = -1;
+              }}
+              onMouseDown={(e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  closeTab(path);
+                }
+              }}
+              onClick={() => setState("active", path)}
+              onContextMenu={(e) =>
+                openMenu(e, [
+                  { label: "Close", run: () => closeTab(path) },
+                  { label: "Close others", run: () => state.tabs.filter((t) => t !== path).forEach(closeTab) },
+                  { label: "Close all", run: () => [...state.tabs].forEach(closeTab) },
+                ])
+              }
+            >
+              {path.endsWith(".typ") ? <FileCode2 size={14} class="tab-icon-file typ" /> : <FileText size={14} class="tab-icon-file" />}
+              <span class="tab-title" dir="auto">{stem(path)}</span>
+              <button
+                class="tab-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(path);
+                }}
+              >
+                <Show when={isDirty(path)} fallback={<X size={13} />}>
+                  <span class="dot" />
+                </Show>
+              </button>
+            </div>
+          )}
+        </For>
+      </div>
+      <Show when={prefs.layout !== "preview" && state.active && !state.active.endsWith(".typ")}>
+        <div class="layout-switch mode-switch">
+          <button classList={{ active: prefs.editorMode === "live" }} title="Live preview (Ctrl+Shift+M)" onClick={() => setPrefs("editorMode", "live")}>
+            <BookOpen size={15} />
+          </button>
+          <button classList={{ active: prefs.editorMode === "source" }} title="Source mode (Ctrl+Shift+M)" onClick={() => setPrefs("editorMode", "source")}>
+            <Code2 size={15} />
+          </button>
+        </div>
+      </Show>
+      <div class="layout-switch">
+        <button classList={{ active: prefs.layout === "editor" }} title="Editor only" onClick={() => setPrefs("layout", "editor")}>
+          <Square size={15} />
+        </button>
+        <button classList={{ active: prefs.layout === "split" }} title="Editor + Preview (Ctrl+Shift+E)" onClick={() => setPrefs("layout", "split")}>
+          <Columns2 size={15} />
+        </button>
+        <button classList={{ active: prefs.layout === "preview" }} title="Preview only" onClick={() => setPrefs("layout", "preview")}>
+          <PanelRight size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}

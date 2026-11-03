@@ -1,0 +1,23 @@
+name: Default
+description: Clean bilingual layout — New Computer Modern for Latin, Vazirmatn for Persian.
+lang: fa
+page:
+  paper: a4
+  margin: 2.5cm
+  numbering: "۱"
+  footer:
+    center: "{page}"
+styles:
+  body: { font: New Computer Modern, font-fa: Vazirmatn, size: 11pt, line-spacing: 1.45, align: justify, space-after: 0.9em }
+  title: { size: 24pt, weight: bold, color: "#1d2b4f", align: center, space-after: 1.6em }
+  subtitle: { size: 13pt, color: "#5b6478" }
+  h1: { size: 18pt, weight: bold, color: "#1d2b4f", space-before: 1.4em, space-after: 0.8em }
+  h2: { size: 14.5pt, weight: bold, color: "#2a3d6b", space-before: 1.2em, space-after: 0.6em }
+  h3: { size: 12.5pt, weight: semibold, color: "#34497a", space-before: 1em, space-after: 0.5em }
+  h4: { size: 11.5pt, weight: semibold }
+  h5: { size: 11pt, weight: semibold, italic: true }
+  h6: { size: 11pt, weight: medium, color: "#5b6478" }
+  quote: { color: "#3c4458", background: "#f3f5fa", border: "#7b93d1" }
+  code: { size: 9.5pt, background: "#f5f6f8", border: "#e1e4ea" }
+  link: { color: "#2f5fc4" }
+  caption: { size: 9.5pt, color: "#5b6478" }

@@ -1,0 +1,16 @@
+name: Minimal
+description: Black on white, no color, generous margins.
+lang: fa
+page:
+  paper: a4
+  margin: 3cm
+  numbering: "۱"
+  footer: { center: "{page}" }
+styles:
+  body: { font: Libertinus Serif, font-fa: Vazirmatn, size: 11.5pt, line-spacing: 1.5, align: start, space-after: 1em }
+  title: { size: 20pt, weight: semibold, align: start, space-after: 1.5em }
+  h1: { size: 15pt, weight: semibold, space-before: 1.5em, space-after: 0.7em }
+  h2: { size: 13pt, weight: semibold, space-before: 1.2em, space-after: 0.6em }
+  h3: { size: 11.5pt, weight: semibold, space-before: 1em, space-after: 0.5em }
+  quote: { italic: true }
+  code: { size: 9.5pt, background: "#f6f6f6" }

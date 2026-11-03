@@ -1,0 +1,20 @@
+name: Modern
+description: Sans-serif, airy, colorful headings — great for notes and handouts.
+lang: fa
+page:
+  paper: a4
+  margin: 2cm
+  numbering: "۱"
+  footer: { right: "{page} / {total}", left: "{title}" }
+styles:
+  body: { font: Vazirmatn, font-fa: Vazirmatn, size: 10.5pt, line-spacing: 1.6, align: start, space-after: 1em }
+  title: { size: 28pt, weight: bold, color: "#5b3fd1", align: start, space-after: 1.4em }
+  subtitle: { size: 14pt, color: "#7a7f8f" }
+  h1: { size: 19pt, weight: bold, color: "#5b3fd1", space-before: 1.5em, space-after: 0.7em }
+  h2: { size: 15pt, weight: semibold, color: "#2b8a87", space-before: 1.3em, space-after: 0.6em }
+  h3: { size: 12.5pt, weight: semibold, color: "#d1663f", space-before: 1em, space-after: 0.5em }
+  h4: { size: 11pt, weight: semibold }
+  quote: { color: "#41455a", background: "#f2effd", border: "#5b3fd1" }
+  code: { size: 9.5pt, background: "#f4f4f8", border: "#e4e2f0" }
+  link: { color: "#5b3fd1", underline: false }
+  caption: { size: 9pt, color: "#7a7f8f" }
