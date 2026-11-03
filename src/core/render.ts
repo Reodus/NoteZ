@@ -4,7 +4,7 @@ import { createSignal } from "solid-js";
 import { saveDialog, openPath } from "./native";
 import { app, notify } from "./app";
 import { ipc, Diagnostic, RenderedBlock, stem } from "./ipc";
-import { root, state, prefs } from "./store";
+import { root, state, viewLayout } from "./store";
 
 export interface Fence {
   lang: string;
@@ -87,7 +87,7 @@ export function schedulePreview(delay = 350) {
 
 export async function runPreview() {
   const path = state.active;
-  if (!path || prefs.layout === "editor") return;
+  if (!path || viewLayout() === "editor") return;
   const text = state.buffers[path]?.content ?? "";
   const my = ++seq;
   setPreview((p) => ({ ...p, busy: true }));

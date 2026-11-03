@@ -1,6 +1,6 @@
 import { For, Show } from "solid-js";
-import { X, FileText, FileCode2, PanelLeft, Columns2, PanelRight, Square, BookOpen, Code2 } from "lucide-solid";
-import { state, setState, isDirty, closeTab, prefs, setPrefs, sidebarOpen, setSidebarOpen } from "../core/store";
+import { X, FileText, FileCode2, PanelLeft, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2 } from "lucide-solid";
+import { state, setState, isDirty, closeTab, prefs, setPrefs, sidebarOpen, setSidebarOpen, setFocusMode } from "../core/store";
 import { stem } from "../core/ipc";
 import { openMenu } from "./primitives";
 
@@ -71,6 +71,9 @@ export default function TabBar() {
           </button>
         </div>
       </Show>
+      <button class="icon-btn" title="Focus mode — text only (Ctrl+Shift+Enter)" onClick={() => setFocusMode(true)}>
+        <Maximize2 size={16} />
+      </button>
       <div class="layout-switch">
         <button classList={{ active: prefs.layout === "editor" }} title="Editor only" onClick={() => setPrefs("layout", "editor")}>
           <Square size={15} />

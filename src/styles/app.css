@@ -3337,3 +3337,56 @@ body,
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* ------------------------------------------------- sliding sidebar, focus */
+.sidebar-slot {
+  position: relative;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+body.resizing .sidebar-slot,
+html.no-anim .sidebar-slot {
+  transition: none;
+}
+.sidebar-slot > .sidebar {
+  position: relative;
+  height: 100%;
+}
+.resizer.end {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+  top: 0;
+  bottom: 0;
+  position: absolute;
+}
+.shell.focus .workspace {
+  position: relative;
+}
+.shell.focus .editor .cm-content {
+  max-width: min(760px, 100%);
+  margin-inline: auto;
+}
+.focus-exit {
+  position: absolute;
+  top: 10px;
+  inset-inline-end: 14px;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-muted);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.workspace:hover .focus-exit {
+  opacity: 0.35;
+}
+.focus-exit:hover {
+  opacity: 1 !important;
+  color: var(--fg);
+}

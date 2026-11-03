@@ -2,7 +2,7 @@
 import type { BuiltinPlugin } from "../core/plugins";
 import {
   state, setState, setDialog, closeTab, saveAll, prefs, setPrefs, setSidebarOpen, sidebarOpen, createNote,
-  setRightTab,
+  setRightTab, focusMode, setFocusMode,
 } from "../core/store";
 import { exportPdf, showGeneratedTypst } from "../core/render";
 import { chooseVault } from "../ui/Welcome";
@@ -55,6 +55,7 @@ export const corePlugin: BuiltinPlugin = {
       run: () => setPrefs("layout", prefs.layout === "editor" ? "split" : "editor"),
     });
     c({ id: "layout.sidebar", title: "Toggle sidebar", key: "Mod-\\", run: () => setSidebarOpen(!sidebarOpen()) });
+    c({ id: "layout.focus", title: "Toggle focus mode (text only)", key: "Mod-Shift-Enter", run: () => setFocusMode(!focusMode()) });
     c({ id: "graph.toggle", title: "Toggle graph view", key: "Mod-g", run: () => setGraphOpen(!graphOpen()) });
     c({ id: "settings.open", title: "Settings", key: "Mod-,", run: () => setDialog({ kind: "settings" }) });
     c({ id: "doc.themes", title: "Choose document theme…", run: () => setDialog({ kind: "themes" }) });

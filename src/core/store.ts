@@ -23,6 +23,7 @@ export interface Prefs {
   autosaveMs: number;
   layout: Layout;
   sidebarWidth: number;
+  sidebarOpen: boolean;
   previewWidth: number;
   recentVaults: string[];
   lastVault: string | null;
@@ -41,6 +42,7 @@ const DEFAULT_PREFS: Prefs = {
   autosaveMs: 600,
   layout: "split",
   sidebarWidth: 264,
+  sidebarOpen: true,
   previewWidth: 520,
   recentVaults: [],
   lastVault: null,
@@ -326,4 +328,9 @@ export type Dialog =
 export const [dialog, setDialog] = createSignal<Dialog>(null);
 export const [sidebarTab, setSidebarTab] = createSignal<string>("files");
 export const [rightTab, setRightTab] = createSignal<string>("preview");
-export const [sidebarOpen, setSidebarOpen] = createSignal(true);
+export const sidebarOpen = () => prefs.sidebarOpen;
+export const setSidebarOpen = (v: boolean) => setPrefs("sidebarOpen", v);
+/** Focus mode: only the text — no sidebar, tabs, toolbar or preview. */
+export const [focusMode, setFocusMode] = createSignal(false);
+/** Layout actually shown (focus mode forces the editor alone). */
+export const viewLayout = (): Layout => (focusMode() ? "editor" : prefs.layout);

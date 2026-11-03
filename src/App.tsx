@@ -1,8 +1,9 @@
 import { createEffect, onCleanup, onMount, Show, Switch, Match } from "solid-js";
-import { Copy } from "lucide-solid";
+import { Copy, Minimize2 } from "lucide-solid";
 import { app, notify } from "./core/app";
 import {
   root, prefs, isDark, openVault, openNote, dialog, setDialog, sidebarOpen, saveAll, state,
+  focusMode, setFocusMode, viewLayout,
 } from "./core/store";
 import { ipc } from "./core/ipc";
 import { loadBuiltins, loadVaultPlugins } from "./core/plugins";
@@ -79,6 +80,11 @@ export default function App() {
 
   const onKey = (e: KeyboardEvent) => {
     if (e.defaultPrevented || dialog()) return;
+    if (e.key === "Escape" && focusMode()) {
+      e.preventDefault();
+      setFocusMode(false);
+      return;
+    }
     app.commands.handleKey(e);
   };
   const onUnload = () => void saveAll();
@@ -103,28 +109,41 @@ export default function App() {
   return (
     <>
       <Show when={root()} fallback={<Welcome />}>
-        <div class="shell" classList={{ "no-sidebar": !sidebarOpen() }}>
-          <Show when={sidebarOpen()}>
+        <div class="shell" classList={{ "no-sidebar": !sidebarOpen() || focusMode(), focus: focusMode() }}>
+          <div
+            class="sidebar-slot"
+            style={{ width: sidebarOpen() && !focusMode() ? `${prefs.sidebarWidth}px` : "0px" }}
+            inert={!sidebarOpen() || focusMode()}
+          >
             <Sidebar />
-          </Show>
+          </div>
           <main class="workspace">
-            <TabBar />
-            <Show when={!graphOpen()} fallback={<GraphView />}>
+            <Show when={!focusMode()}>
+              <TabBar />
+            </Show>
+            <Show when={!graphOpen() || focusMode()} fallback={<GraphView />}>
             <Show when={state.active} fallback={<EmptyState />}>
-              <Show when={prefs.layout !== "preview"}>
+              <Show when={viewLayout() !== "preview" && !focusMode()}>
                 <Toolbar />
               </Show>
-              <div class="work-area" classList={{ [`layout-${prefs.layout}`]: true }}>
-                <Show when={prefs.layout !== "preview"}>
+              <div class="work-area" classList={{ [`layout-${viewLayout()}`]: true }}>
+                <Show when={viewLayout() !== "preview"}>
                   <Editor />
                 </Show>
-                <Show when={prefs.layout !== "editor"}>
+                <Show when={viewLayout() !== "editor"}>
                   <RightPanel />
                 </Show>
               </div>
             </Show>
             </Show>
-            <StatusBar />
+            <Show when={!focusMode()}>
+              <StatusBar />
+            </Show>
+            <Show when={focusMode()}>
+              <button class="focus-exit" title="Exit focus mode (Esc)" onClick={() => setFocusMode(false)}>
+                <Minimize2 size={15} />
+              </button>
+            </Show>
           </main>
         </div>
       </Show>
