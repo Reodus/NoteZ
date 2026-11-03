@@ -3615,3 +3615,7 @@ html.no-anim *::after {
   flex: 1;
   min-width: 0;
 }
+
+.cm-nz-ltr-run {
+  unicode-bidi: isolate;
+}

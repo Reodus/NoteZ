@@ -361,6 +361,8 @@ struct Converter<'a> {
     line_starts: Vec<usize>,
     resolve_image: &'a dyn Fn(&str) -> Option<String>,
     block_ctx: BlockCtx,
+    /// The note has right-to-left text: keep Latin runs' brackets with them.
+    rtl: bool,
 }
 
 fn lang_of(d: Dir) -> &'static str {
@@ -901,6 +903,7 @@ pub fn convert(src: &str, opts: &Options2) -> Output {
         line_starts,
         resolve_image: opts.resolve_image,
         block_ctx: BlockCtx::default(),
+        rtl: src.chars().any(super::bidi::is_rtl_char),
     };
 
     // Pass 1: footnote definitions → Typst, keyed by label.
@@ -960,6 +963,8 @@ fn run(c: &mut Converter, ev: Event, r: &Range<usize>) {
         Event::Text(t) => {
             if matches!(c.top().frame, Frame::Code { .. }) {
                 c.emit(&t);
+            } else if c.rtl {
+                c.text(&super::bidi::mark_runs(&t));
             } else {
                 c.text(&t);
             }

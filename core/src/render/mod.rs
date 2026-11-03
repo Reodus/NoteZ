@@ -1,5 +1,6 @@
 //! Rendering pipeline: note text → Typst source (+ prelude) → SVG / PDF.
 
+pub mod bidi;
 pub mod blocks;
 pub mod compile;
 pub mod md;
