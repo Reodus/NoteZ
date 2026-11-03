@@ -12,4 +12,5 @@ Bilingual (Persian + English) notes with LaTeX-quality PDF export via embedded T
 - `npm run build` — build UI (dist/) and core (release)
 - `npm start` — run Electron on the built UI
 - `npm run dist` — packages (deb, rpm, AppImage) into `release/`
+- `npm run clean` — delete build output (Cargo builds in `~/.cache/notez/target`, see `.cargo/config.toml`)
 - `notez <vault> [note]` — open a vault (and note) from the command line

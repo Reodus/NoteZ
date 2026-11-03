@@ -23,7 +23,7 @@ protocol.registerSchemesAsPrivileged([
 
 const coreBin = app.isPackaged
   ? path.join(process.resourcesPath, "notez-core")
-  : path.join(root, "core/target", existsSync(path.join(root, "core/target/release/notez-core")) ? "release" : "debug", "notez-core");
+  : path.join(root, "core/bin/notez-core"); // npm run core
 const packagesDir = app.isPackaged ? path.join(process.resourcesPath, "typst-packages") : path.join(root, "core/typst-packages");
 
 let core = null;

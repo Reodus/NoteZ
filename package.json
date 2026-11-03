@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "npm run core && node electron/dev.mjs",
     "web": "vite",
-    "core": "cargo build --release --manifest-path core/Cargo.toml",
+    "core": "node scripts/core.mjs",
+    "clean": "node scripts/clean.mjs",
     "build": "vite build && npm run core",
     "start": "electron .",
     "dist": "npm run build && electron-builder --linux"
@@ -61,7 +62,7 @@
     ],
     "extraResources": [
       {
-        "from": "core/target/release/notez-core",
+        "from": "core/bin/notez-core",
         "to": "notez-core"
       },
       {

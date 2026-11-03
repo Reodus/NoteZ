@@ -31,3 +31,10 @@ strip = true
 [[bin]]
 name = "notez-core"
 path = "src/main.rs"
+
+# No debug info for dev builds: much smaller build directory.
+[profile.dev]
+debug = 0
+
+[profile.dev.package."*"]
+debug = false
