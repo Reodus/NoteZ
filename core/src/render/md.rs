@@ -31,8 +31,8 @@ fn is_rtl_char(c: char) -> bool {
     matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF)
 }
 
-/// Direction of the first strong character, if any.
-pub fn detect_dir(text: &str) -> Option<Dir> {
+/// Direction of a word or text: that of its first strong character, if any.
+fn first_strong(text: &str) -> Option<Dir> {
     text.chars().find_map(|c| {
         if is_rtl_char(c) {
             Some(Dir::Rtl)
@@ -42,6 +42,27 @@ pub fn detect_dir(text: &str) -> Option<Dir> {
             None
         }
     })
+}
+
+/// Paragraph direction: that of the first strong character, except that
+/// text starting with a Latin word but mostly Persian (`Windows یک سیستم
+/// عامل است`) is right-to-left. The editor uses the same rule
+/// (src/editor/bidi.ts).
+pub fn detect_dir(text: &str) -> Option<Dir> {
+    match first_strong(text)? {
+        Dir::Rtl => Some(Dir::Rtl),
+        Dir::Ltr => {
+            let (mut rtl, mut ltr) = (0, 0);
+            for w in text.split_whitespace() {
+                match first_strong(w) {
+                    Some(Dir::Rtl) => rtl += 1,
+                    Some(Dir::Ltr) => ltr += 1,
+                    None => {}
+                }
+            }
+            Some(if rtl > ltr { Dir::Rtl } else { Dir::Ltr })
+        }
+    }
 }
 
 /// Pre-rendered blocks supplied by the frontend (Mermaid, plugin blocks):
@@ -1048,6 +1069,8 @@ mod tests {
         assert_eq!(detect_dir("سلام world"), Some(Dir::Rtl));
         assert_eq!(detect_dir("123 hello سلام"), Some(Dir::Ltr));
         assert_eq!(detect_dir("123 !!"), None);
+        assert_eq!(detect_dir("windows یک سیستم عامل باحال"), Some(Dir::Rtl));
+        assert_eq!(detect_dir("Visual Studio Code ویرایشگر"), Some(Dir::Ltr));
     }
 
     #[test]

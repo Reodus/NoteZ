@@ -1,6 +1,6 @@
 {
   "name": "notez",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Bilingual notes with beautiful PDF export",
   "type": "module",
   "scripts": {

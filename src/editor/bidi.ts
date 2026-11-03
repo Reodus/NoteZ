@@ -1,5 +1,7 @@
-// Per-line text direction: every line gets dir="auto", so the browser picks
-// RTL/LTR from the line's first strong character (Persian → RTL, Latin → LTR).
+// Per-line text direction: the line's first strong character decides
+// (Persian → RTL, Latin → LTR), except that a line starting with a Latin word
+// but mostly Persian ("windows یک سیستم عامل") is RTL. Same rule as
+// detect_dir in core/src/render/md.rs.
 // perLineTextDirection makes CodeMirror's cursor motion respect it.
 //
 // Latin runs in right-to-left lines: the bidi algorithm gives neutral
@@ -10,19 +12,34 @@ import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, DecorationSet, Direction, EditorView, ViewPlugin, ViewUpdate } from "@codemirror/view";
 
 const autoDir = Decoration.line({ attributes: { dir: "auto" } });
+const rtlDir = Decoration.line({ attributes: { dir: "rtl" } });
 const ltrRun = Decoration.mark({ bidiIsolate: Direction.LTR, class: "cm-nz-ltr-run", attributes: { dir: "ltr" } });
 
 const RTL = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
 const LATIN = /[A-Za-z0-9_]/;
 const RUN = /[A-Za-z0-9][A-Za-z0-9_ .,:;'"!?+\-*/=<>@#$%&|~^\\(){}[\]]*/g;
 
-/** Is the first strong character of `text` right-to-left? */
-function rtlLine(text: string): boolean {
+/** Direction of the first strong character of `text`, if any. */
+function firstStrong(text: string): "rtl" | "ltr" | null {
   for (const c of text) {
-    if (RTL.test(c)) return true;
-    if (/\p{L}/u.test(c)) return false;
+    if (RTL.test(c)) return "rtl";
+    if (/\p{L}/u.test(c)) return "ltr";
   }
-  return false;
+  return null;
+}
+
+/** Is the line right-to-left (see the rule at the top)? */
+function rtlLine(text: string): boolean {
+  const first = firstStrong(text);
+  if (first !== "ltr") return first === "rtl";
+  let rtl = 0;
+  let ltr = 0;
+  for (const w of text.split(/\s+/)) {
+    const d = firstStrong(w);
+    if (d === "rtl") rtl++;
+    else if (d === "ltr") ltr++;
+  }
+  return rtl > ltr;
 }
 
 /** [from, to) offsets of Latin runs whose trailing neutrals belong to them. */
@@ -58,8 +75,9 @@ function build(view: EditorView): Decos {
   for (const { from, to } of view.visibleRanges) {
     for (let pos = from; pos <= to; ) {
       const line = view.state.doc.lineAt(pos);
-      lines.add(line.from, line.from, autoDir);
-      if (RTL.test(line.text) && rtlLine(line.text)) {
+      const rtl = RTL.test(line.text) && rtlLine(line.text);
+      lines.add(line.from, line.from, rtl ? rtlDir : autoDir);
+      if (rtl) {
         for (const [a, b] of runsNeedingIsolation(line.text)) runs.add(line.from + a, line.from + b, ltrRun);
       }
       pos = line.to + 1;
