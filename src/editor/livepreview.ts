@@ -296,9 +296,41 @@ class CalloutIcon extends WidgetType {
 
 const escHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
+/** Renders the `.nz-math` placeholders that `inlineHtml` emits with KaTeX. */
+export function hydrateMath(root: HTMLElement) {
+  root.querySelectorAll<HTMLElement>(".nz-math[data-tex]").forEach((el) => {
+    const tex = el.dataset.tex!;
+    const display = el.classList.contains("display");
+    const key = (display ? "D" : "I") + tex;
+    el.removeAttribute("data-tex");
+    const cached = mathCache.get(key);
+    if (cached) return void (el.innerHTML = cached);
+    loadKatex().then((katex) => {
+      const html = katex.renderToString(tex, { displayMode: display, throwOnError: false, output: "html" });
+      mathCache.set(key, html);
+      if (el.isConnected) el.innerHTML = html;
+    });
+  });
+}
+
+// `$$x$$`, or `$x$` with no space just inside the dollars and no digit right
+// after the closing one (so prices like "$5 and $10" stay text). Code spans
+// are matched too so the dollars inside them are left alone.
+const INLINE_MATH = /`[^`]+`|(?<!\\)\$\$((?:\\.|[^$\\])+?)\$\$|(?<![\\$])\$(?=[^\s$])((?:\\.|[^$\\])+?)(?<=\S)\$(?![\d$])/g;
+
 /** Minimal inline Markdown → HTML for table cells and properties. */
 export function inlineHtml(src: string): string {
-  return escHtml(src.replace(/%%.*?%%/g, ""))
+  const math: string[] = [];
+  src = src.replace(/%%.*?%%/g, "").replace(INLINE_MATH, (m, d, i) => {
+    if (m[0] === "`") return m;
+    math.push(d === undefined ? `<span class="nz-math" dir="ltr" data-tex="${escHtml(i)}">${escHtml(m)}</span>` : `<span class="nz-math display" dir="ltr" data-tex="${escHtml(d)}">${escHtml(m)}</span>`);
+    return `\u0001${math.length - 1}\u0001`;
+  });
+  return renderInline(src).replace(/\u0001(\d+)\u0001/g, (_, n) => math[+n]);
+}
+
+function renderInline(src: string): string {
+  return escHtml(src)
     .replace(/!\[\[([^\]|]+?)(?:\|(\d+))?\]\]/g, (_, f, w) =>
       IMAGE_EXT.test(f) ? `<img data-src="${f}"${w ? ` style="width:${w}px"` : ""}>` : `<span class="cm-nz-lp-link internal" data-target="${f}">↪ ${f}</span>`,
     )

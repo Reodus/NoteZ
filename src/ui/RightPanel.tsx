@@ -23,8 +23,11 @@ function PreviewPane() {
   createEffect(() => scroller && ro.observe(scroller));
   onCleanup(() => ro.disconnect());
 
-  // A4 is 595pt wide; Typst SVGs carry pt-based width.
-  const pageWidth = () => (zoom() === "fit" ? Math.max(200, width() - 48) : 595 * (zoom() as number) * 1.333);
+  // A4 is 595pt wide; Typst SVGs carry pt-based width. "Fit" fills the
+  // pane but never grows past real size (100%), so a wide pane doesn't blow
+  // pages up. contentRect already excludes the scroller's padding.
+  const A4 = 595 * 1.333;
+  const pageWidth = () => (zoom() === "fit" ? Math.min(A4, Math.max(200, width())) : A4 * (zoom() as number));
   const errors = () => preview().diagnostics.filter((d) => d.severity === "error");
   const warnings = () => preview().diagnostics.filter((d) => d.severity === "warning");
   const stale = () => preview().path !== state.active;
@@ -32,7 +35,7 @@ function PreviewPane() {
   createEffect(on(() => state.active, () => runPreview()));
 
   const step = (d: number) => {
-    const z = zoom() === "fit" ? pageWidth() / (595 * 1.333) : (zoom() as number);
+    const z = zoom() === "fit" ? pageWidth() / A4 : (zoom() as number);
     setZoom(Math.min(3, Math.max(0.3, Math.round((z + d) * 10) / 10)));
   };
 

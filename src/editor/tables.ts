@@ -15,7 +15,7 @@ import { EditorView, WidgetType } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { undo, redo } from "@codemirror/commands";
 import { openMenu, MenuItem } from "../ui/primitives";
-import { getLiveOpts, hydrateImages, inlineHtml } from "./livepreview";
+import { getLiveOpts, hydrateImages, hydrateMath, inlineHtml } from "./livepreview";
 
 type Align = "" | "left" | "center" | "right";
 
@@ -169,6 +169,7 @@ export class TableWidget extends WidgetType {
 function paint(cell: HTMLElement) {
   cell.innerHTML = inlineHtml(unesc(cell.dataset.raw ?? "")) || "";
   hydrateImages(cell);
+  hydrateMath(cell);
 }
 
 function tableDir(src: string): "rtl" | "ltr" {

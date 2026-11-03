@@ -4,7 +4,7 @@
 import { WidgetType, EditorView } from "@codemirror/view";
 import { parseDocument } from "yaml";
 import { editFrontmatter, renameFrontmatterKey } from "../core/frontmatter";
-import { getLiveOpts, inlineHtml } from "./livepreview";
+import { getLiveOpts, hydrateMath, inlineHtml } from "./livepreview";
 
 type Scalar = string | number | boolean | null;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -45,7 +45,7 @@ function inlineEditor(raw: string, placeholder: string, commit: (v: string) => v
   el.dir = "auto";
   el.dataset.placeholder = placeholder;
   let value = raw;
-  const paint = () => (render ? (el.innerHTML = inlineHtml(value)) : (el.textContent = value));
+  const paint = () => (render ? ((el.innerHTML = inlineHtml(value)), hydrateMath(el)) : (el.textContent = value));
   paint();
   el.addEventListener("focus", () => {
     if (el.textContent !== value) el.textContent = value;
@@ -195,6 +195,7 @@ export class PropertiesWidget extends WidgetType {
       const c = h("span", "nz-chip");
       c.dir = "auto";
       c.innerHTML = inlineHtml(show(it));
+      hydrateMath(c);
       const x = h("button", "", "×");
       x.addEventListener("click", () => commit(items.filter((_, j) => j !== i)));
       c.append(x);

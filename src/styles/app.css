@@ -1213,6 +1213,7 @@ mark {
 }
 .editor .cm-editor {
   flex: 1;
+  min-width: 0;
   height: 100%;
   background: transparent;
   color: var(--fg);
@@ -1229,6 +1230,11 @@ mark {
 .editor .cm-content {
   padding: 36px 48px 40vh;
   caret-color: var(--accent);
+  /* CodeMirror sizes the content to its widest line; keep it at the pane
+     width so wide widgets (tables, images) scroll inside themselves instead
+     of stretching the whole page off-screen. */
+  min-width: 0;
+  flex-shrink: 1;
 }
 .editor.readable .cm-content {
   max-width: 820px;
@@ -3274,6 +3280,13 @@ body,
 .nz-edit-table table {
   margin: 0;
 }
+/* Columns keep their natural width; the box scrolls if the table is wider. */
+.cm-nz-lp-table .nz-table-scroll table {
+  max-width: none;
+}
+.nz-cell .katex {
+  white-space: nowrap;
+}
 .cm-nz-lp-table.nz-edit-table th,
 .cm-nz-lp-table.nz-edit-table td {
   padding: 0;
@@ -3286,7 +3299,17 @@ body,
   outline: none;
   cursor: text;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  /* Wrap long text, but never squeeze a column below its longest word:
+     a table wider than the page scrolls sideways instead. (CodeMirror's
+     .cm-lineWrapping sets word-break: break-word, which squeezes too.) */
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.nz-cell .nz-math.display {
+  display: block;
+}
+.nz-cell .katex-display {
+  margin: 0.2em 0;
 }
 .nz-cell.editing {
   background: var(--surface);
