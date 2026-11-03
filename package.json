@@ -1,6 +1,6 @@
 {
   "name": "notez",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Bilingual notes with beautiful PDF export",
   "type": "module",
   "scripts": {
@@ -10,7 +10,8 @@
     "clean": "node scripts/clean.mjs",
     "build": "vite build && npm run core",
     "start": "electron .",
-    "dist": "npm run build && electron-builder --linux"
+    "dist": "npm run build && electron-builder --linux",
+    "dist:win": "npm run build && electron-builder --win"
   },
   "license": "MIT",
   "devDependencies": {
@@ -63,10 +64,6 @@
     ],
     "extraResources": [
       {
-        "from": "core/bin/notez-core",
-        "to": "notez-core"
-      },
-      {
         "from": "core/typst-packages",
         "to": "typst-packages"
       }
@@ -87,7 +84,30 @@
       "synopsis": "Bilingual notes with beautiful PDF export",
       "executableArgs": [
         "--ozone-platform-hint=auto"
+      ],
+      "extraResources": [
+        {
+          "from": "core/bin/notez-core",
+          "to": "notez-core"
+        }
       ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.png",
+      "extraResources": [
+        {
+          "from": "core/bin/notez-core.exe",
+          "to": "notez-core.exe"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     }
   },
   "homepage": "https://github.com/Reodus/NoteZ",

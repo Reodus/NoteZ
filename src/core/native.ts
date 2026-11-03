@@ -42,5 +42,7 @@ export const onVaultFs = (cb: (paths: string[]) => void) => native.onVaultFs(cb)
 
 /** URL the page can load for a file on disk (images in notes). */
 export function fileSrc(absPath: string): string {
-  return "notez-asset://local" + absPath.split("/").map(encodeURIComponent).join("/");
+  // Windows paths (C:\x\y.png) become /C:/x/y.png; the shell strips the leading slash again.
+  const p = absPath.replace(/\\/g, "/");
+  return "notez-asset://local" + (p.startsWith("/") ? "" : "/") + p.split("/").map(encodeURIComponent).join("/");
 }

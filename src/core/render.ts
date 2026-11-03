@@ -130,7 +130,7 @@ export async function exportPdf(path = state.active) {
     const blocks = await renderPluginBlocks(text);
     await ipc.exportPdf(path, text, blocks, target);
     if (prefs.openAfterExport) await openPath(target).catch((e) => notify(String(e), "error"));
-    notify(`Exported ${target.slice(target.lastIndexOf("/") + 1)}`, "success", {
+    notify(`Exported ${target.split(/[\\/]/).pop()}`, "success", {
       label: "Open",
       run: () => openPath(target).catch((e) => notify(String(e), "error")),
     });

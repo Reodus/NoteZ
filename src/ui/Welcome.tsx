@@ -31,7 +31,7 @@ async function createVault() {
 }
 
 export default function Welcome() {
-  const name = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
+  const name = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
   return (
     <div class="welcome">
       <div class="welcome-glow" />

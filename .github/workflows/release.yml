@@ -1,6 +1,7 @@
-# Builds the Linux packages (AppImage, .deb, .rpm) and publishes them as a
-# GitHub release. Runs when a version tag is pushed:
-#   git tag v0.4.0 && git push origin v0.4.0
+# Builds the Linux packages (AppImage, .deb, .rpm) and the Windows installer
+# and portable .exe, then publishes them all as one GitHub release. Runs when
+# a version tag is pushed:
+#   git tag v0.4.2 && git push origin v0.4.2
 # The tag must match "version" in package.json.
 name: Release
 
@@ -10,17 +11,35 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)build, e.g. v0.4.0"
+        description: "Existing tag to (re)build, e.g. v0.4.2"
         required: true
 
 permissions:
   contents: write
 
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
 jobs:
-  linux:
-    runs-on: ubuntu-22.04
-    env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            files: |
+              release/*.AppImage
+              release/*.deb
+              release/*.rpm
+          - os: windows-latest
+            platform: win
+            files: |
+              release/*.exe
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,6 +65,7 @@ jobs:
           workspaces: core
 
       - name: Install packaging tools
+        if: matrix.platform == 'linux'
         run: sudo apt-get update && sudo apt-get install -y rpm
 
       - name: Install dependencies
@@ -55,7 +75,24 @@ jobs:
         run: npm run build
 
       - name: Package
-        run: npx electron-builder --linux --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false" # unsigned builds
+        run: npx electron-builder --${{ matrix.platform }} --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -68,3 +105,4 @@ jobs:
             release/*.AppImage
             release/*.deb
             release/*.rpm
+            release/*.exe

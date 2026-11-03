@@ -1,5 +1,5 @@
 # Type-check and build the UI, and run the Rust core's tests, on every push
-# and pull request.
+# and pull request. The core is also built on Windows.
 name: CI
 
 on:
@@ -35,3 +35,17 @@ jobs:
 
       - name: Test core
         run: cargo test --release --lib --manifest-path core/Cargo.toml
+
+  windows-core:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Build core
+        run: cargo build --release --manifest-path core/Cargo.toml

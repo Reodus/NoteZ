@@ -32,7 +32,8 @@ folder; the PDF engine is Typst, embedded — no TeX installation needed.
 ## Install
 
 Download a package from [Releases](https://github.com/Reodus/NoteZ/releases)
-(`.rpm`, `.deb` or `.AppImage`), or build it yourself:
+(Linux: `.rpm`, `.deb` or `.AppImage`; Windows: `NoteZ Setup <version>.exe` installer
+or portable `NoteZ <version>.exe`), or build it yourself:
 
 ## Build
 
@@ -74,7 +75,8 @@ git tag v0.4.0
 git push origin main v0.4.0
 ```
 
-The AppImage, `.deb` and `.rpm` appear on the Releases page a few minutes later.
+The Linux packages and the Windows installer/portable `.exe` appear on the
+Releases page a few minutes later.
 An existing tag can be rebuilt from the Actions tab (Release → Run workflow).
 
 ## Layout

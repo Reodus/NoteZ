@@ -262,7 +262,7 @@ function SearchPane() {
 }
 
 export default function Sidebar() {
-  const vaultName = () => root()?.split("/").filter(Boolean).pop() ?? "";
+  const vaultName = () => root()?.split(/[\\/]/).filter(Boolean).pop() ?? "";
   const panes = () => [
     { id: "files", title: "Files", icon: <Files size={17} /> },
     { id: "search", title: "Search (Ctrl+Shift+F)", icon: <Search size={17} /> },
@@ -307,7 +307,7 @@ export default function Sidebar() {
                 {(v) => (
                   <button class="menu-item" onClick={() => (close(), import("../core/store").then((s) => s.openVault(v)))}>
                     <span class="menu-icon"><ArrowLeftRight size={15} /></span>
-                    <span class="menu-label" dir="auto">{v.split("/").filter(Boolean).pop()}</span>
+                    <span class="menu-label" dir="auto">{v.split(/[\\/]/).filter(Boolean).pop()}</span>
                   </button>
                 )}
               </For>

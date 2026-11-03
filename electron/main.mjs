@@ -21,9 +21,10 @@ protocol.registerSchemesAsPrivileged([
 
 // ------------------------------------------------------------ Rust core
 
+const exe = process.platform === "win32" ? ".exe" : "";
 const coreBin = app.isPackaged
-  ? path.join(process.resourcesPath, "notez-core")
-  : path.join(root, "core/bin/notez-core"); // npm run core
+  ? path.join(process.resourcesPath, `notez-core${exe}`)
+  : path.join(root, `core/bin/notez-core${exe}`); // npm run core
 const packagesDir = app.isPackaged ? path.join(process.resourcesPath, "typst-packages") : path.join(root, "core/typst-packages");
 
 let core = null;
@@ -239,7 +240,8 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(file).toString());
   });
   protocol.handle("notez-asset", (req) => {
-    const file = decodeURIComponent(new URL(req.url).pathname);
+    let file = decodeURIComponent(new URL(req.url).pathname);
+    if (process.platform === "win32") file = file.replace(/^\/([A-Za-z]:)/, "$1"); // /C:/x → C:/x
     return net.fetch(pathToFileURL(file).toString());
   });
   startCore();
