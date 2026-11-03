@@ -7,7 +7,7 @@ import {
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
-import { bracketMatching, indentOnInput } from "@codemirror/language";
+import { bracketMatching, indentOnInput, indentUnit } from "@codemirror/language";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, closeBrackets, closeBracketsKeymap, CompletionContext, completionKeymap } from "@codemirror/autocomplete";
 import { setDiagnostics, lintGutter, Diagnostic as CmDiagnostic } from "@codemirror/lint";
@@ -17,7 +17,7 @@ import {
   state, prefs, updateContent, setEditorView, setCursor, setActiveTheme, activeTheme,
   isDark, notesList, openNote, root,
 } from "../core/store";
-import { ipc, stem } from "../core/ipc";
+import { ipc, stem, LinkInfo } from "../core/ipc";
 import { preview, schedulePreview } from "../core/render";
 import { bidi } from "./bidi";
 import { typst } from "./typst-lang";
@@ -26,6 +26,7 @@ import { blockPreviews } from "./widgets";
 import { livePreview } from "./livepreview";
 import { mathAutoPair } from "./autopair";
 import { slashCompletion, slashIconRender } from "./slash";
+import { attachmentDrop } from "./attachments";
 import { openUrl } from "../core/native";
 import { toggleInline, setBlockStyle, setTitle, insertLink, BlockStyle } from "./format";
 
@@ -33,14 +34,79 @@ const lineNumbersComp = new Compartment();
 const previewsComp = new Compartment();
 const pluginComp = new Compartment();
 const liveComp = new Compartment();
+/** Settings → Editor: tab size, bracket pairing, spellcheck, Vim. */
+const prefsComp = new Compartment();
+const vimComp = new Compartment();
+let vimExt: Extension | null = null;
 
-function wikilinkCompletion(ctx: CompletionContext) {
+function editorPrefs(): Extension {
+  return [
+    EditorState.tabSize.of(prefs.tabSize),
+    indentUnit.of(" ".repeat(prefs.tabSize)),
+    prefs.autoPair ? closeBrackets() : [],
+    EditorView.contentAttributes.of({ spellcheck: prefs.spellcheck ? "true" : "false" }),
+  ];
+}
+
+/** Vim keys, loaded on first use. */
+async function vimMode(): Promise<Extension> {
+  if (!prefs.vimMode) return [];
+  if (!vimExt) vimExt = (await import("@replit/codemirror-vim")).vim();
+  return vimExt;
+}
+
+// Note names, aliases and headings for [[ completion; refreshed when the vault changes.
+let linkInfo: Promise<LinkInfo[]> | null = null;
+app.events.on("vault:changed", () => (linkInfo = null));
+app.events.on("vault:opened", () => (linkInfo = null));
+app.events.on("note:saved", () => (linkInfo = null));
+const getLinkInfo = () => (linkInfo ??= ipc.linkInfo().catch(() => []));
+
+/** Insert `text`, then "]]" unless the brackets were already auto-closed. */
+const closeLink = (text: string) => (view: EditorView, _c: unknown, from: number, to: number) => {
+  const closed = view.state.sliceDoc(to, to + 2) === "]]";
+  view.dispatch({
+    changes: { from, to, insert: text + (closed ? "" : "]]") },
+    selection: { anchor: from + text.length + 2 },
+  });
+};
+
+async function wikilinkCompletion(ctx: CompletionContext) {
   const m = ctx.matchBefore(/\[\[[^\]\n]*/);
   if (!m) return null;
+  const typed = m.text.slice(2);
+  const hash = typed.indexOf("#");
+  if (hash >= 0) {
+    // [[note#heading
+    const name = typed.slice(0, hash).trim();
+    const info = await getLinkInfo();
+    const note = name
+      ? info.find((n) => n.path === name || stem(n.path) === name.replace(/\.(md|typ)$/, "") || n.path.replace(/\.(md|typ)$/, "") === name)
+      : info.find((n) => n.path === state.active);
+    if (!note) return null;
+    return {
+      from: m.from + 2 + hash + 1,
+      options: note.headings.map((h) => ({ label: h, type: "heading", apply: closeLink(h) })),
+      validFor: /^[^\]\n#|]*$/,
+    };
+  }
+  if (typed.includes("|")) return null;
+  const info = await getLinkInfo();
+  const folder = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
+  const counts = new Map<string, number>();
+  for (const n of info) counts.set(stem(n.path), (counts.get(stem(n.path)) ?? 0) + 1);
+  // Duplicate names link by path, like Obsidian.
+  const target = (p: string) => ((counts.get(stem(p)) ?? 0) > 1 ? p.replace(/\.md$/, "") : stem(p));
+  const notes = info.length ? info.map((n) => n.path) : notesList();
   return {
     from: m.from + 2,
-    options: notesList().map((p) => ({ label: stem(p), detail: p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "", apply: stem(p) + "]]" })),
-    validFor: /^[^\]\n]*$/,
+    options: [
+      ...notes.map((p) => ({ label: stem(p), detail: folder(p), apply: closeLink(target(p)), boost: p === state.active ? -1 : 0 })),
+      ...info.flatMap((n) =>
+        n.aliases.map((a) => ({ label: a, detail: `→ ${stem(n.path)}`, apply: closeLink(`${target(n.path)}|${a}`), boost: -2 })),
+      ),
+    ],
+    validFor: /^[^\]\n#|]*$/,
   };
 }
 
@@ -123,6 +189,8 @@ export default function Editor() {
       // Start below the frontmatter so it shows as the Properties card.
       selection: { anchor: Math.min(doc.length, /^---\r?\n[\s\S]*?\r?\n(---|\.\.\.)[ \t]*(\r?\n|$)/.exec(doc)?.[0].length ?? 0) },
       extensions: [
+        vimComp.of(vimExt && prefs.vimMode ? vimExt : []),
+        prefsComp.of(editorPrefs()),
         lineNumbersComp.of(prefs.lineNumbers ? lineNumbers() : []),
         history(),
         drawSelection(),
@@ -134,7 +202,6 @@ export default function Editor() {
         crosshairCursor(),
         indentOnInput(),
         bracketMatching(),
-        closeBrackets(),
         mathAutoPair,
         EditorView.lineWrapping,
         autocompletion({ override: [wikilinkCompletion, slashCompletion], icons: false, addToOptions: [slashIconRender], maxRenderedOptions: 60 }),
@@ -145,6 +212,7 @@ export default function Editor() {
         bidi,
         lintGutter(),
         linkClick,
+        attachmentDrop,
         placeholder(path.endsWith(".typ") ? "= Start writing Typst…" : "شروع به نوشتن کنید… / Start writing…"),
         previewsComp.of(blockPreviews(prefs.inlinePreviews, isDark())),
         liveComp.of(live(path)),
@@ -178,6 +246,8 @@ export default function Editor() {
         previewsComp.reconfigure(blockPreviews(prefs.inlinePreviews, isDark())),
         liveComp.reconfigure(live(path)),
         pluginComp.reconfigure(app.editorExtensions.items()),
+        prefsComp.reconfigure(editorPrefs()),
+        vimComp.reconfigure(vimExt && prefs.vimMode ? vimExt : []),
       ],
     });
     const sel = view.state.selection.main;
@@ -192,6 +262,19 @@ export default function Editor() {
     show(state.active);
   });
 
+  // A note changed on disk: patch only the differing middle so the cursor
+  // and scroll position stay put. (Hidden tabs rebuild in show().)
+  onCleanup(app.events.on("note:reloaded", ({ path, content }) => {
+    if (!view || path !== current) return;
+    const old = view.state.doc.toString();
+    if (old === content) return;
+    let a = 0;
+    while (a < old.length && a < content.length && old[a] === content[a]) a++;
+    let b = 0;
+    while (b < old.length - a && b < content.length - a && old[old.length - 1 - b] === content[content.length - 1 - b]) b++;
+    view.dispatch({ changes: { from: a, to: old.length - b, insert: content.slice(a, content.length - b) } });
+  }));
+
   createEffect(on(() => state.active, (path) => show(path)));
 
   createEffect(on(() => [prefs.lineNumbers, prefs.inlinePreviews, isDark()] as const, ([ln, pv, dark]) => {
@@ -202,6 +285,15 @@ export default function Editor() {
       ],
     });
   }, { defer: true }));
+
+  createEffect(on(() => [prefs.tabSize, prefs.autoPair, prefs.spellcheck] as const, () => {
+    view?.dispatch({ effects: prefsComp.reconfigure(editorPrefs()) });
+  }, { defer: true }));
+
+  createEffect(on(() => prefs.vimMode, async () => {
+    const ext = await vimMode();
+    view?.dispatch({ effects: vimComp.reconfigure(ext) });
+  }));
 
   createEffect(on(() => prefs.editorMode, () => {
     if (view && current) view.dispatch({ effects: liveComp.reconfigure(live(current)) });
@@ -269,7 +361,11 @@ export default function Editor() {
     <div
       class="editor"
       classList={{ readable: prefs.readableWidth }}
-      style={{ "--editor-size": `${prefs.editorFontSize}px` }}
+      style={{
+        "--editor-size": `${prefs.editorFontSize}px`,
+        "--editor-line-height": String(prefs.lineHeight),
+        ...(prefs.editorFont ? { "--font-editor": `"${prefs.editorFont}", "Vazirmatn", "Inter Variable", sans-serif` } : {}),
+      }}
     >
       <div class="editor-host" ref={host} />
     </div>

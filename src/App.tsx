@@ -6,9 +6,12 @@ import {
   focusMode, setFocusMode, viewLayout,
 } from "./core/store";
 import { ipc } from "./core/ipc";
+import { setZoom, setSpellcheck } from "./core/native";
 import { loadBuiltins, loadVaultPlugins } from "./core/plugins";
 import { corePlugin, readingTimePlugin } from "./plugins/core";
 import { mermaidPlugin } from "./plugins/mermaid";
+import { outlinePlugin, backlinksPlugin, pdfExportPlugin, diagramsPlugin } from "./plugins/builtins";
+import { templatesPlugin } from "./plugins/templates";
 import Welcome from "./ui/Welcome";
 import Sidebar from "./ui/Sidebar";
 import TabBar from "./ui/TabBar";
@@ -78,6 +81,10 @@ export default function App() {
     el.style.setProperty("--accent-rgb", `${r}, ${g}, ${b}`);
   });
 
+  createEffect(() => setZoom(prefs.uiZoom));
+  createEffect(() => document.documentElement.classList.toggle("no-anim", !prefs.animations));
+  createEffect(() => void setSpellcheck(prefs.spellcheck).catch(() => {}));
+
   const onKey = (e: KeyboardEvent) => {
     if (e.defaultPrevented || dialog()) return;
     if (e.key === "Escape" && focusMode()) {
@@ -92,7 +99,7 @@ export default function App() {
   onMount(async () => {
     window.addEventListener("keydown", onKey);
     window.addEventListener("beforeunload", onUnload);
-    await loadBuiltins([corePlugin, readingTimePlugin, mermaidPlugin]);
+    await loadBuiltins([corePlugin, readingTimePlugin, mermaidPlugin, outlinePlugin, backlinksPlugin, pdfExportPlugin, diagramsPlugin, templatesPlugin]);
     const args = await ipc.startupArgs().catch(() => [] as string[]);
     const vault = args[0] ?? prefs.lastVault;
     if (vault) await openVault(vault);
@@ -118,7 +125,7 @@ export default function App() {
             <Sidebar />
           </div>
           <main class="workspace">
-            <Show when={!focusMode()}>
+            <Show when={!focusMode() && prefs.showTabBar}>
               <TabBar />
             </Show>
             <Show when={!graphOpen() || focusMode()} fallback={<GraphView />}>
@@ -136,7 +143,7 @@ export default function App() {
               </div>
             </Show>
             </Show>
-            <Show when={!focusMode()}>
+            <Show when={!focusMode() && prefs.showStatusBar}>
               <StatusBar />
             </Show>
             <Show when={focusMode()}>
@@ -151,6 +158,9 @@ export default function App() {
       <Switch>
         <Match when={dialog()?.kind === "palette" && dialog()}>
           {(d) => <CommandPalette mode={(d() as any).mode} onClose={() => setDialog(null)} />}
+        </Match>
+        <Match when={dialog()?.kind === "pick" && dialog()}>
+          {(d) => <CommandPalette mode="pick" pick={d() as any} onClose={() => setDialog(null)} />}
         </Match>
         <Match when={dialog()?.kind === "settings" && dialog()}>
           {(d) => <Settings tab={(d() as any).tab} onClose={() => setDialog(null)} />}

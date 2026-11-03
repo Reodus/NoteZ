@@ -8,7 +8,7 @@ import { app } from "../core/app";
 import { Entry, dirname, ipc, SearchHit, stem } from "../core/ipc";
 import {
   tree, root, state, openNote, createNote, createFolder, renameEntry, deleteEntry, moveEntry,
-  sidebarTab, setSidebarTab, setDialog, prefs, setPrefs, closeVault,
+  sidebarTab, setSidebarTab, setDialog, prefs, setPrefs, closeVault, newNoteDir,
 } from "../core/store";
 import { askText, openMenu, Popover } from "./primitives";
 import { Logo } from "./Logo";
@@ -52,7 +52,7 @@ const toggleDir = (p: string) => {
   setExpanded(n);
 };
 
-function newNoteIn(dir: string, ext: "md" | "typ" = "md") {
+function newNoteIn(dir: string, ext: "md" | "typ" = prefs.defaultNoteType) {
   askText(ext === "md" ? "New note" : "New Typst note", "Untitled").then((name) => void (name && createNote(dir, name.replace(/\.(md|typ)$/, ""), ext)));
 }
 
@@ -199,7 +199,7 @@ function SearchPane() {
       if (!query.trim()) return setHits([]);
       setBusy(true);
       try {
-        setHits(await ipc.search(query));
+        setHits(await ipc.search(query, [...prefs.excludedFolders]));
       } finally {
         setBusy(false);
       }
@@ -338,7 +338,7 @@ export default function Sidebar() {
         </button>
         <div class="spacer" />
         <Show when={sidebarTab() === "files"}>
-          <button class="icon-btn" title="New note (Ctrl+N)" onClick={() => newNoteIn("")}><FilePlus size={16} /></button>
+          <button class="icon-btn" title="New note (Ctrl+N)" onClick={() => newNoteIn(newNoteDir())}><FilePlus size={16} /></button>
           <button class="icon-btn" title="New folder" onClick={() => newFolderIn("")}><FolderPlus size={16} /></button>
           <button class="icon-btn" title="Collapse all" onClick={() => {
             setExpanded(new Set());

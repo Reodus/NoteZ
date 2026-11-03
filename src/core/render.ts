@@ -3,8 +3,8 @@
 import { createSignal } from "solid-js";
 import { saveDialog, openPath } from "./native";
 import { app, notify } from "./app";
-import { ipc, Diagnostic, RenderedBlock, stem } from "./ipc";
-import { root, state, viewLayout } from "./store";
+import { ipc, Diagnostic, RenderedBlock, stem, dirname } from "./ipc";
+import { root, state, viewLayout, prefs } from "./store";
 
 export interface Fence {
   lang: string;
@@ -80,7 +80,7 @@ export const [preview, setPreview] = createSignal<PreviewState>({
 let seq = 0;
 let timer: number | undefined;
 
-export function schedulePreview(delay = 350) {
+export function schedulePreview(delay = prefs.previewDelayMs) {
   clearTimeout(timer);
   timer = window.setTimeout(runPreview, delay);
 }
@@ -117,9 +117,10 @@ export async function runPreview() {
 export async function exportPdf(path = state.active) {
   if (!path) return notify("Open a note first", "error");
   const text = state.buffers[path]?.content ?? (await ipc.read(path));
+  const dir = !prefs.pdfFolder ? root() : prefs.pdfFolder === "./" ? `${root()}/${dirname(path)}`.replace(/\/$/, "") : prefs.pdfFolder;
   const output = await saveDialog({
     title: "Export PDF",
-    defaultPath: `${root()}/${stem(path)}.pdf`,
+    defaultPath: `${dir}/${stem(path)}.pdf`,
     filters: [{ name: "PDF", extensions: ["pdf"] }],
   });
   if (!output) return;
@@ -128,6 +129,7 @@ export async function exportPdf(path = state.active) {
   try {
     const blocks = await renderPluginBlocks(text);
     await ipc.exportPdf(path, text, blocks, target);
+    if (prefs.openAfterExport) await openPath(target).catch((e) => notify(String(e), "error"));
     notify(`Exported ${target.slice(target.lastIndexOf("/") + 1)}`, "success", {
       label: "Open",
       run: () => openPath(target).catch((e) => notify(String(e), "error")),

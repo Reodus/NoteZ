@@ -1,5 +1,5 @@
 // The only bridge between the UI and Node/Electron (see src/core/native.ts).
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils, webFrame } = require("electron");
 
 const call = async (channel, ...args) => {
   const r = await ipcRenderer.invoke(channel, ...args);
@@ -15,4 +15,19 @@ contextBridge.exposeInMainWorld("notezNative", {
   dialogOpen: (o) => call("dialog-open", o),
   dialogSave: (o) => call("dialog-save", o),
   ask: (message, o) => call("dialog-ask", message, o),
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || null;
+    } catch {
+      return null;
+    }
+  },
+  trash: (p) => call("trash", p),
+  setZoom: (f) => webFrame.setZoomFactor(f),
+  setSpellcheck: (on) => call("spellcheck", on),
+  onVaultFs: (cb) => {
+    const h = (_e, paths) => cb(paths);
+    ipcRenderer.on("vault-fs", h);
+    return () => ipcRenderer.removeListener("vault-fs", h);
+  },
 });

@@ -7,6 +7,7 @@ import {
 } from "lucide-solid";
 import { app, notify } from "../core/app";
 import { editorView, cursor, activeTheme, setDialog, state } from "../core/store";
+import { attachmentDir } from "../editor/attachments";
 import { ipc, TextStyle } from "../core/ipc";
 import { fontList, FONT_SIZES } from "../core/fonts";
 import { exportPdf } from "../core/render";
@@ -124,7 +125,7 @@ export default function Toolbar() {
     });
     if (typeof file !== "string") return;
     try {
-      insertImage(v, await ipc.importAttachment(file));
+      insertImage(v, await ipc.importAttachment(file, attachmentDir(state.active)));
     } catch (e) {
       notify(String(e), "error");
     }
@@ -294,10 +295,12 @@ export default function Toolbar() {
             </div>
           )}
         </Popover>
-        <button class="tb-btn accent-soft" title="Insert chart or diagram" onMouseDown={(e) => e.preventDefault()} onClick={() => setDialog({ kind: "diagrams" })}>
-          <Shapes size={16} />
-          <span class="tb-label">Diagram</span>
-        </button>
+        <Show when={app.commands.has("insert.diagram")}>
+          <button class="tb-btn accent-soft" title="Insert chart or diagram" onMouseDown={(e) => e.preventDefault()} onClick={() => setDialog({ kind: "diagrams" })}>
+            <Shapes size={16} />
+            <span class="tb-label">Diagram</span>
+          </button>
+        </Show>
       </div>
 
       <Show when={pluginButtons().length}>
@@ -320,9 +323,11 @@ export default function Toolbar() {
           <span class="tb-label">{docTheme()}</span>
         </button>
         <Btn title="Page setup — paper, margins, header & footer" onClick={() => setDialog({ kind: "page" })}><FileCog size={16} /></Btn>
-        <button class="btn primary export-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => exportPdf()} title="Export PDF (Ctrl+Shift+S)">
-          <FileDown size={16} /> Export PDF
-        </button>
+        <Show when={app.commands.has("pdf.export")}>
+          <button class="btn primary export-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => exportPdf()} title="Export PDF (Ctrl+Shift+S)">
+            <FileDown size={16} /> Export PDF
+          </button>
+        </Show>
       </div>
     </div>
   );

@@ -3,7 +3,7 @@
 // newline-delimited JSON (see core/src/main.rs).
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, watch } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -96,7 +96,10 @@ const wrap = (fn) => async (_e, ...a) => {
 
 ipcMain.handle("core", wrap(async (cmd, args) => {
   const r = await call(cmd, args);
-  if (cmd === "open_vault") openVault = args.path;
+  if (cmd === "open_vault") {
+    openVault = args.path;
+    watchVault(args.path);
+  }
   return r;
 }));
 ipcMain.handle("startup-args", wrap(async () => startupArgs()));
@@ -123,6 +126,18 @@ ipcMain.handle("dialog-save", wrap(async (o = {}) => {
   const r = await dialog.showSaveDialog(BrowserWindow.getFocusedWindow(), { title: o.title, defaultPath: o.defaultPath, filters: o.filters });
   return r.canceled ? null : r.filePath;
 }));
+ipcMain.handle("trash", wrap(async (p) => {
+  if (!openVault || !path.resolve(p).startsWith(path.resolve(openVault) + path.sep)) throw "outside the vault";
+  await shell.trashItem(p);
+}));
+// Spell checking (English + Persian when the dictionaries are available).
+ipcMain.handle("spellcheck", wrap(async (on) => {
+  for (const w of BrowserWindow.getAllWindows()) {
+    const s = w.webContents.session;
+    s.setSpellCheckerEnabled(!!on);
+    if (on) s.setSpellCheckerLanguages(["en-US", "fa"].filter((l) => s.availableSpellCheckerLanguages.includes(l)));
+  }
+}));
 ipcMain.handle("dialog-ask", wrap(async (message, o = {}) => {
   const r = await dialog.showMessageBox(BrowserWindow.getFocusedWindow(), {
     type: o.kind === "warning" ? "warning" : o.kind === "error" ? "error" : "question",
@@ -134,6 +149,43 @@ ipcMain.handle("dialog-ask", wrap(async (message, o = {}) => {
   });
   return r.response === 0;
 }));
+
+// ------------------------------------------------------- vault watcher
+
+// Changes made outside the app (another editor, git, sync) are batched,
+// fed to the core's note index, then sent to the UI as "vault-fs".
+let watcher = null;
+let changed = new Set();
+let flushTimer = null;
+
+/** Hidden paths are ignored, except NoteZ's own styles and plugins. */
+const watched = (rel) => !rel.split("/").some((s) => s.startsWith(".")) || /^\.notez\/(styles|plugins)\//.test(rel);
+
+function watchVault(dir) {
+  watcher?.close();
+  watcher = null;
+  try {
+    watcher = watch(dir, { recursive: true }, (_ev, name) => {
+      if (!name) return;
+      const rel = name.toString().split(path.sep).join("/");
+      if (!watched(rel)) return;
+      changed.add(rel);
+      clearTimeout(flushTimer);
+      flushTimer = setTimeout(flushChanges, 150);
+    });
+    watcher.on("error", (e) => console.error("vault watcher:", e));
+  } catch (e) {
+    console.error("cannot watch vault:", e);
+  }
+}
+
+async function flushChanges() {
+  const paths = [...changed];
+  changed = new Set();
+  const notes = paths.filter((p) => !p.startsWith("."));
+  if (notes.length) await call("index_update", { paths: notes }).catch(() => {});
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send("vault-fs", paths);
+}
 
 // ----------------------------------------------------------- window
 
@@ -149,9 +201,18 @@ function createWindow() {
     show: false,
     backgroundColor: "#00000000",
     icon: path.join(root, "build/icon.png"),
-    webPreferences: { preload: path.join(here, "preload.cjs"), contextIsolation: true, sandbox: true, spellcheck: false },
+    webPreferences: { preload: path.join(here, "preload.cjs"), contextIsolation: true, sandbox: true, spellcheck: true },
   });
   win.once("ready-to-show", () => win.show());
+  win.webContents.session.setSpellCheckerEnabled(false); // the UI turns it on (Settings → Editor)
+  // Right-click on a misspelled word: suggestions.
+  win.webContents.on("context-menu", (_e, p) => {
+    if (!p.misspelledWord) return;
+    const items = p.dictionarySuggestions.slice(0, 6).map((s) => ({ label: s, click: () => win.webContents.replaceMisspelling(s) }));
+    if (!items.length) items.push({ label: "No suggestions", enabled: false });
+    items.push({ type: "separator" }, { label: "Add to dictionary", click: () => win.webContents.session.addWordToSpellCheckerDictionary(p.misspelledWord) });
+    Menu.buildFromTemplate(items).popup({ window: win });
+  });
   // Links never navigate the app window; they open in the browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) void shell.openExternal(url);

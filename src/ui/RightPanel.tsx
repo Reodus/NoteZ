@@ -1,12 +1,11 @@
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js";
 import {
-  Eye, ListTree, Palette, Link2, ZoomIn, ZoomOut, AlertTriangle, CheckCircle2, Loader2, FileDown,
+  Eye, Palette, ZoomIn, ZoomOut, AlertTriangle, CheckCircle2, Loader2, FileDown,
   FileCode, Pencil,
 } from "lucide-solid";
 import { app, Panel } from "../core/app";
-import { ipc, SearchHit, stem, dirname } from "../core/ipc";
 import {
-  state, rightTab, setRightTab, goToLine, openNote, activeTheme, setDialog, prefs, setPrefs,
+  state, rightTab, setRightTab, goToLine, activeTheme, setDialog, prefs, setPrefs,
 } from "../core/store";
 import { preview, exportPdf, showGeneratedTypst, runPreview } from "../core/render";
 import { isTypst } from "../editor/format";
@@ -16,7 +15,7 @@ import { SvgIcon } from "./primitives";
 // --------------------------------------------------------------- preview
 
 function PreviewPane() {
-  const [zoom, setZoom] = createSignal<number | "fit">("fit");
+  const [zoom, setZoom] = createSignal<number | "fit">(prefs.previewZoom > 0 ? prefs.previewZoom : "fit");
   const [width, setWidth] = createSignal(500);
   let scroller!: HTMLDivElement;
 
@@ -60,7 +59,9 @@ function PreviewPane() {
           const src = await showGeneratedTypst();
           if (src) setDialog({ kind: "typst", source: src });
         }}><FileCode size={15} /></button>
-        <button class="icon-btn" title="Export PDF" onClick={() => exportPdf()}><FileDown size={15} /></button>
+        <Show when={app.commands.has("pdf.export")}>
+          <button class="icon-btn" title="Export PDF" onClick={() => exportPdf()}><FileDown size={15} /></button>
+        </Show>
       </div>
 
       <Show when={errors().length || warnings().length || preview().notes.length}>
@@ -119,45 +120,6 @@ function PageImage(props: { svg: string }) {
   return <img src={url} decoding="async" draggable={false} alt="" />;
 }
 
-// ---------------------------------------------------------------- outline
-
-interface Heading {
-  level: number;
-  text: string;
-  line: number;
-}
-
-function OutlinePane() {
-  const headings = createMemo<Heading[]>(() => {
-    const path = state.active;
-    if (!path) return [];
-    const text = state.buffers[path]?.content ?? "";
-    const typ = path.endsWith(".typ");
-    const out: Heading[] = [];
-    let fence = false;
-    text.split("\n").forEach((l, i) => {
-      if (/^\s*(```|~~~)/.test(l)) fence = !fence;
-      if (fence) return;
-      const m = typ ? /^(=+)\s+(.*)$/.exec(l) : /^(#{1,6})\s+(.*?)\s*(\{[^}]*\})?\s*$/.exec(l);
-      if (m) out.push({ level: m[1].length, text: m[2].replace(/[*_`]/g, ""), line: i + 1 });
-    });
-    return out;
-  });
-  const min = () => Math.min(...headings().map((h) => h.level), 6);
-  return (
-    <div class="outline-pane">
-      <For each={headings()} fallback={<div class="pane-empty">No headings yet.<br />Use # Heading or the style menu.</div>}>
-        {(h) => (
-          <div class="outline-item" style={{ "padding-inline-start": `${12 + (h.level - min()) * 16}px` }} onClick={() => goToLine(h.line)} dir="auto">
-            <span class={`lvl l${h.level}`}>H{h.level}</span>
-            {h.text}
-          </div>
-        )}
-      </For>
-    </div>
-  );
-}
-
 // ----------------------------------------------------------------- styles
 
 export const STYLE_LABELS: [string, string][] = [
@@ -206,48 +168,6 @@ function StylesPane() {
   );
 }
 
-// ------------------------------------------------------------------ links
-
-function LinksPane() {
-  const [hits, setHits] = createSignal<SearchHit[]>([]);
-  createEffect(on(() => state.active, async (p) => {
-    if (!p) return setHits([]);
-    try {
-      setHits(await ipc.backlinks(p));
-    } catch {
-      setHits([]);
-    }
-  }));
-  const outgoing = createMemo(() => {
-    const text = state.active ? state.buffers[state.active]?.content ?? "" : "";
-    return [...new Set([...text.matchAll(/\[\[([^\]|#]+)/g)].map((m) => m[1].trim()))];
-  });
-  return (
-    <div class="links-pane">
-      <h4>Backlinks <span class="count">{hits().length}</span></h4>
-      <For each={hits()} fallback={<div class="pane-empty">No other notes link here.</div>}>
-        {(h) => (
-          <div class="link-hit" onClick={() => openNote(h.path, { line: h.line })}>
-            <div class="link-file" dir="auto">{stem(h.path)} <small>{dirname(h.path)}</small></div>
-            <div class="link-snippet" dir="auto">{h.snippet}</div>
-          </div>
-        )}
-      </For>
-      <h4>Outgoing links <span class="count">{outgoing().length}</span></h4>
-      <For each={outgoing()} fallback={<div class="pane-empty">Link notes with [[Note name]].</div>}>
-        {(name) => (
-          <div class="link-hit" onClick={() => import("../core/store").then((s) => {
-            const p = s.notesList().find((x) => stem(x) === name);
-            if (p) openNote(p);
-          })}>
-            <div class="link-file" dir="auto">{name}</div>
-          </div>
-        )}
-      </For>
-    </div>
-  );
-}
-
 function PluginPanel(props: { panel: Panel }) {
   let el!: HTMLDivElement;
   createEffect(() => {
@@ -260,9 +180,7 @@ function PluginPanel(props: { panel: Panel }) {
 export default function RightPanel() {
   const builtins = [
     { id: "preview", title: "Preview", icon: () => <Eye size={16} /> },
-    { id: "outline", title: "Outline", icon: () => <ListTree size={16} /> },
     { id: "styles", title: "Styles", icon: () => <Palette size={16} /> },
-    { id: "links", title: "Links", icon: () => <Link2 size={16} /> },
   ];
   const plugins = () => app.panels.items();
   let startX = 0;
@@ -301,15 +219,14 @@ export default function RightPanel() {
           {(p) => (
             <button classList={{ active: rightTab() === p.id }} onClick={() => setRightTab(p.id)} title={p.title}>
               <SvgIcon svg={p.icon} size={16} />
+              <Show when={p.label}><span>{p.title}</span></Show>
             </button>
           )}
         </For>
       </div>
       <div class="panel-body">
         <Show when={rightTab() === "preview"}><PreviewPane /></Show>
-        <Show when={rightTab() === "outline"}><OutlinePane /></Show>
         <Show when={rightTab() === "styles"}><StylesPane /></Show>
-        <Show when={rightTab() === "links"}><LinksPane /></Show>
         <For each={plugins()}>{(p) => <Show when={rightTab() === p.id}><PluginPanel panel={p} /></Show>}</For>
       </div>
     </section>

@@ -1223,7 +1223,7 @@ mark {
 .editor .cm-scroller {
   font-family: var(--doc-font, var(--font-editor));
   font-size: var(--editor-size, 16px);
-  line-height: 1.85;
+  line-height: var(--editor-line-height, 1.85);
   overflow: auto;
 }
 .editor .cm-content {
@@ -3512,4 +3512,106 @@ html.no-anim .sidebar-slot {
 .cm-nz-lp-doc-title.nz-prop-edit {
   margin-inline-start: 0;
   padding: 2px 8px;
+}
+
+html.no-anim *,
+html.no-anim *::before,
+html.no-anim *::after {
+  transition: none !important;
+  animation-duration: 0s !important;
+}
+
+/* settings: search, sections, shortcut recorder */
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-muted);
+}
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.settings-section > h3 {
+  margin: 4px 0 -4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-faint);
+}
+.settings-body {
+  max-height: min(70vh, 640px);
+}
+.field-hint.block {
+  display: block;
+  margin-top: 2px;
+}
+.check {
+  align-items: flex-start;
+}
+.check input {
+  margin-top: 3px;
+}
+.row.gap-sm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.key-row {
+  align-items: center;
+}
+.key-rec {
+  min-width: 120px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: end;
+  cursor: pointer;
+}
+.key-rec:hover {
+  border-color: var(--border);
+}
+.key-rec.recording {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.key-rec.custom kbd {
+  border-color: rgba(var(--accent-rgb), 0.5);
+}
+.key-conflict {
+  font-size: 11px;
+  color: var(--warning);
+}
+.settings .row.gap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings .row.gap > .input,
+.settings .row.gap > .combo {
+  flex: 1;
+  min-width: 0;
 }

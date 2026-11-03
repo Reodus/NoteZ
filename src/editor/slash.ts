@@ -8,6 +8,7 @@ import {
 } from "./format";
 import { TEMPLATES } from "../ui/DiagramGallery";
 import { setDialog } from "../core/store";
+import { app } from "../core/app";
 
 interface SlashItem {
   title: string;
@@ -77,8 +78,9 @@ export function slashCompletion(ctx: CompletionContext): CompletionResult | null
   if (/^\s*(```|~~~)/.test(line.text)) return null;
   const query = ctx.state.sliceDoc(slash + 1, ctx.pos).toLowerCase();
   const typ = isTypst();
+  const diagrams = app.commands.has("insert.diagram");
   const items = ITEMS.filter(
-    (i) => !(typ && i.mdOnly) && (!query || i.title.toLowerCase().includes(query) || i.keys.toLowerCase().includes(query)),
+    (i) => !(typ && i.mdOnly) && (diagrams || i.section !== "Charts & diagrams") && (!query || i.title.toLowerCase().includes(query) || i.keys.toLowerCase().includes(query)),
   );
   if (!items.length) return null;
   return {

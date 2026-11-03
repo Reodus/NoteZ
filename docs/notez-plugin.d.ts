@@ -18,7 +18,7 @@ export interface Command {
 
 export interface ToolbarButton { id: string; title: string; /** inline SVG or short text */ icon: string; group?: string; run: () => void }
 export interface StatusItem { id: string; priority?: number; title?: string; render: () => string; onClick?: () => void }
-export interface Panel { id: string; title: string; icon: string; mount: (el: HTMLElement) => void | (() => void) }
+export interface Panel { id: string; title: string; icon: string; mount: (el: HTMLElement) => void | (() => void); /** Show the title next to the icon. */ label?: boolean }
 
 export interface BlockRenderer {
   /** Fenced-code language, e.g. "progress" for ```progress blocks. */

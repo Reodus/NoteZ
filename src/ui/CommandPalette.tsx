@@ -2,7 +2,7 @@ import { createMemo, createSignal, For, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { FileText, FileCode2, TerminalSquare, CornerDownLeft } from "lucide-solid";
 import { app } from "../core/app";
-import { notesList, openNote, setDialog, createNote } from "../core/store";
+import { notesList, openNote, setDialog, createNote, PickItem, newNoteDir, prefs } from "../core/store";
 import { stem, dirname } from "../core/ipc";
 
 /** Subsequence fuzzy score (higher is better), -1 if no match. */
@@ -34,7 +34,7 @@ interface Item {
   run: () => void;
 }
 
-export default function CommandPalette(props: { mode: "files" | "commands"; onClose: () => void }) {
+export default function CommandPalette(props: { mode: "files" | "commands" | "pick"; pick?: { placeholder: string; items: PickItem[] }; onClose: () => void }) {
   const [q, setQ] = createSignal(props.mode === "commands" ? ">" : "");
   const [sel, setSel] = createSignal(0);
 
@@ -43,11 +43,19 @@ export default function CommandPalette(props: { mode: "files" | "commands"; onCl
     const cmdMode = raw.startsWith(">");
     const query = cmdMode ? raw.slice(1).trim() : raw.trim();
     let list: Item[];
+    if (props.pick) {
+      list = props.pick.items.map((p, i) => ({ id: String(i), label: p.label, detail: p.detail, icon: "file" as const, run: p.run }));
+      return list
+        .map((it) => ({ it, s: fuzzy(raw.trim(), it.label + " " + (it.detail ?? "")) }))
+        .filter((x) => x.s >= 0)
+        .sort((a, b) => b.s - a.s)
+        .map((x) => x.it);
+    }
     if (cmdMode) {
       list = app.commands
         .list()
         .filter((c) => c.palette !== false)
-        .map((c) => ({ id: c.id, label: c.title, icon: "cmd" as const, key: c.key, run: () => app.commands.run(c.id) }));
+        .map((c) => ({ id: c.id, label: c.title, icon: "cmd" as const, key: app.commands.effectiveKey(c.id), run: () => app.commands.run(c.id) }));
     } else {
       list = notesList().map((p) => ({
         id: p,
@@ -64,7 +72,7 @@ export default function CommandPalette(props: { mode: "files" | "commands"; onCl
       .slice(0, 60)
       .map((x) => x.it);
     if (!cmdMode && query && !scored.some((i) => i.label.toLowerCase() === query.toLowerCase())) {
-      scored.push({ id: "__new", label: `Create “${query}”`, icon: "new", run: () => createNote("", query) });
+      scored.push({ id: "__new", label: `Create “${query}”`, icon: "new", run: () => createNote(newNoteDir(), query, prefs.defaultNoteType) });
     }
     return scored;
   });
@@ -86,7 +94,7 @@ export default function CommandPalette(props: { mode: "files" | "commands"; onCl
             class="palette-input"
             dir="auto"
             value={q()}
-            placeholder="Search notes… (type > for commands)"
+            placeholder={props.pick?.placeholder ?? "Search notes… (type > for commands)"}
             ref={(el) => setTimeout(() => el.focus())}
             onInput={(e) => (setQ(e.currentTarget.value), setSel(0))}
             onKeyDown={(e) => {

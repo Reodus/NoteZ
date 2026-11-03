@@ -8,7 +8,7 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, Simulation, SimulationNodeDatum } from "d3-force";
 import { Waypoints, X, Maximize2, Search } from "lucide-solid";
 import { basename, dirname, ipc, stem } from "../core/ipc";
-import { isDark, notesList, openNote, root, state } from "../core/store";
+import { isDark, notesList, openNote, root, state, prefs } from "../core/store";
 
 export const [graphOpen, setGraphOpen] = createSignal(false);
 
@@ -204,7 +204,9 @@ export default function GraphView() {
 
   function rebuild() {
     const old = new Map(nodes.map((n) => [n.id, n]));
-    const g = buildGraph(notesList(), links, showLinks());
+    const ex = prefs.excludedFolders.map((f) => f.replace(/^\/+|\/+$/g, "")).filter(Boolean);
+    const notes = notesList().filter((p) => !ex.some((f) => p === f || p.startsWith(f + "/")));
+    const g = buildGraph(notes, links, showLinks());
     // Keep positions of nodes that already exist (toggling links, file changes).
     for (const n of g.nodes) {
       const o = old.get(n.id);
@@ -342,7 +344,7 @@ export default function GraphView() {
     // Settle a little before the first paint, then frame the whole graph.
     sim!.tick(120);
     fit();
-    links = await ipc.graphLinks().catch(() => []);
+    links = await ipc.graphLinks([...prefs.excludedFolders]).catch(() => []);
     if (showLinks()) rebuild();
   });
 

@@ -187,11 +187,22 @@ export interface BuiltinPlugin extends NoteZPlugin {
   id: string;
   name: string;
   description: string;
+  /** Can be switched off in Settings → Plugins. */
+  optional?: boolean;
 }
 
 export const builtinPlugins: BuiltinPlugin[] = [];
 
 export async function loadBuiltins(list: BuiltinPlugin[]) {
   builtinPlugins.push(...list);
-  for (const p of list) await activate(p.id, p);
+  for (const p of list) if (!(p.optional && prefs.disabledBuiltins.includes(p.id))) await activate(p.id, p);
+}
+
+export async function setBuiltinEnabled(id: string, on: boolean) {
+  const p = builtinPlugins.find((b) => b.id === id);
+  if (!p?.optional) return;
+  setPrefs("disabledBuiltins", (l) => (on ? l.filter((x) => x !== id) : [...new Set([...l, id])]));
+  if (on) {
+    if (!loaded().some((l) => l.id === id)) await activate(id, p);
+  } else deactivate(id);
 }

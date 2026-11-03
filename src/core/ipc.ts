@@ -16,6 +16,12 @@ export interface SearchHit {
   snippet: string;
 }
 
+export interface LinkInfo {
+  path: string;
+  aliases: string[];
+  headings: string[];
+}
+
 export interface Diagnostic {
   severity: "error" | "warning";
   message: string;
@@ -107,13 +113,21 @@ export const ipc = {
   write: (path: string, content: string) => invoke<void>("write_note", { path, content }),
   createNote: (path: string) => invoke<void>("create_note", { path }),
   createFolder: (path: string) => invoke<void>("create_folder", { path }),
-  rename: (from: string, to: string) => invoke<void>("rename_entry", { from, to }),
+  /** Rename/move; with `updateLinks`, rewrites links to it. Returns the notes rewritten. */
+  rename: (from: string, to: string, updateLinks = false) => invoke<string[]>("rename_entry", { from, to, update_links: updateLinks }),
+  /** How many notes link to `path` (or into it, for a folder). */
+  linkRefs: (path: string) => invoke<number>("link_refs", { path }),
+  linkInfo: () => invoke<LinkInfo[]>("link_info"),
+  indexUpdate: (paths: string[]) => invoke<void>("index_update", { paths }),
   remove: (path: string) => invoke<void>("delete_entry", { path }),
-  search: (query: string) => invoke<SearchHit[]>("search", { query }),
+  search: (query: string, exclude: string[] = []) => invoke<SearchHit[]>("search", { query, exclude }),
   backlinks: (path: string) => invoke<SearchHit[]>("backlinks", { path }),
   /** All note → note links as [from, to] pairs (for the graph). */
-  graphLinks: () => invoke<[string, string][]>("graph_links"),
-  importAttachment: (source: string) => invoke<string>("import_attachment", { source }),
+  graphLinks: (exclude: string[] = []) => invoke<[string, string][]>("graph_links", { exclude }),
+  /** Copy a file into the vault folder `dir` (vault-relative); returns its vault path. */
+  importAttachment: (source: string, dir?: string) => invoke<string>("import_attachment", { source, dir }),
+  /** Write base64 `data` as `dir/name` (a unique name is chosen); returns its vault path. */
+  saveAttachment: (name: string, data: string, dir?: string) => invoke<string>("save_attachment", { name, data, dir }),
 
   renderPreview: (path: string, text: string, blocks: RenderedBlock[]) =>
     invoke<PreviewResult>("render_preview", { path, text, blocks }),

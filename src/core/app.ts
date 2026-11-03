@@ -12,6 +12,8 @@ export interface Events {
   "note:opened": { path: string };
   "note:changed": { path: string; content: string };
   "note:saved": { path: string };
+  /** The note changed on disk and its buffer was replaced. */
+  "note:reloaded": { path: string; content: string };
   "preview:rendered": { path: string; pages: number; millis: number; errors: number };
 }
 
@@ -65,6 +67,23 @@ function matchKey(spec: string, e: KeyboardEvent): boolean {
 class CommandRegistry {
   private map = new Map<string, Command>();
   private version = createSignal(0);
+  private overrides: () => Record<string, string> = () => ({});
+
+  /** User-defined shortcuts (command id → key, "" = none) take precedence. */
+  setOverrides(get: () => Record<string, string>) {
+    this.overrides = get;
+  }
+
+  /** The key a command currently runs on. */
+  effectiveKey(id: string): string | undefined {
+    const o = this.overrides();
+    return id in o ? o[id] || undefined : this.map.get(id)?.key;
+  }
+
+  /** Commands' default (built-in) key. */
+  defaultKey(id: string): string | undefined {
+    return this.map.get(id)?.key;
+  }
 
   register(cmd: Command): Disposer {
     this.map.set(cmd.id, cmd);
@@ -84,19 +103,26 @@ class CommandRegistry {
     });
   }
 
+  /** Whether `id` is registered (reactive). */
+  has(id: string): boolean {
+    this.version[0]();
+    return this.map.has(id);
+  }
+
   list(): Command[] {
     this.version[0]();
     return [...this.map.values()];
   }
 
   keyFor(id: string): string | undefined {
-    return this.map.get(id)?.key;
+    return this.effectiveKey(id);
   }
 
   handleKey(e: KeyboardEvent): boolean {
     if (e.defaultPrevented) return false;
     for (const cmd of this.map.values()) {
-      if (cmd.key && matchKey(cmd.key, e)) {
+      const key = this.effectiveKey(cmd.id);
+      if (key && matchKey(key, e)) {
         e.preventDefault();
         e.stopPropagation();
         this.run(cmd.id);
@@ -145,6 +171,8 @@ export interface Panel {
   icon: string;
   /** Mount into `el`; return a cleanup function. */
   mount: (el: HTMLElement) => void | (() => void);
+  /** Show the title next to the icon in the tab strip. */
+  label?: boolean;
 }
 
 export interface BlockContext {
@@ -170,10 +198,10 @@ export interface Toast {
 const [toasts, setToasts] = createSignal<Toast[]>([]);
 let toastId = 0;
 
-export function notify(message: string, kind: Toast["kind"] = "info", action?: Toast["action"]) {
+export function notify(message: string, kind: Toast["kind"] = "info", action?: Toast["action"], ms?: number) {
   const id = ++toastId;
   setToasts((t) => [...t, { id, message, kind, action }]);
-  setTimeout(() => dismissToast(id), kind === "error" ? 8000 : 4500);
+  setTimeout(() => dismissToast(id), ms ?? (kind === "error" ? 8000 : 4500));
 }
 
 export function dismissToast(id: number) {
