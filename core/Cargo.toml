@@ -2,7 +2,9 @@
 name = "notez-core"
 version = "0.4.0"
 description = "NoteZ core (vault + Typst rendering)"
-authors = ["you"]
+authors = ["Amir Mohammad Jahangirzad"]
+license = "MIT"
+repository = "https://github.com/Reodus/NoteZ"
 edition = "2024"
 
 

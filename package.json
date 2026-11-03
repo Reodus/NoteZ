@@ -90,5 +90,9 @@
       ]
     }
   },
-  "homepage": "https://notez.invalid"
+  "homepage": "https://github.com/Reodus/NoteZ",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Reodus/NoteZ.git"
+  }
 }

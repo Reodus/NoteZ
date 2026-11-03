@@ -4,3 +4,5 @@ release
 core/target
 core/bin
 .cargo/config.toml
+*.log
+.DS_Store
