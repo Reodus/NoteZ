@@ -207,11 +207,14 @@ function languageFor(path: string): Extension {
   return markdown({ base: markdownLanguage, codeLanguages: languages });
 }
 
+/** Editor state per open tab (undo history, cursor), kept while the editor
+ * is unmounted, e.g. while an image or PDF tab is shown. */
+const states = new Map<string, EditorState>();
+
 export default function Editor() {
   let host!: HTMLDivElement;
   let view: EditorView | undefined;
   /** Editor state per open tab: keeps undo history and cursor when switching. */
-  const states = new Map<string, EditorState>();
   let current: string | null = null;
   const live = (path: string) =>
     livePreview(prefs.editorMode === "live", path.endsWith(".typ"), {
@@ -395,6 +398,7 @@ export default function Editor() {
   createEffect(on(() => (state.active ? state.buffers[state.active]?.content : undefined), () => schedulePreview(), { defer: false }));
 
   onCleanup(() => {
+    if (view && current) states.set(current, view.state);
     setEditorView(null);
     view?.destroy();
   });

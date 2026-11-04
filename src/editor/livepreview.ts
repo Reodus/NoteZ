@@ -226,6 +226,42 @@ class ImageWidget extends WidgetType {
   }
 }
 
+/** `![[doc.pdf]]`, `![[doc.pdf#page=3|500]]`: the PDF in Chromium's viewer. */
+class PdfWidget extends WidgetType {
+  /** `|300` = width in px (as in the PDF export); `#height=400` = viewer height. */
+  constructor(readonly src: string, readonly page: string | null, readonly width: string | null, readonly height: string | null = null) {
+    super();
+  }
+  eq(o: PdfWidget) {
+    return o.src === this.src && o.page === this.page && o.width === this.width && o.height === this.height;
+  }
+  toDOM(view: EditorView) {
+    const wrap = document.createElement("span");
+    wrap.className = "cm-nz-lp-pdf";
+    const bar = document.createElement("span");
+    bar.className = "cm-nz-lp-pdf-bar";
+    bar.textContent = `📄 ${this.src.split("/").pop()}${this.page ? ` · page ${this.page}` : ""}`;
+    bar.title = "Click to edit the embed";
+    editOnClick(bar, view, (from) => from + 3);
+    const frame = document.createElement("iframe");
+    if (this.width) wrap.style.width = `${this.width}px`;
+    frame.style.height = `${this.height ?? (this.width ? Math.round(Number(this.width) * 1.35) : 560)}px`;
+    frame.title = this.src;
+    resolveImage(this.src).then((u) => {
+      if (u) frame.src = u + (this.page ? `#page=${this.page}` : "");
+      else {
+        wrap.classList.add("missing");
+        frame.replaceWith(Object.assign(document.createElement("span"), { textContent: `missing: ${this.src}` }));
+      }
+    });
+    wrap.append(bar, frame);
+    return wrap;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
 class FootnoteWidget extends WidgetType {
   constructor(readonly label: string, readonly def: boolean) {
     super();
@@ -615,9 +651,14 @@ function build(view: EditorView): DecorationSet {
           (m, s) => {
             if (inCode(s)) return;
             const e = s + m[0].length;
+            const [file, frag = ""] = m[1].trim().split("#");
             if (IMAGE_EXT.test(m[1])) {
               const w = /^\d+$/.test(m[2] ?? "") ? m[2] : null;
               add(s, e, Decoration.replace({ widget: new ImageWidget(m[1].trim(), "", w) }));
+            } else if (/\.pdf$/i.test(file)) {
+              const page = /page=(\d+)/.exec(frag)?.[1] ?? null;
+              const w = /^\d+$/.test(m[2] ?? "") ? m[2] : null;
+              add(s, e, Decoration.replace({ widget: new PdfWidget(file, page, w, /height=(\d+)/.exec(frag)?.[1] ?? null) }));
             } else {
               add(s, s + 3, HIDE);
               add(s + 3, e - 2, Decoration.mark({ class: "cm-nz-lp-link internal embed", attributes: { "data-target": m[1] } }));
@@ -743,7 +784,10 @@ function build(view: EditorView): DecorationSet {
             const alt = /^!\[([^\]]*)\]/.exec(raw)?.[1] ?? "";
             const [label, width] = alt.split("|");
             const url = doc.sliceString(src.from, src.to).replace(/^<|>$/g, "");
-            add(node.from, node.to, Decoration.replace({ widget: new ImageWidget(url, label, /^\d+$/.test(width ?? "") ? width : null) }));
+            const [file, frag = ""] = url.split("#");
+            const w = /^\d+$/.test(width ?? "") ? width : null;
+            const widget = /\.pdf$/i.test(file) ? new PdfWidget(file, /page=(\d+)/.exec(frag)?.[1] ?? null, w, /height=(\d+)/.exec(frag)?.[1] ?? null) : new ImageWidget(url, label, w);
+            add(node.from, node.to, Decoration.replace({ widget }));
             return false;
           }
           case "Link": {

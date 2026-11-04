@@ -1,16 +1,17 @@
-import { createSignal, For, Show, createEffect, on, createRoot } from "solid-js";
+import { createSignal, For, Show, createEffect, on, createRoot, Switch, Match } from "solid-js";
 import {
-  Files, Search, FilePlus, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, FileText, FileCode2, Pencil, Trash2,
-  FolderInput, Settings, Sun, Moon, Monitor, ArrowLeftRight, ChevronsDownUp, Copy, Waypoints,
+  Files, Search, FilePlus, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, FileText, FileCode2,
+  FolderInput, Settings, Sun, Moon, Monitor, ArrowLeftRight, ChevronsDownUp, Waypoints, File, FileImage, FileType2,
 } from "lucide-solid";
+import { fileMenu, newNoteIn, newFolderIn } from "./fileMenu";
 import { graphOpen, setGraphOpen } from "./GraphView";
 import { app } from "../core/app";
-import { Entry, dirname, ipc, SearchHit, stem } from "../core/ipc";
+import { Entry, dirname, ipc, SearchHit, stem, fileKind } from "../core/ipc";
 import {
-  tree, root, state, openNote, createNote, createFolder, renameEntry, deleteEntry, moveEntry,
+  tree, root, state, openNote, moveEntry,
   sidebarTab, setSidebarTab, setDialog, prefs, setPrefs, closeVault, newNoteDir,
 } from "../core/store";
-import { askText, openMenu, Popover } from "./primitives";
+import { openMenu, Popover } from "./primitives";
 import { Logo } from "./Logo";
 import { chooseVault } from "./Welcome";
 
@@ -52,38 +53,51 @@ const toggleDir = (p: string) => {
   setExpanded(n);
 };
 
-function newNoteIn(dir: string, ext: "md" | "typ" = prefs.defaultNoteType) {
-  askText(ext === "md" ? "New note" : "New Typst note", "Untitled").then((name) => void (name && createNote(dir, name.replace(/\.(md|typ)$/, ""), ext)));
-}
-
-function newFolderIn(dir: string) {
-  askText("New folder", "New folder").then((name) => void (name && createFolder(dir, name)));
-}
-
 function entryMenu(e: MouseEvent, entry: Entry | null) {
-  const dir = entry ? (entry.is_dir ? entry.path : dirname(entry.path)) : "";
-  openMenu(e, [
-    { label: "New note", icon: <FilePlus size={15} />, run: () => newNoteIn(dir) },
-    { label: "New Typst note", icon: <FileCode2 size={15} />, run: () => newNoteIn(dir, "typ") },
-    { label: "New folder", icon: <FolderPlus size={15} />, run: () => newFolderIn(dir) },
-    ...(entry
-      ? ([
-          "-",
-          {
-            label: "Rename…",
-            icon: <Pencil size={15} />,
-            hint: "F2",
-            run: () => askText("Rename", entry.name).then((n) => void (n && renameEntry(entry.path, n))),
-          },
-          {
-            label: "Copy path",
-            icon: <Copy size={15} />,
-            run: () => navigator.clipboard.writeText(entry.path),
-          },
-          { label: "Delete", icon: <Trash2 size={15} />, danger: true, run: () => deleteEntry(entry.path) },
-        ] as const)
-      : []),
-  ]);
+  openMenu(e, fileMenu(entry, "tree"));
+}
+
+/** Which tree entries are shown (notes always; attachments and other files per settings). */
+function visible(e: Entry): boolean {
+  if (e.is_dir) return true;
+  const k = fileKind(e.path);
+  return k === "note" || (k === "other" ? prefs.showAllFiles : prefs.showAttachments || prefs.showAllFiles);
+}
+
+/** Open every folder up to `path`, then scroll its row into view and flash it. */
+export function revealInTree(path: string) {
+  const parts = path.split("/").slice(0, -1);
+  const next = new Set(expanded());
+  parts.forEach((_, i) => next.add(parts.slice(0, i + 1).join("/")));
+  setExpanded(next);
+  setTimeout(() => {
+    const row = [...document.querySelectorAll<HTMLElement>(".tree-item")].find((r) => r.dataset.path === path);
+    if (!row) return;
+    row.scrollIntoView({ block: "center" });
+    row.classList.remove("flash");
+    void row.offsetWidth;
+    row.classList.add("flash");
+  }, 60);
+}
+
+export const collapseAll = () => setExpanded(new Set());
+export function expandAll() {
+  const all = new Set<string>();
+  const walk = (es: Entry[]) => es.forEach((e) => e.is_dir && (all.add(e.path), walk(e.children)));
+  walk(tree());
+  setExpanded(all);
+}
+
+function FileIcon(props: { path: string }) {
+  const k = () => fileKind(props.path);
+  return (
+    <Switch fallback={<File size={15} class="ti other" />}>
+      <Match when={props.path.endsWith(".typ")}><FileCode2 size={15} class="ti typ" /></Match>
+      <Match when={k() === "note"}><FileText size={15} class="ti" /></Match>
+      <Match when={k() === "image"}><FileImage size={15} class="ti image" /></Match>
+      <Match when={k() === "pdf"}><FileType2 size={15} class="ti pdf" /></Match>
+    </Switch>
+  );
 }
 
 function TreeNode(props: { entry: Entry; depth: number }) {
@@ -120,11 +134,12 @@ function TreeNode(props: { entry: Entry; depth: number }) {
           onClick={() => openNote(e().path)}
           onContextMenu={(ev) => entryMenu(ev, e())}
           title={e().path}
+          data-path={e().path}
         >
-          {e().name.endsWith(".typ") ? <FileCode2 size={15} class="ti typ" /> : <FileText size={15} class="ti" />}
-          <span class="tree-label" dir="auto">{stem(e().name)}</span>
-          <Show when={e().name.endsWith(".typ")}>
-            <span class="badge">typ</span>
+          <FileIcon path={e().path} />
+          <span class="tree-label" dir="auto">{fileKind(e().path) === "note" ? stem(e().name) : e().name.replace(/\.[^.]+$/, "")}</span>
+          <Show when={fileKind(e().path) !== "note" || e().name.endsWith(".typ")}>
+            <span class="badge">{e().name.includes(".") ? e().name.slice(e().name.lastIndexOf(".") + 1).toLowerCase() : ""}</span>
           </Show>
         </div>
       }
@@ -137,16 +152,17 @@ function TreeNode(props: { entry: Entry; depth: number }) {
         onDragStart={(ev) => ev.dataTransfer?.setData("text/notez-path", e().path)}
         onClick={() => toggleDir(e().path)}
         onContextMenu={(ev) => entryMenu(ev, e())}
+        data-path={e().path}
         {...dropProps(e().path)}
       >
         <ChevronRight size={13} class="ti chev" classList={{ open: open() }} />
         {open() ? <FolderOpen size={15} class="ti folder" /> : <Folder size={15} class="ti folder" />}
         <span class="tree-label" dir="auto">{e().name}</span>
-        <span class="count">{e().children.length || ""}</span>
+        <span class="count">{e().children.filter(visible).length || ""}</span>
       </div>
       <Show when={open()}>
         <div class="tree-children" style={{ "--guide": `${17 + props.depth * 14}px` }}>
-          <For each={e().children}>{(c) => <TreeNode entry={c} depth={props.depth + 1} />}</For>
+          <For each={e().children.filter(visible)}>{(c) => <TreeNode entry={c} depth={props.depth + 1} />}</For>
         </div>
       </Show>
     </Show>
@@ -170,7 +186,7 @@ function FilesPane() {
       }}
     >
       <For
-        each={tree()}
+        each={tree().filter(visible)}
         fallback={
           <div class="empty-hint">
             <p>This vault is empty.</p>

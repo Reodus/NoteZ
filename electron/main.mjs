@@ -16,7 +16,7 @@ const devUrl = process.env.NOTEZ_DEV_URL; // set by `npm run dev`
 // and localStorage behave as in a browser).
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
-  { scheme: "notez-asset", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  { scheme: "notez-asset", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
 ]);
 
 // ------------------------------------------------------------ Rust core
@@ -139,6 +139,8 @@ ipcMain.handle("spellcheck", wrap(async (on) => {
     if (on) s.setSpellCheckerLanguages(["en-US", "fa"].filter((l) => s.availableSpellCheckerLanguages.includes(l)));
   }
 }));
+// Reveal a file in the system file manager (selected), like Obsidian.
+ipcMain.handle("show-in-folder", wrap(async (p) => shell.showItemInFolder(p)));
 ipcMain.handle("replace-misspelling", wrap(async (word) => BrowserWindow.getFocusedWindow()?.webContents.replaceMisspelling(word)));
 ipcMain.handle("add-to-dictionary", wrap(async (word) => BrowserWindow.getFocusedWindow()?.webContents.session.addWordToSpellCheckerDictionary(word)));
 ipcMain.handle("dialog-ask", wrap(async (message, o = {}) => {
@@ -204,7 +206,7 @@ function createWindow() {
     show: false,
     backgroundColor: "#00000000",
     icon: path.join(root, "build/icon.png"),
-    webPreferences: { preload: path.join(here, "preload.cjs"), contextIsolation: true, sandbox: true, spellcheck: true },
+    webPreferences: { preload: path.join(here, "preload.cjs"), contextIsolation: true, sandbox: true, spellcheck: true, plugins: true },
   });
   win.once("ready-to-show", () => win.show());
   win.webContents.session.setSpellCheckerEnabled(false); // the UI turns it on (Settings → Editor)
@@ -244,10 +246,19 @@ app.whenReady().then(() => {
     if (!file.startsWith(dist + path.sep)) return new Response("forbidden", { status: 403 });
     return net.fetch(pathToFileURL(file).toString());
   });
-  protocol.handle("notez-asset", (req) => {
+  protocol.handle("notez-asset", async (req) => {
     let file = decodeURIComponent(new URL(req.url).pathname);
     if (process.platform === "win32") file = file.replace(/^\/([A-Za-z]:)/, "$1"); // /C:/x → C:/x
-    return net.fetch(pathToFileURL(file).toString());
+    // The UI (app:// or the dev server) reads these with fetch() too, e.g. a file's size.
+    let res;
+    try {
+      res = await net.fetch(pathToFileURL(file).toString());
+    } catch {
+      return new Response("not found", { status: 404, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+    const headers = new Headers(res.headers);
+    headers.set("Access-Control-Allow-Origin", "*");
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   });
   startCore();
   createWindow();

@@ -121,6 +121,8 @@ export const ipc = {
   linkInfo: () => invoke<LinkInfo[]>("link_info"),
   indexUpdate: (paths: string[]) => invoke<void>("index_update", { paths }),
   remove: (path: string) => invoke<void>("delete_entry", { path }),
+  /** Copy a file/folder next to itself ("name 1.ext"); returns the new path. */
+  duplicate: (path: string) => invoke<string>("duplicate_entry", { path }),
   search: (query: string, exclude: string[] = []) => invoke<SearchHit[]>("search", { query, exclude }),
   backlinks: (path: string) => invoke<SearchHit[]>("backlinks", { path }),
   /** All note → note links as [from, to] pairs (for the graph). */
@@ -164,6 +166,17 @@ export function basename(path: string): string {
 export function stem(path: string): string {
   return basename(path).replace(/\.(md|typ)$/, "");
 }
+
+export type FileKind = "note" | "image" | "pdf" | "other";
+const IMAGE_RE = /\.(png|jpe?g|gif|svg|webp|bmp|avif|ico)$/i;
+/** What a vault file is, by extension. */
+export function fileKind(path: string): FileKind {
+  if (/\.(md|typ)$/i.test(path)) return "note";
+  if (IMAGE_RE.test(path)) return "image";
+  if (/\.pdf$/i.test(path)) return "pdf";
+  return "other";
+}
+export const isNotePath = (path: string | null | undefined) => !!path && fileKind(path) === "note";
 
 export function join(dir: string, name: string): string {
   return dir ? `${dir}/${name}` : name;

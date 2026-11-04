@@ -748,6 +748,25 @@ impl<'a> Converter<'a> {
         if url.starts_with("http://") || url.starts_with("https://") {
             return format!("#text(fill: luma(120))[\\[image: {}\\]]", escape_markup(url));
         }
+        // `doc.pdf#page=3`: a PDF page is placed like an image (Typst reads PDFs).
+        let (file, frag) = url.split_once('#').unwrap_or((url, ""));
+        if file.to_ascii_lowercase().ends_with(".pdf") {
+            let Some(path) = (self.resolve_image)(file) else {
+                return format!("#text(fill: red)[\\[missing PDF: {}\\]]", escape_markup(file));
+            };
+            // `#page=3&height=400`: only the page matters for print.
+            let page = frag
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("page="))
+                .and_then(|p| p.parse::<u32>().ok())
+                .unwrap_or(1)
+                .max(1);
+            let w = width.map(|px| format!("{:.1}pt", px * 0.75)).unwrap_or_else(|| "100%".into());
+            return format!(
+                "#align(center, block(stroke: 0.5pt + luma(200), image({}, page: {page}, width: {w})))",
+                q(&path)
+            );
+        }
         let Some(path) = (self.resolve_image)(url) else {
             return format!("#text(fill: red)[\\[missing image: {}\\]]", escape_markup(url));
         };
@@ -1142,6 +1161,13 @@ mod tests {
         assert_eq!(detect_dir("123 !!"), None);
         assert_eq!(detect_dir("windows یک سیستم عامل باحال"), Some(Dir::Rtl));
         assert_eq!(detect_dir("Visual Studio Code ویرایشگر"), Some(Dir::Ltr));
+    }
+
+    #[test]
+    fn pdf_embeds() {
+        let out = conv("![[doc.pdf#page=2]]\n\n![](a/b.pdf)\n");
+        assert!(out.contains("image(\"/doc.pdf\", page: 2, width: 100%)"), "{out}");
+        assert!(out.contains("image(\"/a/b.pdf\", page: 1"), "{out}");
     }
 
     #[test]

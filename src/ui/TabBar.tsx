@@ -1,7 +1,8 @@
 import { For, Show } from "solid-js";
-import { X, FileText, FileCode2, PanelLeft, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2 } from "lucide-solid";
+import { X, FileText, FileCode2, FileImage, FileType2, PanelLeft, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2 } from "lucide-solid";
 import { state, setState, isDirty, closeTab, prefs, setPrefs, sidebarOpen, setSidebarOpen, setFocusMode } from "../core/store";
-import { stem } from "../core/ipc";
+import { stem, basename, fileKind, isNotePath } from "../core/ipc";
+import { fileMenu, entryFor } from "./fileMenu";
 import { openMenu } from "./primitives";
 
 export default function TabBar() {
@@ -40,12 +41,18 @@ export default function TabBar() {
                 openMenu(e, [
                   { label: "Close", run: () => closeTab(path) },
                   { label: "Close others", run: () => state.tabs.filter((t) => t !== path).forEach(closeTab) },
+                  { label: "Close tabs to the right", run: () => state.tabs.slice(state.tabs.indexOf(path) + 1).forEach(closeTab) },
                   { label: "Close all", run: () => [...state.tabs].forEach(closeTab) },
+                  "-",
+                  ...fileMenu(entryFor(path), "tab"),
                 ])
               }
             >
-              {path.endsWith(".typ") ? <FileCode2 size={14} class="tab-icon-file typ" /> : <FileText size={14} class="tab-icon-file" />}
-              <span class="tab-title" dir="auto">{stem(path)}</span>
+              {path.endsWith(".typ") ? <FileCode2 size={14} class="tab-icon-file typ" />
+                : fileKind(path) === "image" ? <FileImage size={14} class="tab-icon-file image" />
+                : fileKind(path) === "pdf" ? <FileType2 size={14} class="tab-icon-file pdf" />
+                : <FileText size={14} class="tab-icon-file" />}
+              <span class="tab-title" dir="auto">{fileKind(path) === "note" ? stem(path) : basename(path)}</span>
               <button
                 class="tab-close"
                 onClick={(e) => {
@@ -61,7 +68,7 @@ export default function TabBar() {
           )}
         </For>
       </div>
-      <Show when={prefs.layout !== "preview" && state.active && !state.active.endsWith(".typ")}>
+      <Show when={prefs.layout !== "preview" && isNotePath(state.active) && !state.active!.endsWith(".typ")}>
         <div class="layout-switch mode-switch">
           <button classList={{ active: prefs.editorMode === "live" }} title="Live preview (Ctrl+Shift+M)" onClick={() => setPrefs("editorMode", "live")}>
             <BookOpen size={15} />

@@ -2,9 +2,9 @@
 import { createSignal, createRoot, createEffect } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { EditorView } from "@codemirror/view";
-import { ask, onVaultFs, trashPath } from "./native";
+import { ask, onVaultFs, openPath, trashPath } from "./native";
 import { app, notify } from "./app";
-import { ipc, Entry, Theme, dirname, join } from "./ipc";
+import { ipc, Entry, Theme, dirname, join, fileKind } from "./ipc";
 
 // ------------------------------------------------------------ preferences
 
@@ -37,6 +37,10 @@ export interface Prefs {
   attachmentFolder: string;
   /** File name for pasted images without a name; `{{date:FMT}}` and `{{note}}` are filled in. */
   attachmentName: string;
+  /** File tree: show images and PDFs next to notes. */
+  showAttachments: boolean;
+  /** File tree: show every file type (others open in their default app). */
+  showAllFiles: boolean;
   /** Built-in plugins switched off. */
   disabledBuiltins: string[];
   /** Folder with note templates ("" = find a top-level "Templates" folder). */
@@ -94,6 +98,8 @@ const DEFAULT_PREFS: Prefs = {
   attachmentMode: "folder",
   attachmentFolder: "attachments",
   attachmentName: "Pasted image {{date:YYYYMMDDHHmmss}}",
+  showAttachments: true,
+  showAllFiles: false,
   disabledBuiltins: [],
   templatesFolder: "",
   editorFont: "",
@@ -236,8 +242,17 @@ export function closeVault() {
   setPrefs("lastVault", null);
 }
 
+/** Bumped when files change on disk, so image/PDF tabs reload. */
+export const [fileRev, setFileRev] = createSignal(0);
+
+/** Open a vault file: notes in the editor, images and PDFs in a viewer tab, anything else in its default app. */
 export async function openNote(path: string, opts: { line?: number } = {}) {
-  if (!state.buffers[path]) {
+  const kind = fileKind(path);
+  if (kind === "other") {
+    if (root()) await openPath(`${root()}/${path}`).catch((e) => notify(String(e), "error"));
+    return;
+  }
+  if (kind === "note" && !state.buffers[path]) {
     try {
       const content = await ipc.read(path);
       setState("buffers", path, { content, saved: content });
@@ -444,6 +459,7 @@ async function vaultChanged(paths: string[]) {
     fsTreeTimer = window.setTimeout(refreshTree, 100);
   }
   const hit = (t: string) => paths.some((p) => t === p || t.startsWith(p + "/"));
+  if (state.tabs.some((t) => fileKind(t) !== "note" && hit(t))) setFileRev((n) => n + 1);
   for (const t of state.tabs.filter(hit)) {
     const b = state.buffers[t];
     if (!b) continue;

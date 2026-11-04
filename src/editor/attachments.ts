@@ -6,6 +6,7 @@ import { ipc } from "../core/ipc";
 import { notify } from "../core/app";
 import { prefs, state } from "../core/store";
 import { formatDate } from "../plugins/templates";
+import { linkTo } from "../ui/fileMenu";
 
 const IMAGE = /\.(png|jpe?g|gif|svg|webp|bmp|avif)$/i;
 
@@ -95,6 +96,16 @@ export const attachmentDrop = EditorView.domEventHandlers({
     return true;
   },
   drop(e, view) {
+    // A file dragged from the file tree: link or embed it.
+    const vaultPath = e.dataTransfer?.getData("text/notez-path");
+    if (vaultPath) {
+      e.preventDefault();
+      const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.selection.main.head;
+      const insert = state.active?.endsWith(".typ") ? linkFor(vaultPath, true) : linkTo(vaultPath);
+      view.dispatch({ changes: { from: pos, insert }, selection: { anchor: pos + insert.length } });
+      view.focus();
+      return true;
+    }
     const files = [...(e.dataTransfer?.files ?? [])];
     if (!files.length) return false;
     e.preventDefault();

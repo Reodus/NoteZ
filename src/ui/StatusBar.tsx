@@ -1,6 +1,7 @@
 import { createMemo, For, Show } from "solid-js";
 import { CheckCircle2, AlertTriangle, Loader2, Save } from "lucide-solid";
 import { app } from "../core/app";
+import { isNotePath } from "../core/ipc";
 import { state, cursor, isDirty, setRightTab, prefs, setPrefs } from "../core/store";
 import { preview } from "../core/render";
 import { docThemeId } from "./StyleDialogs";
@@ -19,7 +20,7 @@ export default function StatusBar() {
 
   return (
     <footer class="statusbar">
-      <Show when={state.active}>
+      <Show when={isNotePath(state.active)}>
         <span class="sb-item" title="Save state">
           <Show when={isDirty(state.active!)} fallback={<><CheckCircle2 size={12} /> Saved</>}>
             <Save size={12} /> Editing…
@@ -29,13 +30,13 @@ export default function StatusBar() {
         <span class="sb-item">{text().length.toLocaleString()} chars</span>
         <span class="sb-item">Ln {cursor().line}, Col {cursor().col}{cursor().selected ? ` (${cursor().selected} sel)` : ""}</span>
       </Show>
-      <For each={items()}>
+      <For each={isNotePath(state.active) ? items() : []}>
         {(it) => (
           <span class="sb-item" classList={{ click: !!it.onClick }} title={it.title} onClick={it.onClick}>{it.render()}</span>
         )}
       </For>
       <div class="spacer" />
-      <Show when={state.active}>
+      <Show when={isNotePath(state.active)}>
         <span class="sb-item">{state.active!.endsWith(".typ") ? "Typst" : "Markdown"}</span>
         <span class="sb-item">Theme: {docThemeId()}</span>
         <Show when={prefs.layout !== "editor"}>

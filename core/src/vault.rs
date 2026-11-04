@@ -55,7 +55,8 @@ fn build(root: &Path, dir: &Path) -> std::io::Result<Vec<Entry>> {
         let is_dir = item.file_type()?.is_dir();
         if is_dir {
             entries.push(Entry { name, path: rel, is_dir, children: build(root, &path)? });
-        } else if is_note(&path) {
+        } else {
+            // Every file: the UI shows notes, images and PDFs (and, if asked, the rest).
             entries.push(Entry { name, path: rel, is_dir, children: vec![] });
         }
     }
@@ -109,6 +110,38 @@ pub fn rename(root: &Path, from: &str, to: &str) -> Result<(), String> {
     fs::rename(resolve(root, from)?, dst).map_err(|e| e.to_string())
 }
 
+/// Copy a file or folder next to itself as "name 1.ext" (first free number);
+/// returns the new vault path.
+pub fn duplicate(root: &Path, rel: &str) -> Result<String, String> {
+    let src = resolve(root, rel)?;
+    if rel.is_empty() || !src.exists() {
+        return Err(format!("not found: {rel}"));
+    }
+    let (dir, name) = rel.rsplit_once('/').map(|(d, n)| (format!("{d}/"), n)).unwrap_or((String::new(), rel));
+    let (base, ext) = match name.rsplit_once('.') {
+        Some((b, e)) if !src.is_dir() && !b.is_empty() => (b, format!(".{e}")),
+        _ => (name, String::new()),
+    };
+    let to = (1..1000)
+        .map(|n| format!("{dir}{base} {n}{ext}"))
+        .find(|c| resolve(root, c).map(|p| !p.exists()).unwrap_or(false))
+        .ok_or("no free name")?;
+    fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
+        if from.is_dir() {
+            fs::create_dir_all(to)?;
+            for item in fs::read_dir(from)? {
+                let item = item?;
+                copy_all(&item.path(), &to.join(item.file_name()))?;
+            }
+            Ok(())
+        } else {
+            fs::copy(from, to).map(|_| ())
+        }
+    }
+    copy_all(&src, &resolve(root, &to)?).map_err(|e| e.to_string())?;
+    Ok(to)
+}
+
 pub fn delete(root: &Path, rel: &str) -> Result<(), String> {
     let path = resolve(root, rel)?;
     if rel.is_empty() || path == root {
@@ -132,7 +165,22 @@ mod tests {
     }
 
     #[test]
-    fn tree_lists_notes_only() {
+    fn duplicate_picks_free_name() {
+        let dir = std::env::temp_dir().join(format!("notez-dup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("f/sub")).unwrap();
+        fs::write(dir.join("f/a.md"), "x").unwrap();
+        fs::write(dir.join("f/a 1.md"), "y").unwrap();
+        fs::write(dir.join("f/sub/p.png"), "z").unwrap();
+        assert_eq!(duplicate(&dir, "f/a.md").unwrap(), "f/a 2.md");
+        assert_eq!(fs::read_to_string(dir.join("f/a 2.md")).unwrap(), "x");
+        assert_eq!(duplicate(&dir, "f/sub").unwrap(), "f/sub 1");
+        assert!(dir.join("f/sub 1/p.png").is_file());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn tree_lists_all_files() {
         let dir = std::env::temp_dir().join(format!("notez-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("sub")).unwrap();
@@ -143,7 +191,7 @@ mod tests {
         fs::write(dir.join("sub/d.md"), "").unwrap();
         let t = tree(&dir).unwrap();
         let names: Vec<_> = t.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, ["sub", "a.md", "b.typ"]);
+        assert_eq!(names, ["sub", "a.md", "b.typ", "c.png"]);
         assert_eq!(t[0].children[0].path, "sub/d.md");
         fs::remove_dir_all(&dir).unwrap();
     }
@@ -190,6 +238,31 @@ fn walk_notes(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(p);
         }
     }
+}
+
+/// Every non-hidden file that is not a note (images, PDFs…), vault-relative.
+pub fn all_files(root: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        let Ok(rd) = fs::read_dir(dir) else { return };
+        for item in rd.flatten() {
+            let name = item.file_name().to_string_lossy().into_owned();
+            if is_hidden(&name) {
+                continue;
+            }
+            let p = item.path();
+            if p.is_dir() {
+                walk(root, &p, out);
+            } else if !is_note(&p) {
+                if let Ok(rel) = p.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    let mut v = Vec::new();
+    walk(root, root, &mut v);
+    v.sort();
+    v
 }
 
 pub fn all_notes(root: &Path) -> Vec<String> {

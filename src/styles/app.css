@@ -1260,9 +1260,21 @@ mark {
 .editor .cm-cursor {
   border-left: 2px solid var(--accent);
 }
-.editor .cm-selectionBackground,
-.editor .cm-focused .cm-selectionBackground {
-  background: rgba(var(--accent-rgb), 0.2) !important;
+/* Selection: CodeMirror draws its selection boxes using the editor's single
+   direction, so in right-to-left lines that wrap they land on the wrong side.
+   Use the browser's own selection (which follows each line's bidi
+   direction) and keep CodeMirror's drawn caret. */
+.editor .cm-selectionLayer {
+  display: none;
+}
+.editor .cm-content .cm-line::selection,
+.editor .cm-content .cm-line ::selection,
+.editor .cm-content ::selection {
+  background: rgba(var(--accent-rgb), 0.28) !important;
+}
+.editor .cm-content:not(:focus) .cm-line::selection,
+.editor .cm-content:not(:focus) .cm-line ::selection {
+  background: rgba(var(--accent-rgb), 0.16) !important;
 }
 .editor .cm-selectionMatch {
   background: rgba(var(--accent-rgb), 0.1);
@@ -3702,4 +3714,143 @@ html.no-anim *::after {
   font-family: var(--font-mono, monospace);
   margin: -4px 0 8px;
   word-break: break-all;
+}
+
+/* ---------------------------------------------------- images & PDFs */
+
+.ti.image,
+.tab-icon-file.image {
+  color: #c2410c;
+}
+.ti.pdf,
+.tab-icon-file.pdf {
+  color: #dc2626;
+}
+.ti.other {
+  opacity: 0.7;
+}
+.tree-item.file .badge {
+  margin-inline-start: auto;
+}
+.tree-item.flash {
+  animation: tree-flash 1.2s var(--ease);
+}
+@keyframes tree-flash {
+  0%,
+  40% {
+    background: rgba(var(--accent-rgb), 0.28);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.file-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.file-view-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 13px;
+  min-height: 42px;
+}
+.file-view-bar .fv-name {
+  color: var(--fg);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-view-bar .fv-dir,
+.file-view-bar .fv-meta {
+  color: var(--fg-faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.file-view-bar .spacer {
+  flex: 1;
+}
+.fv-zoom {
+  min-width: 52px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.fv-zoom:hover {
+  background: var(--hover);
+}
+.fv-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 2px;
+}
+.fv-stage {
+  flex: 1;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  /* checkerboard so transparent images are visible */
+  background-color: var(--bg);
+  background-image: linear-gradient(45deg, var(--hover) 25%, transparent 25%), linear-gradient(-45deg, var(--hover) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--hover) 75%), linear-gradient(-45deg, transparent 75%, var(--hover) 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+}
+.fv-stage img {
+  max-width: none;
+  box-shadow: var(--shadow-lg);
+  image-rendering: auto;
+  cursor: zoom-in;
+}
+.fv-stage:not(.fit) img {
+  cursor: zoom-out;
+}
+.fv-pdf {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: #525659;
+}
+
+/* ![[doc.pdf]] in live preview */
+.cm-nz-lp-pdf {
+  display: inline-flex;
+  flex-direction: column;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 4px 0;
+  vertical-align: top;
+}
+.cm-nz-lp-pdf-bar {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  cursor: text;
+}
+.cm-nz-lp-pdf iframe {
+  width: 100%;
+  border: none;
+  background: #525659;
+}
+.cm-nz-lp-pdf.missing {
+  color: #dc2626;
+  padding: 6px 10px;
 }

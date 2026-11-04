@@ -93,6 +93,12 @@ fn create_folder(state: &AppState, path: String) -> Res<()> {
 
 /// Rename/move a note or folder; with `update_links`, rewrite the links that
 /// point to it. Returns the (new) paths of the notes rewritten.
+fn duplicate_entry(state: &AppState, path: String) -> Res<String> {
+    let to = vault::duplicate(&state.root()?, &path)?;
+    state.with_index(|i, r| i.refresh(r, &to))?;
+    Ok(to)
+}
+
 fn rename_entry(state: &AppState, from: String, to: String, update_links: bool) -> Res<Vec<String>> {
     let root = state.root()?;
     let plan = if update_links { state.with_index(|i, r| links::plan_rename(i, r, &from, &to))? } else { vec![] };
@@ -409,6 +415,7 @@ pub fn dispatch(state: &AppState, cmd: &str, a: &Value) -> Result<Value, Value> 
         "link_refs" => out(state.with_index(|i, r| links::refs(i, r, &arg::<String>(a, "path").unwrap_or_default()))),
         "link_info" => out(state.with_index(|i, _| links::info(i))),
         "delete_entry" => out(delete_entry(state, arg(a, "path")?)),
+        "duplicate_entry" => out(duplicate_entry(state, arg(a, "path")?)),
         "search" => out(search(state, arg(a, "query")?, opt(a, "exclude"))),
         "backlinks" => out(backlinks(state, arg(a, "path")?)),
         "graph_links" => out(state.with_index(|i, r| links::graph(i, r, &opt::<Vec<String>>(a, "exclude")))),

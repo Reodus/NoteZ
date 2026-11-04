@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("notezNative", {
   startupArgs: () => call("startup-args"),
   openUrl: (url) => call("open-url", url),
   openPath: (p) => call("open-path", p),
+  showInFolder: (p) => call("show-in-folder", p),
   dialogOpen: (o) => call("dialog-open", o),
   dialogSave: (o) => call("dialog-save", o),
   ask: (message, o) => call("dialog-ask", message, o),

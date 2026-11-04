@@ -25,6 +25,8 @@ import { StyleDialog, PageSetupDialog, ThemesDialog } from "./ui/StyleDialogs";
 import { MenuHost, Modal, PromptHost, Toasts } from "./ui/primitives";
 import { Logo } from "./ui/Logo";
 import Editor from "./editor/Editor";
+import FileView from "./ui/FileView";
+import { isNotePath } from "./core/ipc";
 import GraphView, { graphOpen } from "./ui/GraphView";
 import "./styles/app.css";
 
@@ -130,6 +132,7 @@ export default function App() {
             </Show>
             <Show when={!graphOpen() || focusMode()} fallback={<GraphView />}>
             <Show when={state.active} fallback={<EmptyState />}>
+            <Show when={isNotePath(state.active)} fallback={<FileView path={state.active!} />}>
               <Show when={viewLayout() !== "preview" && !focusMode()}>
                 <Toolbar />
               </Show>
@@ -141,6 +144,7 @@ export default function App() {
                   <RightPanel />
                 </Show>
               </div>
+            </Show>
             </Show>
             </Show>
             <Show when={!focusMode() && prefs.showStatusBar}>

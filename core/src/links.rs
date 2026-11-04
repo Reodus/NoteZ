@@ -22,6 +22,9 @@ pub struct Resolver<'a> {
     root: &'a Path,
     notes: Vec<&'a String>,
     by_stem: HashMap<String, Vec<&'a String>>,
+    /// Non-note files (images, PDFs…) by lower-cased file name; read from
+    /// disk the first time an attachment link needs it.
+    files: std::cell::OnceCell<HashMap<String, Vec<String>>>,
 }
 
 pub fn stem_of(p: &str) -> String {
@@ -48,7 +51,24 @@ impl<'a> Resolver<'a> {
         for n in &notes {
             by_stem.entry(stem_of(n).to_lowercase()).or_default().push(n);
         }
-        Resolver { root, notes, by_stem }
+        Resolver { root, notes, by_stem, files: std::cell::OnceCell::new() }
+    }
+
+    fn files(&self) -> &HashMap<String, Vec<String>> {
+        self.files.get_or_init(|| {
+            let mut m: HashMap<String, Vec<String>> = HashMap::new();
+            for p in vault::all_files(self.root) {
+                let name = p.rsplit('/').next().unwrap_or(&p).to_lowercase();
+                m.entry(name).or_default().push(p);
+            }
+            m
+        })
+    }
+
+    /// Other files in the vault with the same file name as `p`.
+    pub fn same_name_count(&self, p: &str, except: &str) -> usize {
+        let name = p.rsplit('/').next().unwrap_or(p).to_lowercase();
+        self.files().get(&name).map(|v| v.iter().filter(|x| x.as_str() != except).count()).unwrap_or(0)
     }
 
     fn exists(&self, p: &str) -> bool {
@@ -75,7 +95,16 @@ impl<'a> Resolver<'a> {
         }
         let name = t.rsplit('/').next()?;
         let key = name.strip_suffix(".md").or_else(|| name.strip_suffix(".typ")).unwrap_or(name).to_lowercase();
-        self.by_stem.get(&key).and_then(|v| v.first()).map(|n| ((*n).clone(), Kind::Stem))
+        if let Some(n) = self.by_stem.get(&key).and_then(|v| v.first()) {
+            return Some(((*n).clone(), Kind::Stem));
+        }
+        // `![[pic.png]]`: an attachment found by its file name anywhere.
+        if name.contains('.') && !has_ext(name) {
+            let mut hits = self.files().get(&name.to_lowercase())?.clone();
+            hits.sort();
+            return hits.into_iter().next().map(|p| (p, Kind::Stem));
+        }
+        None
     }
 
     pub fn is_note(&self, p: &str) -> bool {
@@ -132,7 +161,12 @@ pub fn plan_rename(idx: &Index, root: &Path, from: &str, to: &str) -> Vec<(Strin
     let r = Resolver::new(idx, root);
     let folder = !r.is_note(from) && vault::resolve(root, from).map(|p| p.is_dir()).unwrap_or(false);
     let new_stem = stem_of(to).to_lowercase();
-    let stem_unique = !idx.paths().any(|p| p != from && stem_of(p).to_lowercase() == new_stem);
+    let attachment = !folder && !r.is_note(from);
+    let stem_unique = if attachment {
+        r.same_name_count(to, from) == 0
+    } else {
+        !idx.paths().any(|p| p != from && stem_of(p).to_lowercase() == new_stem)
+    };
     let mut plan = Vec::new();
     for note in idx.paths() {
         let Some(text) = idx.text(note) else { continue };
@@ -145,6 +179,8 @@ pub fn plan_rename(idx: &Index, root: &Path, from: &str, to: &str) -> Vec<(Strin
             let keep_ext = has_ext(raw.trim()) || !r.is_note(&target);
             let as_path = |p: &str| if keep_ext { p.to_string() } else { p.trim_end_matches(".md").to_string() };
             let mut new = match kind {
+                // `![[pic.png]]` stays a bare file name while it is unique.
+                _ if wiki && attachment && stem_unique && !raw.contains('/') => new_path.rsplit('/').next().unwrap_or(&new_path).to_string(),
                 Kind::Stem if folder => continue, // bare names still resolve
                 Kind::Stem if wiki && stem_unique => {
                     let name = new_path.rsplit('/').next().unwrap_or(&new_path);
@@ -272,6 +308,19 @@ mod tests {
         }
         let idx = Index::build(&dir);
         (dir, idx)
+    }
+
+    #[test]
+    fn rename_attachment_rewrites_links() {
+        let (dir, idx) = vault("att", &[("a.md", "![[pic.png]] ![[pic.png|300]] ![x](img/pic.png)"), ("img/n.md", "![](pic.png)"), ("r.md", "![[top.png]]")]);
+        std::fs::write(dir.join("img/pic.png"), "x").unwrap();
+        std::fs::write(dir.join("top.png"), "x").unwrap();
+        let plan: HashMap<_, _> = plan_rename(&idx, &dir, "img/pic.png", "img/photo 1.png").into_iter().collect();
+        assert_eq!(plan["a.md"], "![[photo 1.png]] ![[photo 1.png|300]] ![x](img/photo%201.png)");
+        assert_eq!(plan["img/n.md"], "![](photo%201.png)");
+        // Moved into a folder: still a bare name.
+        let plan: HashMap<_, _> = plan_rename(&idx, &dir, "top.png", "img/top.png").into_iter().collect();
+        assert_eq!(plan.get("r.md").map(String::as_str), None, "{plan:?}");
     }
 
     #[test]

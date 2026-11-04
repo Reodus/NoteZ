@@ -11,6 +11,7 @@ interface Native {
   startupArgs(): Promise<string[]>;
   openUrl(url: string): Promise<void>;
   openPath(path: string): Promise<void>;
+  showInFolder?(path: string): Promise<void>;
   dialogOpen(o: { title?: string; directory?: boolean; multiple?: boolean; defaultPath?: string; filters?: DialogFilter[] }): Promise<string | string[] | null>;
   dialogSave(o: { title?: string; defaultPath?: string; filters?: DialogFilter[] }): Promise<string | null>;
   ask(message: string, o?: { title?: string; kind?: "info" | "warning" | "error"; okLabel?: string; cancelLabel?: string }): Promise<boolean>;
@@ -31,6 +32,8 @@ export const invoke = <T>(cmd: string, args?: Record<string, unknown>) => native
 export const startupArgs = () => native.startupArgs();
 export const openUrl = (url: string) => native.openUrl(url);
 export const openPath = (path: string) => native.openPath(path);
+/** Open the system file manager with `path` selected. */
+export const showInFolder = (path: string) => (native.showInFolder ? native.showInFolder(path) : native.openPath(path.slice(0, path.lastIndexOf("/")) || "/"));
 export const openDialog = (o: Parameters<Native["dialogOpen"]>[0]) => native.dialogOpen(o);
 export const saveDialog = (o: Parameters<Native["dialogSave"]>[0]) => native.dialogSave(o);
 export const ask = (message: string, o?: Parameters<Native["ask"]>[1]) => native.ask(message, o);
