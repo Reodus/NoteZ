@@ -31,8 +31,12 @@ export interface Prefs {
   newNoteTheme: string;
   /** Rewrite links in other notes when a note or folder is renamed/moved. */
   updateLinks: "always" | "ask" | "never";
-  /** Where pasted/dropped files go: a vault folder, or "./x" relative to the note. */
+  /** Where pasted/dropped files go (like Obsidian's "Default location for new attachments"). */
+  attachmentMode: "root" | "folder" | "same" | "subfolder";
+  /** The vault folder ("folder" mode) or the subfolder name ("subfolder" mode). */
   attachmentFolder: string;
+  /** File name for pasted images without a name; `{{date:FMT}}` and `{{note}}` are filled in. */
+  attachmentName: string;
   /** Built-in plugins switched off. */
   disabledBuiltins: string[];
   /** Folder with note templates ("" = find a top-level "Templates" folder). */
@@ -87,7 +91,9 @@ const DEFAULT_PREFS: Prefs = {
   enabledPlugins: [],
   newNoteTheme: "default",
   updateLinks: "ask",
+  attachmentMode: "folder",
   attachmentFolder: "attachments",
+  attachmentName: "Pasted image {{date:YYYYMMDDHHmmss}}",
   disabledBuiltins: [],
   templatesFolder: "",
   editorFont: "",
@@ -118,7 +124,19 @@ const PREFS_KEY = "notez.prefs.v1";
 function loadPrefs(): Prefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (raw) return { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // Before 0.5: one field, "./x" meaning "x next to the note".
+      if (!saved.attachmentMode && typeof saved.attachmentFolder === "string") {
+        const f = saved.attachmentFolder.trim();
+        if (f.startsWith(".")) {
+          const sub = f.replace(/^\.\/?/, "").replace(/\/+$/, "");
+          saved.attachmentMode = sub ? "subfolder" : "same";
+          saved.attachmentFolder = sub || "attachments";
+        } else saved.attachmentMode = "folder";
+      }
+      return { ...DEFAULT_PREFS, ...saved };
+    }
   } catch {
     /* fall through */
   }

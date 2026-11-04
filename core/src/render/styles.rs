@@ -80,12 +80,15 @@ pub struct PageStyle {
     /// Page number pattern: "1", "۱", "i", "1 / 1" ...
     pub numbering: Option<String>,
     pub background: Option<String>,
+    /// Digits of heading numbers: auto (Persian in RTL documents) | persian |
+    /// latin | arabic. Unset = as written in each heading's `numbering`.
+    pub heading_digits: Option<String>,
 }
 
 impl PageStyle {
     pub fn merge(&mut self, o: &Self) {
         macro_rules! take { ($($f:ident),*) => { $(if o.$f.is_some() { self.$f = o.$f.clone(); })* } }
-        take!(paper, orientation, margin, columns, skip_first, numbering, background);
+        take!(paper, orientation, margin, columns, skip_first, numbering, background, heading_digits);
         for (mine, theirs) in [(&mut self.header, &o.header), (&mut self.footer, &o.footer)] {
             match (mine.as_mut(), theirs) {
                 (Some(m), Some(t)) => m.merge(t),
@@ -197,6 +200,25 @@ fn align(s: &str) -> Option<&'static str> {
 fn numbering(s: &str) -> Option<String> {
     let s = s.trim();
     (!s.is_empty() && s != "none").then(|| q(s))
+}
+
+/// Rewrite the counting digit of a numbering pattern ("1", "۱" or "١") in the
+/// chosen style; letters and Roman numerals are left alone.
+pub fn with_digits(pattern: &str, digits: Option<&str>, rtl: bool) -> String {
+    let target = match digits.map(str::trim) {
+        Some("persian" | "fa") => '۱',
+        Some("arabic" | "arabic-indic") => '١',
+        Some("latin" | "western" | "en") => '1',
+        Some("auto") => {
+            if rtl {
+                '۱'
+            } else {
+                '1'
+            }
+        }
+        _ => return pattern.to_string(),
+    };
+    pattern.chars().map(|c| if matches!(c, '1' | '۱' | '١') { target } else { c }).collect()
 }
 
 /// Typst font list: Latin first, then Persian (Typst falls back per glyph).
@@ -435,7 +457,8 @@ pub fn prelude(theme: &Theme, meta: &Meta) -> String {
         if !blk.is_empty() {
             o.push_str(&format!("#show {sel}: set block({})\n", blk.join(", ")));
         }
-        if let Some(n) = st.numbering.as_deref().and_then(numbering) {
+        let pat = st.numbering.as_deref().map(|n| with_digits(n, p.heading_digits.as_deref(), theme.is_rtl()));
+        if let Some(n) = pat.as_deref().and_then(numbering) {
             o.push_str(&format!("#show {sel}: set heading(numbering: {n})\n"));
         }
         if let Some(a) = st.align.as_deref().and_then(align) {
@@ -532,6 +555,17 @@ pub fn title_block(theme: &Theme, meta: &Meta, subtitle: Option<&str>) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn heading_digit_styles() {
+        assert_eq!(with_digits("۱.۱.", Some("latin"), true), "1.1.");
+        assert_eq!(with_digits("1.1.", Some("persian"), false), "۱.۱.");
+        assert_eq!(with_digits("1.", Some("arabic"), false), "١.");
+        assert_eq!(with_digits("۱.", Some("auto"), false), "1.");
+        assert_eq!(with_digits("1.", Some("auto"), true), "۱.");
+        assert_eq!(with_digits("I.", Some("persian"), true), "I.");
+        assert_eq!(with_digits("۱.", None, false), "۱.");
+    }
 
     #[test]
     fn builtin_themes_parse() {

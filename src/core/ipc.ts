@@ -79,6 +79,7 @@ export interface PageStyle {
   "skip-first"?: boolean | null;
   numbering?: string | null;
   background?: string | null;
+  "heading-digits"?: string | null;
 }
 
 export interface Theme {

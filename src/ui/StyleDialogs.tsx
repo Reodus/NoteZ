@@ -76,6 +76,11 @@ const NUMBERING = [
   { v: "I.", l: "I.  II.  III." },
   { v: "A.", l: "A.  B.  C." },
   { v: "a)", l: "a)  b)  c)" },
+  { v: "1)", l: "1)  2)  3)" },
+  { v: "(1)", l: "(1)  (2)  (3)" },
+  { v: "1-1", l: "1-1  1-2" },
+  { v: "i.", l: "i.  ii.  iii." },
+  { v: "α.", l: "α.  β.  γ." },
 ];
 
 function ScopeSwitch(props: { scope: "note" | "theme"; onChange: (s: "note" | "theme") => void; themeId: string }) {
@@ -383,6 +388,15 @@ export function PageSetupDialog(props: { onClose: () => void }) {
                 <option value="i">i, ii, iii</option>
                 <option value="I">I, II, III</option>
                 <option value="a">a, b, c</option>
+              </select>
+            </Field>
+            <Field label="Heading number digits" hint="Applies to numbered headings (set the numbering shape per heading style).">
+              <select class="input" value={pg["heading-digits"] ?? ""} onChange={(e) => setPg("heading-digits", e.currentTarget.value || null)}>
+                <option value="">As set in each heading style</option>
+                <option value="auto">Automatic (Persian in Persian documents)</option>
+                <option value="persian">Persian — ۱.۲.۳</option>
+                <option value="latin">Western — 1.2.3</option>
+                <option value="arabic">Arabic-Indic — ١.٢.٣</option>
               </select>
             </Field>
           </div>

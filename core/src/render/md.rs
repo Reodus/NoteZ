@@ -293,7 +293,8 @@ fn rewrite_spans(line: &str) -> String {
 /// Line-preserving rewrite of NoteZ syntax into HTML markers that the
 /// CommonMark parser passes through.
 pub fn preprocess(src: &str) -> String {
-    let mut out = String::with_capacity(src.len() + 64);
+    let mut lines: Vec<(String, &str)> = Vec::new();
+    let mut blank: Vec<usize> = Vec::new();
     let mut fence: Option<(char, usize)> = None;
     let mut in_comment = false;
     for line in src.split_inclusive('\n') {
@@ -312,30 +313,71 @@ pub fn preprocess(src: &str) -> String {
                     Some((c, len)) if c == fc && n >= len && trimmed[n..].trim().is_empty() => fence = None,
                     _ => {}
                 }
-                out.push_str(line);
+                lines.push((body.to_string(), nl));
                 continue;
             }
         }
         if fence.is_some() {
-            out.push_str(line);
+            lines.push((body.to_string(), nl));
             continue;
         }
         if let Some(rest) = trimmed.strip_prefix(":::") {
             let attrs = rest.trim();
-            if attrs.is_empty() {
-                out.push_str("<!--nz:/div-->");
-            } else {
-                out.push_str(&format!("<!--nz:div {}-->", attrs.replace("--", "")));
-            }
-            out.push_str(nl);
+            let marker = if attrs.is_empty() { "<!--nz:/div-->".to_string() } else { format!("<!--nz:div {}-->", attrs.replace("--", "")) };
+            lines.push((marker, nl));
             continue;
         }
+        let was_comment = in_comment;
         let body = rewrite_obsidian(body, &mut in_comment);
         let body = rewrite_callout(&body);
-        out.push_str(&rewrite_spans(&body));
+        let body = rewrite_spans(&body);
+        if !was_comment && body.trim().is_empty() {
+            blank.push(lines.len());
+        }
+        lines.push((body, nl));
+    }
+    mark_blank_runs(&mut lines, &blank);
+    let mut out = String::with_capacity(src.len() + 64);
+    for (body, nl) in lines {
+        out.push_str(&body);
         out.push_str(nl);
     }
     out
+}
+
+/// Extra empty lines become vertical space, as they look in the editor
+/// (Markdown would collapse them). In a run of `n >= 2` blank lines the
+/// second becomes `<!--nz:vspace n-1-->`, so the line count is unchanged.
+/// Skipped where an HTML block would break the structure: before indented
+/// lines (list continuations, indented code) and between list items.
+fn mark_blank_runs(lines: &mut [(String, &str)], blank: &[usize]) {
+    let is_item = |l: &str| {
+        let t = l.trim_start();
+        t.starts_with("- ") || t.starts_with("* ") || t.starts_with("+ ") || {
+            let d = t.chars().take_while(|c| c.is_ascii_digit()).count();
+            d > 0 && (t[d..].starts_with(". ") || t[d..].starts_with(") "))
+        }
+    };
+    let mut i = 0;
+    while i < blank.len() {
+        let start = blank[i];
+        let mut end = start;
+        while i + 1 < blank.len() && blank[i + 1] == end + 1 {
+            i += 1;
+            end += 1;
+        }
+        i += 1;
+        let n = end - start + 1;
+        if n < 2 || start == 0 || end + 1 >= lines.len() {
+            continue;
+        }
+        let prev = &lines[start - 1].0;
+        let next = &lines[end + 1].0;
+        if next.starts_with([' ', '\t']) || (is_item(prev) && is_item(next)) || prev.trim_start().starts_with('|') && next.trim_start().starts_with('|') {
+            continue;
+        }
+        lines[start + 1].0 = format!("<!--nz:vspace {}-->", n - 1);
+    }
 }
 
 // ---------------------------------------------------------------- converter
@@ -549,7 +591,14 @@ impl<'a> Converter<'a> {
                 self.deliver(format!("{body}\n\n"), plain, start);
             }
             Frame::Heading { level, id } => {
-                let label = id.map(|i| format!(" <{}>", sanitize_label(&i))).unwrap_or_default();
+                // Explicit `{#id}`, else `h:<slug>` so `[[#Heading]]` links can find it.
+                let label = match id {
+                    Some(i) => format!(" <{}>", sanitize_label(&i)),
+                    None => match heading_slug(&plain) {
+                        s if s.is_empty() => String::new(),
+                        s => format!(" <h:{s}>"),
+                    },
+                };
                 let h = format!("#heading(level: {level})[{buf}]{label}");
                 let body = self.directed(&plain, h);
                 self.deliver(format!("{body}\n\n"), plain, start);
@@ -654,7 +703,13 @@ impl<'a> Converter<'a> {
             Frame::Underline => self.inline(format!("#underline[{buf}]"), plain),
             Frame::Mark => self.inline(format!("#highlight[{buf}]"), plain),
             Frame::Link { url, wiki } => {
-                let s = if wiki || url.starts_with('#') || !url.contains(':') {
+                let s = if let Some(slug) = url.strip_prefix('#').map(|h| heading_slug(&super::percent_decode(h))).filter(|s| !s.is_empty()) {
+                    // A heading in this note: a real PDF link when it exists.
+                    format!(
+                        "#context {{ let t = query(label({})); if t.len() > 0 {{ link(t.first().location())[#text(fill: rgb(\"#2f5fc4\"))[{buf}]] }} else [#text(fill: rgb(\"#2f5fc4\"))[{buf}]] }}",
+                        q(&format!("h:{slug}"))
+                    )
+                } else if wiki || url.starts_with('#') || !url.contains(':') {
                     // Note-to-note link: no target in a PDF, keep styled text.
                     format!("#text(fill: rgb(\"#2f5fc4\"))[{buf}]")
                 } else {
@@ -737,6 +792,9 @@ impl<'a> Converter<'a> {
                 self.push(Frame::Div(parse_attrs(attrs)));
             } else if inner == "nz:/div" {
                 self.close_div();
+            } else if let Some(n) = inner.strip_prefix("nz:vspace") {
+                let n: f32 = n.trim().parse().unwrap_or(1.0);
+                self.deliver(format!("#v({:.1}em)\n\n", n * 1.2), String::new(), None);
             } else if inner.eq_ignore_ascii_case("pagebreak") {
                 self.deliver("#pagebreak()\n\n".into(), String::new(), None);
             } else if inner.eq_ignore_ascii_case("toc") {
@@ -798,6 +856,19 @@ impl<'a> Converter<'a> {
         }
         Output { typst: self.pop().buf, checkpoints: self.checkpoints, packages: self.packages }
     }
+}
+
+/// Label-safe slug of a heading's text (`[[#Heading]]` targets).
+fn heading_slug(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.trim().chars().flat_map(char::to_lowercase) {
+        if c.is_alphanumeric() || matches!(c, '_' | '.') {
+            out.push(c);
+        } else if !out.ends_with('-') && !out.is_empty() {
+            out.push('-');
+        }
+    }
+    out.trim_end_matches('-').to_string()
 }
 
 fn sanitize_label(s: &str) -> String {
@@ -1071,6 +1142,30 @@ mod tests {
         assert_eq!(detect_dir("123 !!"), None);
         assert_eq!(detect_dir("windows یک سیستم عامل باحال"), Some(Dir::Rtl));
         assert_eq!(detect_dir("Visual Studio Code ویرایشگر"), Some(Dir::Ltr));
+    }
+
+    #[test]
+    fn same_note_heading_links() {
+        let out = conv("[[#مقدمه اول|برو]]\n\n## مقدمه اول\n\n[x](#Intro%20Two)\n\n# Intro Two\n");
+        assert!(out.contains("<h:مقدمه-اول>"), "{out}");
+        assert!(out.contains("label(\"h:مقدمه-اول\")"), "{out}");
+        assert!(out.contains("<h:intro-two>") && out.contains("label(\"h:intro-two\")"), "{out}");
+    }
+
+    #[test]
+    fn blank_lines_become_space() {
+        let out = conv("a\nb\n\n\n\nc\n\nd\n");
+        assert!(out.contains("a \\\nb"), "{out}");
+        assert_eq!(out.matches("#v(").count(), 1, "{out}");
+        assert!(out.contains("#v(2.4em)"), "{out}");
+        // Lists stay one list; indented continuations stay attached.
+        let out = conv("- x\n\n\n- y\n\n\n  more\n");
+        assert!(!out.contains("#v("), "{out}");
+        // Inside code fences nothing changes.
+        let out = conv("```\nx\n\n\n\ny\n```\n");
+        assert!(!out.contains("#v("), "{out}");
+        // Line count is preserved.
+        assert_eq!(preprocess("a\n\n\n\nb\n").lines().count(), 5);
     }
 
     #[test]

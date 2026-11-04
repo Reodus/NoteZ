@@ -260,7 +260,7 @@ export function hydrateImages(root: HTMLElement) {
   });
 }
 
-const CALLOUTS: Record<string, { label: string; icon: string }> = {
+export const CALLOUTS: Record<string, { label: string; icon: string; color?: string }> = {
   note: { label: "Note", icon: "ℹ" },
   info: { label: "Info", icon: "ℹ" },
   tip: { label: "Tip", icon: "💡" },
@@ -271,6 +271,10 @@ const CALLOUTS: Record<string, { label: string; icon: string }> = {
   success: { label: "Success", icon: "✓" },
   question: { label: "Question", icon: "?" },
   quote: { label: "Quote", icon: "❝" },
+  abstract: { label: "Summary", icon: "≡" },
+  example: { label: "Example", icon: "☰" },
+  todo: { label: "To do", icon: "☐" },
+  bug: { label: "Bug", icon: "🐞" },
 };
 
 class CalloutIcon extends WidgetType {

@@ -25,6 +25,13 @@ contextBridge.exposeInMainWorld("notezNative", {
   trash: (p) => call("trash", p),
   setZoom: (f) => webFrame.setZoomFactor(f),
   setSpellcheck: (on) => call("spellcheck", on),
+  replaceMisspelling: (w) => call("replace-misspelling", w),
+  addToDictionary: (w) => call("add-to-dictionary", w),
+  onContextMenu: (cb) => {
+    const h = (_e, info) => cb(info);
+    ipcRenderer.on("context-menu", h);
+    return () => ipcRenderer.removeListener("context-menu", h);
+  },
   onVaultFs: (cb) => {
     const h = (_e, paths) => cb(paths);
     ipcRenderer.on("vault-fs", h);

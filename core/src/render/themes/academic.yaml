@@ -5,6 +5,7 @@ page:
   paper: a4
   margin: 3cm 2.5cm 3cm 2.5cm
   numbering: "۱"
+  heading-digits: auto
   skip-first: true
   header: { left: "{title}", right: "{chapter}", line: true }
   footer: { center: "{page}" }

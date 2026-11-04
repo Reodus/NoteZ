@@ -139,6 +139,8 @@ ipcMain.handle("spellcheck", wrap(async (on) => {
     if (on) s.setSpellCheckerLanguages(["en-US", "fa"].filter((l) => s.availableSpellCheckerLanguages.includes(l)));
   }
 }));
+ipcMain.handle("replace-misspelling", wrap(async (word) => BrowserWindow.getFocusedWindow()?.webContents.replaceMisspelling(word)));
+ipcMain.handle("add-to-dictionary", wrap(async (word) => BrowserWindow.getFocusedWindow()?.webContents.session.addWordToSpellCheckerDictionary(word)));
 ipcMain.handle("dialog-ask", wrap(async (message, o = {}) => {
   const r = await dialog.showMessageBox(BrowserWindow.getFocusedWindow(), {
     type: o.kind === "warning" ? "warning" : o.kind === "error" ? "error" : "question",
@@ -206,13 +208,16 @@ function createWindow() {
   });
   win.once("ready-to-show", () => win.show());
   win.webContents.session.setSpellCheckerEnabled(false); // the UI turns it on (Settings → Editor)
-  // Right-click on a misspelled word: suggestions.
+  // Right-clicks the page didn't handle itself (the editor leaves them
+  // through on purpose): tell the UI, with spelling suggestions, so it can
+  // show one menu (src/editor/contextmenu.ts).
   win.webContents.on("context-menu", (_e, p) => {
-    if (!p.misspelledWord) return;
-    const items = p.dictionarySuggestions.slice(0, 6).map((s) => ({ label: s, click: () => win.webContents.replaceMisspelling(s) }));
-    if (!items.length) items.push({ label: "No suggestions", enabled: false });
-    items.push({ type: "separator" }, { label: "Add to dictionary", click: () => win.webContents.session.addWordToSpellCheckerDictionary(p.misspelledWord) });
-    Menu.buildFromTemplate(items).popup({ window: win });
+    win.webContents.send("context-menu", {
+      word: p.misspelledWord || "",
+      suggestions: p.misspelledWord ? p.dictionarySuggestions : [],
+      x: p.x,
+      y: p.y,
+    });
   });
   // Links never navigate the app window; they open in the browser.
   win.webContents.setWindowOpenHandler(({ url }) => {

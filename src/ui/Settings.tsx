@@ -3,7 +3,8 @@ import { Paintbrush, Type, Puzzle, Keyboard, Info, RefreshCw, FolderOpen, Files,
 import { openDialog, openPath } from "../core/native";
 import { app, notify } from "../core/app";
 import { ipc } from "../core/ipc";
-import { prefs, setPrefs, root } from "../core/store";
+import { prefs, setPrefs, root, state } from "../core/store";
+import { attachmentDir, pastedName } from "../editor/attachments";
 import { builtinPlugins, setPluginEnabled, setBuiltinEnabled, loadedPlugins } from "../core/plugins";
 import { templatesDir } from "../plugins/templates";
 import { ComboBox, Field, Modal, Segmented } from "./primitives";
@@ -236,9 +237,30 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
               <Segmented value={prefs.defaultNoteType} onChange={(v) => setPrefs("defaultNoteType", v as "md" | "typ")}
                 options={[{ value: "md", label: "Markdown (.md)" }, { value: "typ", label: "Typst (.typ)" }]} />
             </Field>
-            <Field label="Attachment folder" hint='Pasted and dropped files are copied here. Start with "./" for a folder next to the note (e.g. "./images").'>
-              <FolderInput value={prefs.attachmentFolder} placeholder="attachments" onChange={(v) => setPrefs("attachmentFolder", v || "attachments")} />
+            <Field label="Default location for new attachments" hint="Where pasted, dropped and inserted images and files are stored.">
+              <select class="input" value={prefs.attachmentMode} onChange={(e) => setPrefs("attachmentMode", e.currentTarget.value as any)}>
+                <option value="root">Vault folder (root)</option>
+                <option value="folder">In the folder specified below</option>
+                <option value="same">Same folder as current note</option>
+                <option value="subfolder">In subfolder under current note's folder</option>
+              </select>
             </Field>
+            <Show when={prefs.attachmentMode === "folder"}>
+              <Field label="Attachment folder path">
+                <FolderInput value={prefs.attachmentFolder} placeholder="attachments" onChange={(v) => setPrefs("attachmentFolder", v || "attachments")} />
+              </Field>
+            </Show>
+            <Show when={prefs.attachmentMode === "subfolder"}>
+              <Field label="Subfolder name" hint="Created inside the note's folder when needed.">
+                <input class="input" value={prefs.attachmentFolder} placeholder="attachments" onChange={(e) => setPrefs("attachmentFolder", e.currentTarget.value.trim().replace(/^[./]+|\/+$/g, "") || "attachments")} />
+              </Field>
+            </Show>
+            <Field label="Name for pasted images" hint="{{date:YYYYMMDDHHmmss}} = time of pasting, {{note}} = the note's name.">
+              <input class="input" value={prefs.attachmentName} placeholder="Pasted image {{date:YYYYMMDDHHmmss}}" onChange={(e) => setPrefs("attachmentName", e.currentTarget.value.trim() || "Pasted image {{date:YYYYMMDDHHmmss}}")} />
+            </Field>
+            <div class="field-hint attach-preview">
+              → {(() => { const d = attachmentDir(state.active); return (d ? d + "/" : "") + pastedName(state.active, "png"); })()}
+            </div>
             <Field label="Templates folder" hint={`Empty = find a top-level folder named like "Templates"${templatesDir() ? ` (now: ${templatesDir()})` : ""}.`}>
               <FolderInput value={prefs.templatesFolder} placeholder="auto" onChange={(v) => setPrefs("templatesFolder", v)} />
             </Field>

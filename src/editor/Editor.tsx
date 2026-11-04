@@ -16,6 +16,7 @@ import { app } from "../core/app";
 import {
   state, prefs, updateContent, setEditorView, setCursor, setActiveTheme, activeTheme,
   isDark, notesList, openNote, root,
+  editorView,
 } from "../core/store";
 import { ipc, stem, LinkInfo } from "../core/ipc";
 import { preview, schedulePreview } from "../core/render";
@@ -27,6 +28,9 @@ import { livePreview } from "./livepreview";
 import { mathAutoPair } from "./autopair";
 import { slashCompletion, slashIconRender } from "./slash";
 import { attachmentDrop } from "./attachments";
+import { trailingLine } from "./trailing";
+import { tableKeys, skipTableCaret } from "./tables";
+import { editorContextMenu } from "./contextmenu";
 import { openUrl } from "../core/native";
 import { toggleInline, setBlockStyle, setTitle, insertLink, BlockStyle } from "./format";
 
@@ -116,14 +120,48 @@ export function openLinkTarget(target: string): boolean {
     void openUrl(target);
     return true;
   }
-  const name = decodeURI(target.split("#")[0].split("|")[0].trim());
-  if (!name) return false;
+  const clean = target.split("|")[0].trim();
+  let name = clean.split("#")[0];
+  const heading = clean.includes("#") ? clean.slice(clean.indexOf("#") + 1) : "";
+  try {
+    name = decodeURI(name);
+  } catch {
+    /* keep as typed */
+  }
+  if (!name) return heading ? jumpToHeading(state.active, heading) : false;
   const hit =
     notesList().find((p) => p === name) ??
     notesList().find((p) => stem(p) === name.replace(/\.(md|typ)$/, "")) ??
     notesList().find((p) => p.endsWith("/" + name));
-  if (hit) openNote(hit);
+  if (hit) void openNote(hit).then(() => heading && jumpToHeading(hit, heading));
   return !!hit;
+}
+
+const normHeading = (s: string) => s.replace(/[#*_`=~\[\]]/g, "").replace(/[\s\u200c-]+/g, " ").trim().toLowerCase();
+
+/** Move the cursor of the open note `path` to heading `h` (`[[#Heading]]`). */
+function jumpToHeading(path: string | null, h: string): boolean {
+  const view = editorView();
+  if (!view || !path || state.active !== path) return false;
+  let want = h;
+  try {
+    want = decodeURIComponent(h);
+  } catch {
+    /* as is */
+  }
+  want = normHeading(want.replace(/^\^/, ""));
+  const doc = view.state.doc;
+  for (let n = 1; n <= doc.lines; n++) {
+    const line = doc.line(n);
+    const m = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line.text) ?? /^=+\s+(.*)$/.exec(line.text);
+    const text = m ? m[m.length - 1] : /\^([\w-]+)\s*$/.exec(line.text)?.[1] === h.replace(/^\^/, "") ? h : null;
+    if (text !== null && (normHeading(text) === want || text === h)) {
+      view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin: 40 }) });
+      view.focus();
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Ctrl+click on [[wikilinks]] and [text](target) links opens them. */
@@ -212,7 +250,11 @@ export default function Editor() {
         bidi,
         lintGutter(),
         linkClick,
+        editorContextMenu(openLinkTarget),
+        tableKeys,
+        skipTableCaret,
         attachmentDrop,
+        trailingLine(path.endsWith(".typ")),
         placeholder(path.endsWith(".typ") ? "= Start writing Typst…" : "شروع به نوشتن کنید… / Start writing…"),
         previewsComp.of(blockPreviews(prefs.inlinePreviews, isDark())),
         liveComp.of(live(path)),

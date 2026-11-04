@@ -4,9 +4,10 @@ import type { Completion, CompletionContext, CompletionResult } from "@codemirro
 import type { EditorView } from "@codemirror/view";
 import {
   setBlockStyle, toggleList, insertBlock, insertTable, insertMath, insertPageBreak, insertToc,
-  insertFootnote, insertFenced, insertLink, isTypst,
+  insertFootnote, insertFenced, insertLink, insertCallout, isTypst,
 } from "./format";
 import { TEMPLATES } from "../ui/DiagramGallery";
+import { CALLOUTS } from "./livepreview";
 import { setDialog } from "../core/store";
 import { app } from "../core/app";
 
@@ -36,10 +37,6 @@ const ITEMS: SlashItem[] = [
   { section: "Basic", title: "Numbered list", icon: "1.", keys: "ol number list لیست شماره", hint: "1.", run: (v) => toggleList(v, "number") },
   { section: "Basic", title: "To-do list", icon: "☑", keys: "todo task checkbox کار", hint: "- [ ]", run: (v) => toggleList(v, "task"), mdOnly: true },
   { section: "Basic", title: "Quote", icon: "❝", keys: "blockquote نقل قول", hint: ">", run: (v) => setBlockStyle(v, "quote") },
-  {
-    section: "Basic", title: "Callout", icon: "💡", keys: "note tip warning alert باکس نکته هشدار", mdOnly: true,
-    run: (v) => insertBlock(v, "> [!NOTE] Title\n> ", 10),
-  },
   { section: "Basic", title: "Divider", icon: "—", keys: "hr rule line separator جداکننده خط", hint: "---", run: (v) => insertBlock(v, isTypst() ? "#line(length: 100%)" : "---"), },
   { section: "Basic", title: "Table", icon: "▦", keys: "grid جدول", run: (v) => insertTable(v, 3, 3) },
   { section: "Basic", title: "Code block", icon: "</>", keys: "code snippet کد", hint: "```", run: (v) => insertFenced(v, "", ""), mdOnly: true },
@@ -48,6 +45,11 @@ const ITEMS: SlashItem[] = [
 
   { section: "Math", title: "Equation", icon: "∑", keys: "math latex formula فرمول معادله", hint: "$$", run: (v) => insertMath(v, true) },
   { section: "Math", title: "Inline math", icon: "x²", keys: "math inline فرمول", hint: "$", run: (v) => insertMath(v, false) },
+
+  ...Object.entries(CALLOUTS).map(([type, c]): SlashItem => ({
+    section: "Callouts", title: `Callout: ${c.label}`, icon: c.icon, keys: `callout box admonition ${type} باکس کادر`,
+    mdOnly: true, run: (v) => insertCallout(v, type),
+  })),
 
   { section: "Charts & diagrams", title: "Bar chart", icon: "📊", keys: "chart bar نمودار میله", run: diagram("bar") },
   { section: "Charts & diagrams", title: "Line chart", icon: "📈", keys: "chart line plot نمودار خطی", run: diagram("line") },

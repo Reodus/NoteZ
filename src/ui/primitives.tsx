@@ -139,6 +139,8 @@ export interface MenuItem {
   danger?: boolean;
   hint?: string;
   run: () => void;
+  /** A submenu, shown on hover. */
+  items?: (MenuItem | "-")[];
 }
 
 const [menu, setMenu] = createSignal<{ x: number; y: number; items: (MenuItem | "-")[] } | null>(null);
@@ -168,25 +170,63 @@ export function MenuHost() {
             style={{ left: `${Math.min(m().x, window.innerWidth - 220)}px`, top: `${Math.min(m().y, window.innerHeight - m().items.length * 32 - 16)}px` }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <For each={m().items}>
-              {(it) =>
-                it === "-" ? (
-                  <div class="menu-sep" />
-                ) : (
-                  <button class="menu-item" classList={{ danger: it.danger }} onClick={() => (close(), it.run())}>
-                    <span class="menu-icon">{it.icon}</span>
-                    <span class="menu-label">{it.label}</span>
-                    <Show when={it.hint}>
-                      <kbd>{it.hint}</kbd>
-                    </Show>
-                  </button>
-                )
-              }
-            </For>
+            <MenuList items={m().items} close={close} />
           </div>
         </Portal>
       )}
     </Show>
+  );
+}
+
+function MenuList(props: { items: (MenuItem | "-")[]; close: () => void }) {
+  const [open, setOpen] = createSignal<number | null>(null);
+  let hoverTimer = 0;
+  return (
+    <For each={props.items}>
+      {(it, i) =>
+        it === "-" ? (
+          <div class="menu-sep" />
+        ) : (
+          <div
+            class="menu-entry"
+            onMouseEnter={() => {
+              clearTimeout(hoverTimer);
+              hoverTimer = window.setTimeout(() => setOpen(it.items ? i() : null), it.items ? 60 : 120);
+            }}
+          >
+            <button
+              class="menu-item"
+              classList={{ danger: it.danger, "has-sub": !!it.items, open: open() === i() }}
+              onClick={() => (it.items ? setOpen(i()) : (props.close(), it.run()))}
+            >
+              <span class="menu-icon">{it.icon}</span>
+              <span class="menu-label">{it.label}</span>
+              <Show when={it.hint}>
+                <kbd>{it.hint}</kbd>
+              </Show>
+              <Show when={it.items}>
+                <span class="menu-sub-caret">›</span>
+              </Show>
+            </button>
+            <Show when={it.items && open() === i()}>
+              <div
+                class="context-menu submenu"
+                ref={(el) =>
+                  requestAnimationFrame(() => {
+                    // Flip left / up when the submenu would leave the window.
+                    const r = el.getBoundingClientRect();
+                    if (r.right > window.innerWidth - 4) el.classList.add("left");
+                    if (r.bottom > window.innerHeight - 4) el.style.top = `${Math.max(-r.top + 4, window.innerHeight - 4 - r.bottom)}px`;
+                  })
+                }
+              >
+                <MenuList items={it.items!} close={props.close} />
+              </div>
+            </Show>
+          </div>
+        )
+      }
+    </For>
   );
 }
 

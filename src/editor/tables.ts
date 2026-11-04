@@ -10,11 +10,14 @@
 // - Right-click: insert/delete/move rows and columns, align, sort, format,
 //   or edit the table as plain Markdown.
 // - The source is re-aligned (padded pipes) on Tab/Enter and when you leave.
-import { EditorState, StateEffect, StateField } from "@codemirror/state";
-import { EditorView, WidgetType } from "@codemirror/view";
+import { EditorState, Prec, StateEffect, StateField } from "@codemirror/state";
+import { EditorView, WidgetType, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { undo, redo } from "@codemirror/commands";
-import { openMenu, MenuItem } from "../ui/primitives";
+import { askText, openMenu, MenuItem } from "../ui/primitives";
+import { openPath } from "../core/native";
+import { root } from "../core/store";
+import { saveFiles } from "./attachments";
 import { getLiveOpts, hydrateImages, hydrateMath, inlineHtml } from "./livepreview";
 
 type Align = "" | "left" | "center" | "right";
@@ -266,6 +269,110 @@ function commit(wrap: HTMLElement, m: Model, focus?: { r: number; c: number } | 
   }
 }
 
+// --------------------------------------------- keyboard into tables
+
+/**
+ * Arrow keys next to a rendered table go into its cells (like Obsidian)
+ * instead of putting the caret beside the widget, where it is drawn as tall
+ * as the whole table.
+ */
+function enterTable(view: EditorView, dir: "up" | "down" | "left" | "right"): boolean {
+  const s = view.state;
+  const sel = s.selection.main;
+  if (!sel.empty) return false;
+  const line = s.doc.lineAt(sel.head);
+  const forward = dir === "down" || dir === "right";
+  if (dir === "right" && sel.head !== line.to) return false;
+  if (dir === "left" && sel.head !== line.from) return false;
+  // Already on the table's own first/last line (caret beside the widget)?
+  let t = tableAt(s, sel.head);
+  const beside = !!t && sel.head >= t.from && sel.head <= t.to;
+  // A wrapped line: Up/Down first move within it.
+  if (!beside && (dir === "up" || dir === "down") && s.doc.lineAt(view.moveVertically(sel, forward).head).number === line.number) return false;
+  if (!beside) {
+    const n = forward ? line.number + 1 : line.number - 1;
+    if (n < 1 || n > s.doc.lines) return false;
+    const next = s.doc.line(n);
+    t = tableAt(s, next.from);
+    if (!t || (forward ? t.from !== next.from : t.to !== next.to)) return false;
+  }
+  if (!t || s.field(rawTableField, false) === t.from) return false;
+  const wrap = findWrap(view, t.from);
+  const st = wrap && live.get(wrap);
+  if (!wrap || !st) return false;
+  const m = parse(st.src);
+  const lastRow = m.rows.length;
+  const lastCol = m.header.length - 1;
+  if (dir === "down") focusCell(wrap, 0, 0);
+  else if (dir === "up") focusCell(wrap, lastRow, 0);
+  else if (dir === "right") focusCell(wrap, 0, 0);
+  else focusCell(wrap, lastRow, lastCol);
+  return true;
+}
+
+export const tableKeys = Prec.high(
+  keymap.of([
+    { key: "ArrowDown", run: (v) => enterTable(v, "down") },
+    { key: "ArrowUp", run: (v) => enterTable(v, "up") },
+    { key: "ArrowRight", run: (v) => enterTable(v, getComputedStyle(v.contentDOM).direction === "rtl" ? "left" : "right") },
+    { key: "ArrowLeft", run: (v) => enterTable(v, getComputedStyle(v.contentDOM).direction === "rtl" ? "right" : "left") },
+  ]),
+);
+
+/** Keyboard moves (Page Up/Down, Ctrl+Home…) that land beside a rendered table skip past it. */
+export const skipTableCaret = EditorView.updateListener.of((u) => {
+  if (!u.selectionSet || u.docChanged) return;
+  const tr = u.transactions.find((t) => t.isUserEvent("select") && !t.isUserEvent("select.pointer"));
+  if (!tr) return;
+  const s = u.state;
+  const sel = s.selection.main;
+  if (!sel.empty) return;
+  const t = tableAt(s, sel.head);
+  if (!t || sel.head < t.from || sel.head > t.to || s.field(rawTableField, false) === t.from) return;
+  if (!findWrap(u.view, t.from)) return;
+  const down = sel.head >= u.startState.selection.main.head;
+  const target = down ? Math.min(s.doc.length, t.to + 1) : Math.max(0, t.from - 1);
+  if (target >= t.from && target <= t.to) return;
+  queueMicrotask(() => u.view.dispatch({ selection: { anchor: target }, scrollIntoView: true }));
+});
+
+// ------------------------------------------- toolbar ↔ focused cell
+
+let activeCellEl: HTMLElement | null = null;
+const cellListeners = new Set<() => void>();
+const setCurrentCell = (cell: HTMLElement | null) => {
+  if (cell === activeCellEl) return;
+  activeCellEl = cell;
+  cellListeners.forEach((f) => f());
+};
+
+/** Call `fn` whenever a table cell gains or loses focus. */
+export function onTableCellFocus(fn: () => void): () => void {
+  cellListeners.add(fn);
+  return () => cellListeners.delete(fn);
+}
+
+/** Alignment of the focused cell's column, or null when no cell is focused. */
+export function tableCellAlign(): Align | null {
+  const cell = activeCellEl;
+  const wrap = cell?.isConnected ? cell.closest<HTMLElement>(".nz-edit-table") : null;
+  const st = wrap && live.get(wrap);
+  if (!cell || !st) return null;
+  return parse(st.src).aligns[Number(cell.dataset.c)] ?? "";
+}
+
+/** Toolbar alignment inside a table: Markdown aligns whole columns. */
+export function alignTableColumn(a: Align): boolean {
+  const cell = activeCellEl;
+  const wrap = cell?.isConnected ? cell.closest<HTMLElement>(".nz-edit-table") : null;
+  if (!cell || !wrap || !live.has(wrap)) return false;
+  const r = Number(cell.dataset.r);
+  const c = Number(cell.dataset.c);
+  edit(wrap, (m) => ((m.aligns[c] = a), { r, c }));
+  cellListeners.forEach((f) => f());
+  return true;
+}
+
 /** Apply a structural change to the table under `wrap`. */
 function edit(wrap: HTMLElement, fn: (m: Model) => { r: number; c: number } | null | void) {
   const st = live.get(wrap);
@@ -369,7 +476,9 @@ function leave(wrap: HTMLElement, where: "before" | "after") {
 function wire(wrap: HTMLElement) {
   wrap.addEventListener("focusin", (e) => {
     const cell = e.target as HTMLElement;
-    if (!cell.classList?.contains("nz-cell") || cell.classList.contains("editing")) return;
+    if (!cell.classList?.contains("nz-cell")) return;
+    setCurrentCell(cell);
+    if (cell.classList.contains("editing")) return;
     cell.classList.add("editing");
     cell.textContent = unesc(cell.dataset.raw ?? "");
     caretToEnd(cell);
@@ -383,6 +492,7 @@ function wire(wrap: HTMLElement) {
     }
     // Leaving the table entirely: tidy the source (Advanced Tables style).
     const next = e.relatedTarget as Node | null;
+    if (!(next as HTMLElement | null)?.classList?.contains("nz-cell")) setCurrentCell(null);
     if (!next || !wrap.contains(next)) {
       const st = live.get(wrap);
       if (st && wrap.isConnected) queueMicrotask(() => wrap.isConnected && commit(wrap, parse(st.src)));
@@ -395,14 +505,76 @@ function wire(wrap: HTMLElement) {
   });
 
   wrap.addEventListener("paste", (e) => {
-    const cell = e.target as HTMLElement;
-    if (!cell.classList?.contains("nz-cell")) return;
+    const cell = (e.target as HTMLElement).closest?.(".nz-cell") as HTMLElement | null;
+    if (!cell) return;
     e.preventDefault();
-    const text = (e.clipboardData?.getData("text/plain") ?? "").replace(/\r?\n/g, " ");
-    document.execCommand("insertText", false, text);
+    const files = [...(e.clipboardData?.files ?? [])];
+    if (files.length) return void addFilesToCell(wrap, cell, files);
+    let text = e.clipboardData?.getData("text/plain") ?? "";
+    // An image copied from the editor arrives as HTML only.
+    if (!text.trim()) text = imagesFromHtml(e.clipboardData?.getData("text/html") ?? "");
+    document.execCommand("insertText", false, text.replace(/\r?\n/g, " "));
+  });
+
+  wrap.addEventListener("dragover", (e) => {
+    if ((e.target as HTMLElement).closest?.(".nz-cell") && e.dataTransfer?.types.includes("Files")) e.preventDefault();
+  });
+  wrap.addEventListener("drop", (e) => {
+    const cell = (e.target as HTMLElement).closest?.(".nz-cell") as HTMLElement | null;
+    const files = [...(e.dataTransfer?.files ?? [])];
+    if (!cell || !files.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    void addFilesToCell(wrap, cell, files);
+  });
+
+  // Clicking an image selects it (outline); double-click / Enter edits.
+  wrap.tabIndex = -1;
+  wrap.addEventListener("dblclick", (e) => {
+    const img = (e.target as HTMLElement).closest?.("img");
+    const cell = img?.closest(".nz-cell") as HTMLElement | null;
+    if (!img || !cell || cell.classList.contains("editing")) return;
+    e.preventDefault();
+    editAtImage(cell, imgIndex(cell, img));
+  });
+  wrap.addEventListener("keydown", (e) => {
+    if (e.target !== wrap || !selImg || selImg.wrap !== wrap) return;
+    const { cell, idx } = selImg;
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      removeImage(wrap, cell, idx);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      editAtImage(cell, idx);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      clearImgSel();
+      leave(wrap, "after");
+    }
+  });
+  const copyImg = (e: ClipboardEvent, cut: boolean) => {
+    if (e.target !== wrap || !selImg || selImg.wrap !== wrap) return;
+    const span = imageSpans(selImg.cell.dataset.raw ?? "")[selImg.idx];
+    if (!span) return;
+    e.preventDefault();
+    e.clipboardData?.setData("text/plain", unesc(span.text));
+    if (cut) removeImage(wrap, selImg.cell, selImg.idx);
+  };
+  wrap.addEventListener("copy", (e) => copyImg(e, false));
+  wrap.addEventListener("cut", (e) => copyImg(e, true));
+  wrap.addEventListener("focusout", (e) => {
+    if (e.target === wrap && selImg?.wrap === wrap) clearImgSel();
   });
 
   wrap.addEventListener("mousedown", (e) => {
+    const img = (e.target as HTMLElement).closest?.("img");
+    const imgCell = img?.closest(".nz-cell") as HTMLElement | null;
+    if (img && imgCell && !imgCell.classList.contains("editing")) {
+      e.preventDefault();
+      selectImage(wrap, imgCell, img);
+      return;
+    }
+    clearImgSel();
     const link = (e.target as HTMLElement).closest?.(".cm-nz-lp-link") as HTMLElement | null;
     const cell = (e.target as HTMLElement).closest?.(".nz-cell");
     if (link && cell && !cell.classList.contains("editing") && e.button === 0 && link.dataset.target) {
@@ -489,6 +661,11 @@ function wire(wrap: HTMLElement) {
     const r = Number(cell.dataset.r);
     const c = Number(cell.dataset.c);
     const st = live.get(wrap)!;
+    const img = (e.target as HTMLElement).closest?.("img");
+    if (img && !cell.classList.contains("editing")) {
+      selectImage(wrap, cell, img);
+      return openMenu(e, imageMenu(wrap, cell, imgIndex(cell, img)));
+    }
     const m0 = parse(st.src);
     const body = r - 1; // body row index (-1 = header)
     const items: (MenuItem | "-")[] = [
@@ -525,6 +702,156 @@ function wire(wrap: HTMLElement) {
       { label: "Delete table", danger: true, run: () => deleteTable(wrap) },
     ];
     openMenu(e, items);
+  });
+}
+
+// ------------------------------------------------------ images in cells
+
+const IMG_MD = /!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)\s]+\)/g;
+
+/** Image embeds in a cell's (escaped) source, in display order. */
+function imageSpans(raw: string): { from: number; to: number; text: string }[] {
+  return [...raw.matchAll(IMG_MD)].map((m) => ({ from: m.index!, to: m.index! + m[0].length, text: m[0] }));
+}
+
+let selImg: { wrap: HTMLElement; cell: HTMLElement; idx: number } | null = null;
+
+function clearImgSel() {
+  document.querySelectorAll(".nz-cell img.nz-img-selected").forEach((i) => i.classList.remove("nz-img-selected"));
+  selImg = null;
+}
+
+const imgIndex = (cell: HTMLElement, img: Element) => [...cell.querySelectorAll("img")].indexOf(img as HTMLImageElement);
+
+function selectImage(wrap: HTMLElement, cell: HTMLElement, img: HTMLImageElement) {
+  clearImgSel();
+  (document.activeElement as HTMLElement | null)?.closest?.(".nz-cell") && (document.activeElement as HTMLElement).blur();
+  img.classList.add("nz-img-selected");
+  selImg = { wrap, cell, idx: imgIndex(cell, img) };
+  wrap.focus({ preventScroll: true });
+}
+
+/** Read/write one cell of the model by its (r, c) data attributes. */
+function cellText(m: Model, cell: HTMLElement): string {
+  const r = Number(cell.dataset.r);
+  const c = Number(cell.dataset.c);
+  return (r === 0 ? m.header[c] : m.rows[r - 1]?.[c]) ?? "";
+}
+function setCellText(m: Model, cell: HTMLElement, v: string) {
+  const r = Number(cell.dataset.r);
+  const c = Number(cell.dataset.c);
+  if (r === 0) m.header[c] = v;
+  else if (m.rows[r - 1]) m.rows[r - 1][c] = v;
+}
+
+function removeImage(wrap: HTMLElement, cell: HTMLElement, idx: number) {
+  clearImgSel();
+  edit(wrap, (m) => {
+    const raw = cellText(m, cell);
+    const span = imageSpans(raw)[idx];
+    if (span) setCellText(m, cell, (raw.slice(0, span.from) + raw.slice(span.to)).replace(/ {2,}/g, " ").trim());
+  });
+}
+
+function replaceImage(wrap: HTMLElement, cell: HTMLElement, idx: number, text: string) {
+  edit(wrap, (m) => {
+    const raw = cellText(m, cell);
+    const span = imageSpans(raw)[idx];
+    if (span) setCellText(m, cell, raw.slice(0, span.from) + text + raw.slice(span.to));
+  });
+}
+
+/** Start editing the cell with the caret just after image `idx`'s source. */
+function editAtImage(cell: HTMLElement, idx: number) {
+  clearImgSel();
+  const raw = cell.dataset.raw ?? "";
+  const span = imageSpans(raw)[idx];
+  cell.focus();
+  if (!span) return;
+  const off = unesc(raw.slice(0, span.to)).length;
+  const node = cell.firstChild;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return;
+  const sel = window.getSelection();
+  const rg = document.createRange();
+  rg.setStart(node, Math.min(off, node.textContent!.length));
+  rg.collapse(true);
+  sel?.removeAllRanges();
+  sel?.addRange(rg);
+}
+
+/** `![[x|300]]` / `![alt|300](u)` → width; `null` when none. */
+function imageWidth(md: string): string | null {
+  const w = /^!\[\[[^\]|\\]*(?:\\?\|(\d+)(?:x\d+)?)?\]\]$/.exec(md)?.[1] ?? /^!\[[^\]]*?\|(\d+)(?:x\d+)?\]/.exec(md)?.[1];
+  return w ?? null;
+}
+
+function withWidth(md: string, w: string): string {
+  const px = w.trim().replace(/px$/, "");
+  if (md.startsWith("![[")) {
+    const target = md.slice(3, -2).split(/\\?\|/)[0];
+    return px ? `![[${target}\\|${px}]]` : `![[${target}]]`;
+  }
+  return md.replace(/^!\[([^\]|]*)(?:\|[^\]]*)?\]/, (_, alt) => (px ? `![${alt}|${px}]` : `![${alt}]`));
+}
+
+function imageTarget(md: string): string {
+  return md.startsWith("![[") ? md.slice(3, -2).split(/\\?\|/)[0] : decodeURI(/\(([^)\s]+)\)$/.exec(md)?.[1] ?? "");
+}
+
+function imageMenu(wrap: HTMLElement, cell: HTMLElement, idx: number): (MenuItem | "-")[] {
+  const span = imageSpans(cell.dataset.raw ?? "")[idx];
+  if (!span) return [];
+  const md = span.text;
+  return [
+    {
+      label: "Open image",
+      run: async () => {
+        const o = getLiveOpts();
+        const abs = await o?.resolveAsset?.(o.notePath() ?? "", imageTarget(md));
+        if (abs) void openPath(abs);
+      },
+    },
+    { label: "Copy image link", run: () => void navigator.clipboard.writeText(unesc(md)) },
+    {
+      label: "Resize…",
+      hint: imageWidth(md) ? `${imageWidth(md)}px` : "",
+      run: async () => {
+        const w = await askText("Image width in pixels (empty = original size)", imageWidth(md) ?? "", "e.g. 300");
+        if (w === null || (w.trim() && !/^\d+(px)?$/.test(w.trim()))) return;
+        replaceImage(wrap, cell, idx, withWidth(md, w));
+      },
+    },
+    { label: "Edit source", run: () => editAtImage(cell, idx) },
+    "-",
+    { label: "Remove image", danger: true, run: () => removeImage(wrap, cell, idx) },
+  ];
+}
+
+/** `<img src="notez-asset://local/abs">` (copied from the editor) → links. */
+function imagesFromHtml(html: string): string {
+  const base = root();
+  const out: string[] = [];
+  for (const m of html.matchAll(/<img[^>]+src="([^"]+)"/g)) {
+    let src = m[1].replace(/&amp;/g, "&");
+    if (src.startsWith("notez-asset://local")) {
+      const abs = decodeURIComponent(src.slice("notez-asset://local".length));
+      src = base && abs.startsWith(base + "/") ? abs.slice(base.length + 1) : abs;
+      out.push(`![](${encodeURI(src)})`);
+    } else if (/^https?:/.test(src)) out.push(`![](${src})`);
+  }
+  return out.join(" ");
+}
+
+async function addFilesToCell(wrap: HTMLElement, cell: HTMLElement, files: File[]) {
+  const links = (await saveFiles(files)).map(esc).join(" ");
+  if (!links || !wrap.isConnected) return;
+  if (document.activeElement === cell && cell.classList.contains("editing")) {
+    document.execCommand("insertText", false, links);
+    return;
+  }
+  edit(wrap, (m) => {
+    const raw = cellText(m, cell);
+    setCellText(m, cell, raw ? `${raw} ${links}` : links);
   });
 }
 

@@ -19,6 +19,9 @@ interface Native {
   trash(path: string): Promise<void>;
   setZoom(factor: number): void;
   setSpellcheck(on: boolean): Promise<void>;
+  replaceMisspelling?(word: string): Promise<void>;
+  addToDictionary?(word: string): Promise<void>;
+  onContextMenu?(cb: (info: { word: string; suggestions: string[]; x: number; y: number }) => void): () => void;
 }
 
 const native: Native = (window as unknown as { notezNative: Native }).notezNative;
@@ -35,6 +38,11 @@ export const ask = (message: string, o?: Parameters<Native["ask"]>[1]) => native
 export const trashPath = (p: string) => native.trash(p);
 export const setZoom = (f: number) => native.setZoom(f);
 export const setSpellcheck = (on: boolean) => native.setSpellcheck(on);
+export const replaceMisspelling = (w: string) => void native.replaceMisspelling?.(w);
+export const addToDictionary = (w: string) => void native.addToDictionary?.(w);
+/** Right-clicks the page didn't prevent, with the misspelled word (if any). */
+export const onSpellMenu = (cb: (info: { word: string; suggestions: string[]; x: number; y: number }) => void) =>
+  native?.onContextMenu?.(cb) ?? (() => {});
 /** Absolute path of a dropped/pasted File, or null (e.g. a clipboard image). */
 export const pathForFile = (file: File) => native.pathForFile(file);
 /** Files changed on disk (vault-relative paths), batched. */

@@ -1,21 +1,23 @@
-import { createMemo, createSignal, For, JSX, Show } from "solid-js";
+import { createMemo, createSignal, For, JSX, onCleanup, Show } from "solid-js";
 import { openDialog as pickFile } from "../core/native";
 import {
   Bold, Italic, Underline, Strikethrough, Code, AlignLeft, AlignCenter, AlignRight, AlignJustify,
   List, ListOrdered, ListChecks, Link, Image, Table, Sigma, Shapes, FileDown, ChevronDown, Highlighter,
-  Baseline, Palette, FileCog, SeparatorHorizontal, Footprints, ListTree, PilcrowLeft, PilcrowRight, Type,
+  Baseline, Palette, FileCog, SeparatorHorizontal, Footprints, ListTree, PilcrowLeft, PilcrowRight, Type, MessageSquareQuote,
 } from "lucide-solid";
 import { app, notify } from "../core/app";
 import { editorView, cursor, activeTheme, setDialog, state } from "../core/store";
 import { attachmentDir } from "../editor/attachments";
+import { alignTableColumn, onTableCellFocus, tableCellAlign } from "../editor/tables";
 import { ipc, TextStyle } from "../core/ipc";
 import { fontList, FONT_SIZES } from "../core/fonts";
 import { exportPdf } from "../core/render";
 import { readFrontmatter } from "../core/frontmatter";
 import {
   toggleInline, setBlockStyle, setTitle, blockStyleAt, BlockStyle, blockAttr, setBlockAttr, applySpan, toggleList,
-  insertLink, insertImage, insertTable, insertMath, insertPageBreak, insertFootnote, insertToc, isTypst,
+  insertLink, insertImage, insertTable, insertMath, insertPageBreak, insertFootnote, insertToc, isTypst, insertCallout,
 } from "../editor/format";
+import { CALLOUTS } from "../editor/livepreview";
 import { ColorGrid, ComboBox, Popover, SvgIcon } from "./primitives";
 
 const STYLE_NAMES: Record<BlockStyle, string> = {
@@ -87,6 +89,23 @@ export default function Toolbar() {
   const run = (fn: (v: NonNullable<ReturnType<typeof view>>) => void) => () => {
     const v = view();
     if (v) fn(v);
+  };
+
+  // A focused table cell takes over the alignment buttons (column alignment).
+  const [cellTick, setCellTick] = createSignal(0);
+  onCleanup(onTableCellFocus(() => setCellTick((n) => n + 1)));
+  const cellAlign = createMemo(() => (cellTick(), cursor(), tableCellAlign()));
+  const align = (a: "left" | "center" | "right" | "justify" | null) => () => {
+    if (cellAlign() !== null) {
+      if (a !== "justify") alignTableColumn(a ?? "");
+      return;
+    }
+    const v = view();
+    if (v) setBlockAttr(v, "align", a);
+  };
+  const alignNow = () => {
+    const c = cellAlign();
+    return c !== null ? c || null : ctx().align;
   };
 
   // Recompute on cursor moves / edits.
@@ -259,13 +278,13 @@ export default function Toolbar() {
       </div>
 
       <div class="tb-group">
-        <Btn title="Align start (default)" active={!ctx().align || ctx().align === "start"} onClick={run((v) => setBlockAttr(v, "align", null))}>
+        <Btn title="Align start (default)" active={!alignNow() || alignNow() === "start"} onClick={align(null)}>
           {ctx().dir === "ltr" ? <AlignLeft size={16} /> : <AlignRight size={16} />}
         </Btn>
-        <Btn title="Align left" active={ctx().align === "left"} onClick={run((v) => setBlockAttr(v, "align", "left"))}><AlignLeft size={16} /></Btn>
-        <Btn title="Center" active={ctx().align === "center"} onClick={run((v) => setBlockAttr(v, "align", "center"))}><AlignCenter size={16} /></Btn>
-        <Btn title="Align right" active={ctx().align === "right"} onClick={run((v) => setBlockAttr(v, "align", "right"))}><AlignRight size={16} /></Btn>
-        <Btn title="Justify" active={ctx().align === "justify"} onClick={run((v) => setBlockAttr(v, "align", "justify"))}><AlignJustify size={16} /></Btn>
+        <Btn title="Align left" active={alignNow() === "left"} onClick={align("left")}><AlignLeft size={16} /></Btn>
+        <Btn title="Center" active={alignNow() === "center"} onClick={align("center")}><AlignCenter size={16} /></Btn>
+        <Btn title="Align right" active={alignNow() === "right"} onClick={align("right")}><AlignRight size={16} /></Btn>
+        <Btn title={cellAlign() !== null ? "Justify (not available in tables)" : "Justify"} disabled={cellAlign() !== null} active={alignNow() === "justify"} onClick={align("justify")}><AlignJustify size={16} /></Btn>
         <Show when={!isTypst()}>
           <Btn title="Right-to-left paragraph" active={ctx().dir === "rtl"} onClick={run((v) => setBlockAttr(v, "dir", ctx().dir === "rtl" ? null : "rtl"))}><PilcrowLeft size={16} /></Btn>
           <Btn title="Left-to-right paragraph" active={ctx().dir === "ltr"} onClick={run((v) => setBlockAttr(v, "dir", ctx().dir === "ltr" ? null : "ltr"))}><PilcrowRight size={16} /></Btn>
@@ -276,6 +295,34 @@ export default function Toolbar() {
         <Btn title="Bulleted list" onClick={run((v) => toggleList(v, "bullet"))}><List size={16} /></Btn>
         <Btn title="Numbered list" onClick={run((v) => toggleList(v, "number"))}><ListOrdered size={16} /></Btn>
         <Btn title="Checklist" onClick={run((v) => toggleList(v, "task"))}><ListChecks size={16} /></Btn>
+        <Popover class="tb-btn" title="Callout" trigger={() => (<><MessageSquareQuote size={16} /><ChevronDown size={11} class="muted" /></>)}>
+          {(close) => {
+            const [fold, setFold] = createSignal<"" | "+" | "-">("");
+            return (
+              <div class="menu callout-menu">
+                <For each={Object.entries(CALLOUTS)}>
+                  {([type, c]) => (
+                    <button class={`menu-item callout-item co-${type}`} onClick={() => (close(), run((v) => insertCallout(v, type, fold()))())}>
+                      <span class="menu-icon">{c.icon}</span>
+                      <span class="menu-label">{c.label}</span>
+                    </button>
+                  )}
+                </For>
+                <Show when={!isTypst()}>
+                  <div class="menu-sep" />
+                  <label class="menu-item callout-fold" onMouseDown={(e) => e.stopPropagation()}>
+                    <span class="menu-label">Foldable</span>
+                    <select class="input" value={fold()} onChange={(e) => setFold(e.currentTarget.value as any)}>
+                      <option value="">No</option>
+                      <option value="+">Yes, open</option>
+                      <option value="-">Yes, collapsed</option>
+                    </select>
+                  </label>
+                </Show>
+              </div>
+            );
+          }}
+        </Popover>
       </div>
 
       <div class="tb-group">

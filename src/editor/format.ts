@@ -492,3 +492,59 @@ export function insertFenced(view: EditorView, lang: string, code: string) {
   if (isTypst() && lang === "typst") return insertBlock(view, code);
   insertBlock(view, "```" + lang + "\n" + code.trimEnd() + "\n```", lang.length + 4);
 }
+
+/** Colors used for callouts in the PDF (core/src/render/md.rs callout_style). */
+const CALLOUT_COLOR: Record<string, string> = {
+  tip: "#1f9d55", success: "#1f9d55", important: "#8a4fd8", example: "#8a4fd8", warning: "#c98a10",
+  caution: "#d13c3c", danger: "#d13c3c", bug: "#d13c3c", question: "#0e8f9e", abstract: "#0e8f9e",
+  quote: "#7a7f8f", todo: "#2f6fde", info: "#2f6fde", note: "#2f6fde",
+};
+
+const CALLOUT_HEAD = /^(\s*>\s*)\[!([^\]]+)\]([+-]?)/;
+
+/**
+ * Insert an Obsidian callout (`> [!type]`). On a callout header line its type
+ * changes; with a selection (or on a line of text) the lines go inside it.
+ * `fold`: "" = always open, "+" = foldable (open), "-" = foldable (closed).
+ */
+export function insertCallout(view: EditorView, type: string, fold: "" | "+" | "-" = "") {
+  const s = view.state;
+  const T = type.toUpperCase();
+  if (isTypst()) {
+    const color = CALLOUT_COLOR[type] ?? CALLOUT_COLOR.note;
+    const title = type[0].toUpperCase() + type.slice(1);
+    const open = `#block(width: 100%, inset: 10pt, radius: 4pt, fill: rgb("${color}").lighten(90%), stroke: (left: 3pt + rgb("${color}")))[\n  #text(weight: "bold", fill: rgb("${color}"))[${title}] \\\n  `;
+    insertBlock(view, `${open}\n]`, open.length);
+    return;
+  }
+  const head = s.doc.lineAt(s.selection.main.head);
+  // Already a callout: retype it (search up to its header).
+  for (let n = head.number; n >= 1; n--) {
+    const l = s.doc.line(n);
+    if (!/^\s*>/.test(l.text)) break;
+    const m = CALLOUT_HEAD.exec(l.text);
+    if (m) {
+      const from = l.from + m[1].length;
+      view.dispatch({ changes: { from, to: from + m[0].length - m[1].length, insert: `[!${T}]${fold}` } });
+      view.focus();
+      return;
+    }
+  }
+  const sel = s.selection.main;
+  const lines = selectedLines(s);
+  const hasText = !sel.empty || head.text.trim().length > 0;
+  if (!hasText) {
+    insertBlock(view, `> [!${T}]${fold} \n> `);
+    return;
+  }
+  const first = lines[0];
+  const last = lines[lines.length - 1];
+  const body = lines.map((l) => "> " + l.text.replace(/^\s*>\s?/, "")).join("\n");
+  const insert = `> [!${T}]${fold} \n${body}`;
+  view.dispatch({
+    changes: { from: first.from, to: last.to, insert },
+    selection: { anchor: first.from + insert.length },
+    scrollIntoView: true,
+  });
+  view.focus();
+}
