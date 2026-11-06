@@ -1,6 +1,6 @@
 [package]
 name = "notez-core"
-version = "0.5.5"
+version = "0.5.6"
 description = "NoteZ core (vault + Typst rendering)"
 authors = ["Amir Mohammad Jahangirzad"]
 license = "Apache-2.0"
@@ -24,9 +24,13 @@ typst-kit = { version = "0.15.1", features = ["embedded-fonts", "scan-fonts", "s
 typst-layout = "0.15.1"
 
 
+# ThinLTO with many codegen units: the final optimize/link step runs on all
+# CPU cores. (`lto = true` + `codegen-units = 1` did it on one core, which
+# made every release build of the Typst-sized dependency tree slow, for a
+# few percent of binary size and speed.)
 [profile.release]
-codegen-units = 1
-lto = true
+codegen-units = 16
+lto = "thin"
 opt-level = 3
 strip = true
 

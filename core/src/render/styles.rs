@@ -413,11 +413,15 @@ pub fn prelude(theme: &Theme, meta: &Meta) -> String {
     text.push(format!("lang: {}", q(lang)));
     o.push_str(&format!("#set text({})\n", text.join(", ")));
     let mut par = Vec::new();
-    if let Some(l) = leading(&body) {
+    let lead = leading(&body);
+    if let Some(l) = &lead {
         par.push(format!("leading: {l}"));
     }
+    // Typst's paragraph spacing replaces the gap between lines instead of
+    // adding to it, so "space after" smaller than the line spacing made a
+    // paragraph break look like a line break. Space after is extra space.
     if let Some(s) = body.space_after.as_deref().and_then(length) {
-        par.push(format!("spacing: {s}"));
+        par.push(format!("spacing: {} + {s}", lead.as_deref().unwrap_or("0.65em")));
     }
     match body.align.as_deref() {
         Some("justify") => par.push("justify: true".into()),
