@@ -14,7 +14,7 @@ import { fontList, FONT_SIZES } from "../core/fonts";
 import { exportPdf } from "../core/render";
 import { readFrontmatter } from "../core/frontmatter";
 import {
-  toggleInline, setBlockStyle, setTitle, blockStyleAt, BlockStyle, blockAttr, setBlockAttr, applySpan, toggleList,
+  toggleInline, inlineActive, InlineKind, setBlockStyle, setTitle, blockStyleAt, BlockStyle, blockAttr, setBlockAttr, applySpan, toggleList,
   insertLink, insertImage, insertTable, insertMath, insertPageBreak, insertFootnote, insertToc, isTypst, insertCallout,
 } from "../editor/format";
 import { CALLOUTS } from "../editor/livepreview";
@@ -114,9 +114,11 @@ export default function Toolbar() {
     const v = view();
     const content = state.active ? state.buffers[state.active]?.content : "";
     void content;
-    if (!v) return { style: "p" as BlockStyle, align: null as string | null, dir: null as string | null };
+    const none = new Set<InlineKind>();
+    if (!v) return { style: "p" as BlockStyle, align: null as string | null, dir: null as string | null, marks: none };
     const pos = v.state.selection.main.head;
-    return { style: blockStyleAt(v.state, pos), align: blockAttr(v.state, pos, "align"), dir: blockAttr(v.state, pos, "dir") };
+    const marks = new Set((["bold", "italic", "underline", "strike", "code"] as InlineKind[]).filter((k) => inlineActive(v.state, k)));
+    return { style: blockStyleAt(v.state, pos), align: blockAttr(v.state, pos, "align"), dir: blockAttr(v.state, pos, "dir"), marks };
   });
 
   const theme = activeTheme;
@@ -234,11 +236,11 @@ export default function Toolbar() {
       </div>
 
       <div class="tb-group">
-        <Btn title="Bold (Ctrl+B)" onClick={run((v) => toggleInline(v, "bold"))}><Bold size={16} /></Btn>
-        <Btn title="Italic (Ctrl+I)" onClick={run((v) => toggleInline(v, "italic"))}><Italic size={16} /></Btn>
-        <Btn title="Underline (Ctrl+U)" onClick={run((v) => toggleInline(v, "underline"))}><Underline size={16} /></Btn>
-        <Btn title="Strikethrough (Ctrl+Shift+X)" onClick={run((v) => toggleInline(v, "strike"))}><Strikethrough size={16} /></Btn>
-        <Btn title="Inline code (Ctrl+E)" onClick={run((v) => toggleInline(v, "code"))}><Code size={16} /></Btn>
+        <Btn title="Bold (Ctrl+B)" active={ctx().marks.has("bold")} onClick={run((v) => toggleInline(v, "bold"))}><Bold size={16} /></Btn>
+        <Btn title="Italic (Ctrl+I)" active={ctx().marks.has("italic")} onClick={run((v) => toggleInline(v, "italic"))}><Italic size={16} /></Btn>
+        <Btn title="Underline (Ctrl+U)" active={ctx().marks.has("underline")} onClick={run((v) => toggleInline(v, "underline"))}><Underline size={16} /></Btn>
+        <Btn title="Strikethrough (Ctrl+Shift+X)" active={ctx().marks.has("strike")} onClick={run((v) => toggleInline(v, "strike"))}><Strikethrough size={16} /></Btn>
+        <Btn title="Inline code (Ctrl+E)" active={ctx().marks.has("code")} onClick={run((v) => toggleInline(v, "code"))}><Code size={16} /></Btn>
         <div class="split-btn">
           <Btn title="Text color" onClick={run((v) => applySpan(v, { color: lastColor() }))}>
             <span class="color-icon"><Baseline size={16} /><i style={{ background: lastColor() }} /></span>

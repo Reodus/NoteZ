@@ -62,7 +62,7 @@ function clearFormatting(view: EditorView) {
   view.focus();
 }
 
-async function clipboard(view: EditorView, op: "cut" | "copy" | "paste" | "plain") {
+export async function clipboard(view: EditorView, op: "cut" | "copy" | "paste" | "plain") {
   view.focus();
   const { from, to } = view.state.selection.main;
   if (op === "copy" || op === "cut") {

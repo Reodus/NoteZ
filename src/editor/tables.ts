@@ -19,6 +19,7 @@ import { openPath } from "../core/native";
 import { root } from "../core/store";
 import { saveFiles } from "./attachments";
 import { getLiveOpts, hydrateImages, hydrateMath, inlineHtml } from "./livepreview";
+import { WRAP_PAIRS } from "./autopair";
 
 type Align = "" | "left" | "center" | "right";
 
@@ -354,6 +355,10 @@ export function onTableCellFocus(fn: () => void): () => void {
 
 /** Alignment of the focused cell's column, or null when no cell is focused. */
 export function tableCellAlign(): Align | null {
+  if (!activeCellEl && cellSel?.wrap.isConnected) {
+    const st = live.get(cellSel.wrap);
+    return st ? parse(st.src).aligns[rect(cellSel).c0] ?? "" : null;
+  }
   const cell = activeCellEl;
   const wrap = cell?.isConnected ? cell.closest<HTMLElement>(".nz-edit-table") : null;
   const st = wrap && live.get(wrap);
@@ -363,6 +368,14 @@ export function tableCellAlign(): Align | null {
 
 /** Toolbar alignment inside a table: Markdown aligns whole columns. */
 export function alignTableColumn(a: Align): boolean {
+  if (!activeCellEl && cellSel?.wrap.isConnected && live.has(cellSel.wrap)) {
+    const { c0, c1 } = rect(cellSel);
+    editKeepSel(cellSel.wrap, (m) => {
+      for (let c = c0; c <= c1; c++) m.aligns[c] = a;
+    });
+    cellListeners.forEach((f) => f());
+    return true;
+  }
   const cell = activeCellEl;
   const wrap = cell?.isConnected ? cell.closest<HTMLElement>(".nz-edit-table") : null;
   if (!cell || !wrap || !live.has(wrap)) return false;
@@ -471,9 +484,275 @@ function leave(wrap: HTMLElement, where: "before" | "after") {
   view.focus();
 }
 
+// ------------------------------------------- selecting cells with the mouse
+
+/** A rectangle of selected cells (drag across cells, or Shift+click). */
+interface CellSel {
+  wrap: HTMLElement;
+  r0: number;
+  c0: number;
+  r1: number;
+  c1: number;
+}
+let cellSel: CellSel | null = null;
+
+const rect = (s: CellSel) => ({
+  r0: Math.min(s.r0, s.r1),
+  r1: Math.max(s.r0, s.r1),
+  c0: Math.min(s.c0, s.c1),
+  c1: Math.max(s.c0, s.c1),
+});
+
+function paintCellSel() {
+  document.querySelectorAll(".nz-cell-selected").forEach((e) => e.classList.remove("nz-cell-selected"));
+  if (!cellSel?.wrap.isConnected) return;
+  const { r0, r1, c0, c1 } = rect(cellSel);
+  cellSel.wrap.querySelectorAll<HTMLElement>(".nz-cell").forEach((cell) => {
+    const r = Number(cell.dataset.r);
+    const c = Number(cell.dataset.c);
+    if (r >= r0 && r <= r1 && c >= c0 && c <= c1) cell.parentElement!.classList.add("nz-cell-selected");
+  });
+}
+
+function setCellSel(sel: CellSel | null) {
+  cellSel = sel;
+  paintCellSel();
+  cellListeners.forEach((f) => f());
+}
+
+/** Select from (r0, c0) to (r1, c1): the table itself takes focus. */
+function selectCells(wrap: HTMLElement, r0: number, c0: number, r1: number, c1: number) {
+  window.getSelection()?.removeAllRanges();
+  if (document.activeElement !== wrap) wrap.focus({ preventScroll: true });
+  setCurrentCell(null);
+  setCellSel({ wrap, r0, c0, r1, c1 });
+}
+
+/** Like edit(), but the cell selection stays (and is repainted). */
+function editKeepSel(wrap: HTMLElement, fn: (m: Model) => void) {
+  const sel = cellSel;
+  edit(wrap, (m) => void fn(m));
+  const view = live.get(wrap)?.view;
+  const range = view && rangeOf(wrap);
+  const now = (range && view && findWrap(view, range.from)) || wrap;
+  if (sel) {
+    if (document.activeElement !== now) now.focus({ preventScroll: true });
+    cellSel = { ...sel, wrap: now };
+    paintCellSel();
+  }
+}
+
+/** The selected cells as a model (first selected row = header). */
+function selectedModel(m: Model, s: CellSel): Model {
+  const { r0, r1, c0, c1 } = rect(s);
+  const all = [m.header, ...m.rows];
+  const rows = all.slice(r0, r1 + 1).map((r) => r.slice(c0, c1 + 1));
+  return { header: rows[0], aligns: m.aligns.slice(c0, c1 + 1), rows: rows.slice(1) };
+}
+
+const htmlEsc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** Rows of a pasted block: tab-separated (spreadsheets) or a Markdown table. */
+function pastedRows(text: string): string[][] | null {
+  const lines = text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n");
+  if (lines.every((l) => l.trim().startsWith("|"))) {
+    return lines.filter((l) => !/^\s*\|?[\s:|-]+\|?\s*$/.test(l) || !l.includes("-")).map(cellsOf);
+  }
+  if (lines.length > 1 || text.includes("\t")) return lines.map((l) => l.split("\t").map((c) => esc(c.trim())));
+  return null;
+}
+
+function wireCellSelection(wrap: HTMLElement) {
+  let drag: { r: number; c: number; moved: boolean } | null = null;
+  const cellFrom = (e: MouseEvent) => {
+    const cell = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest?.(".nz-cell") as HTMLElement | null;
+    return cell && wrap.contains(cell) ? cell : null;
+  };
+  const move = (e: MouseEvent) => {
+    if (!drag) return;
+    const cell = cellFrom(e);
+    if (!cell) return;
+    const r = Number(cell.dataset.r);
+    const c = Number(cell.dataset.c);
+    if (!drag.moved && r === drag.r && c === drag.c) return; // still selecting text in one cell
+    e.preventDefault();
+    if (!drag.moved) {
+      drag.moved = true;
+      wrap.classList.add("nz-selecting");
+    }
+    if (!cellSel || cellSel.r1 !== r || cellSel.c1 !== c) selectCells(wrap, drag.r, drag.c, r, c);
+  };
+  const up = () => {
+    drag = null;
+    wrap.classList.remove("nz-selecting");
+    document.removeEventListener("mousemove", move, true);
+    document.removeEventListener("mouseup", up, true);
+  };
+
+  wrap.addEventListener("mousedown", (e) => {
+    const cell = (e.target as HTMLElement).closest?.(".nz-cell") as HTMLElement | null;
+    if (!cell) return;
+    const r = Number(cell.dataset.r);
+    const c = Number(cell.dataset.c);
+    if (e.button === 2 && cellSel?.wrap === wrap) {
+      const s = rect(cellSel);
+      // Right-click inside the selection keeps it (and focus) for the menu.
+      if (r >= s.r0 && r <= s.r1 && c >= s.c0 && c <= s.c1) e.preventDefault();
+      return;
+    }
+    if (e.button !== 0) return;
+    if (e.shiftKey) {
+      // Extend from the focused cell (or the current selection's anchor).
+      const from = cellSel?.wrap === wrap ? { r: cellSel.r0, c: cellSel.c0 } : focusedCell(wrap);
+      if (from) {
+        e.preventDefault();
+        selectCells(wrap, from.r, from.c, r, c);
+        return;
+      }
+    }
+    if (cellSel) setCellSel(null);
+    drag = { r, c, moved: false };
+    document.addEventListener("mousemove", move, true);
+    document.addEventListener("mouseup", up, true);
+  });
+
+  wrap.addEventListener("keydown", (e) => {
+    if (e.target !== wrap || cellSel?.wrap !== wrap) return;
+    const s = cellSel;
+    const { r0, r1, c0, c1 } = rect(s);
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      editKeepSel(wrap, (m) => {
+        const all = [m.header, ...m.rows];
+        for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) all[r][c] = "";
+      });
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setCellSel(null);
+      leave(wrap, "after");
+    } else if (e.key === "Enter" || e.key === "F2") {
+      e.preventDefault();
+      setCellSel(null);
+      focusCell(wrap, s.r1, s.c1);
+    } else if (e.key.startsWith("Arrow") && e.shiftKey) {
+      e.preventDefault();
+      const st = live.get(wrap)!;
+      const m = parse(st.src);
+      const rtl = (wrap.querySelector("table") as HTMLElement | null)?.dir === "rtl";
+      const d = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, rtl ? 1 : -1], ArrowRight: [0, rtl ? -1 : 1] }[e.key] ?? [0, 0];
+      const r = Math.max(0, Math.min(m.rows.length, s.r1 + d[0]));
+      const c = Math.max(0, Math.min(m.header.length - 1, s.c1 + d[1]));
+      selectCells(wrap, s.r0, s.c0, r, c);
+    } else if (e.key.startsWith("Arrow")) {
+      e.preventDefault();
+      setCellSel(null);
+      focusCell(wrap, s.r1, s.c1);
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      const m = parse(live.get(wrap)!.src);
+      selectCells(wrap, 0, 0, m.rows.length, m.header.length - 1);
+    } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
+      e.preventDefault();
+      const view = live.get(wrap)!.view;
+      setCellSel(null);
+      if (e.key.toLowerCase() === "y" || e.shiftKey) redo(view);
+      else undo(view);
+      // Back to editing a cell, so the keyboard keeps working.
+      const range = rangeOf(wrap);
+      const now = (range && findWrap(view, range.from)) || wrap;
+      focusCell(now, s.r1, s.c1);
+    }
+  });
+
+  const copyCells = (e: ClipboardEvent, cut: boolean) => {
+    if (e.target !== wrap || cellSel?.wrap !== wrap) return;
+    const st = live.get(wrap);
+    if (!st) return;
+    e.preventDefault();
+    const sub = selectedModel(parse(st.src), cellSel);
+    const rows = [sub.header, ...sub.rows];
+    e.clipboardData?.setData("text/plain", format(sub));
+    e.clipboardData?.setData(
+      "text/html",
+      `<table>${rows.map((r, i) => `<tr>${r.map((c) => (i ? `<td>${htmlEsc(unesc(c))}</td>` : `<th>${htmlEsc(unesc(c))}</th>`)).join("")}</tr>`).join("")}</table>`,
+    );
+    if (cut) {
+      const { r0, r1, c0, c1 } = rect(cellSel);
+      editKeepSel(wrap, (m) => {
+        const all = [m.header, ...m.rows];
+        for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) all[r][c] = "";
+      });
+    }
+  };
+  wrap.addEventListener("copy", (e) => copyCells(e, false));
+  wrap.addEventListener("cut", (e) => copyCells(e, true));
+  wrap.addEventListener("paste", (e) => {
+    if (e.target !== wrap || cellSel?.wrap !== wrap) return;
+    e.preventDefault();
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    const rows = pastedRows(text) ?? [[esc(text.replace(/\r?\n/g, " "))]];
+    const { r0, c0, r1, c1 } = rect(cellSel);
+    // A single value fills the whole selection; a block lands at its corner.
+    const fill = rows.length === 1 && rows[0].length === 1;
+    editKeepSel(wrap, (m) => {
+      const h = fill ? r1 - r0 + 1 : rows.length;
+      const w = fill ? c1 - c0 + 1 : Math.max(...rows.map((r) => r.length));
+      while (m.rows.length < r0 + h - 1) m.rows.push(m.header.map(() => ""));
+      while (m.header.length < c0 + w) insertCol(m, m.header.length);
+      const all = [m.header, ...m.rows];
+      for (let i = 0; i < h; i++) for (let j = 0; j < w; j++) all[r0 + i][c0 + j] = fill ? rows[0][0] : rows[i][j] ?? "";
+    });
+  });
+  wrap.addEventListener("focusout", (e) => {
+    if (e.target !== wrap || cellSel?.wrap !== wrap) return;
+    const next = e.relatedTarget as Node | null;
+    // Toolbar buttons keep focus where it is; anything else ends the selection.
+    if (next && !wrap.contains(next)) setCellSel(null);
+  });
+}
+
+/** Wrap the selected text of a cell in `open`/`close`, keeping it selected. */
+function wrapCellSelection(cell: HTMLElement, open: string, close: string): boolean {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+  const range = sel.getRangeAt(0);
+  if (!cell.contains(range.commonAncestorContainer)) return false;
+  const pre = document.createRange();
+  pre.selectNodeContents(cell);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const start = pre.toString().length;
+  const text = sel.toString();
+  document.execCommand("insertText", false, open + text + close);
+  selectOffsets(cell, start + open.length, start + open.length + text.length);
+  return true;
+}
+
+function selectOffsets(el: HTMLElement, a: number, b: number) {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  const r = document.createRange();
+  let pos = 0;
+  let setStart = false;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const len = n.textContent!.length;
+    if (!setStart && a <= pos + len) {
+      r.setStart(n, a - pos);
+      setStart = true;
+    }
+    if (setStart && b <= pos + len) {
+      r.setEnd(n, b - pos);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return;
+    }
+    pos += len;
+  }
+}
+
 // --------------------------------------------------------- events
 
 function wire(wrap: HTMLElement) {
+  wireCellSelection(wrap);
   wrap.addEventListener("focusin", (e) => {
     const cell = e.target as HTMLElement;
     if (!cell.classList?.contains("nz-cell")) return;
@@ -610,6 +889,9 @@ function wire(wrap: HTMLElement) {
       return;
     }
 
+    const close = WRAP_PAIRS[e.key];
+    if (close && !e.altKey && wrapCellSelection(cell, e.key, close)) return handled();
+
     switch (e.key) {
       case "Tab": {
         handled();
@@ -668,7 +950,31 @@ function wire(wrap: HTMLElement) {
     }
     const m0 = parse(st.src);
     const body = r - 1; // body row index (-1 = header)
+    // Right-click inside a selected range acts on the whole range.
+    let sr = cellSel?.wrap === wrap ? rect(cellSel) : null;
+    if (sr && !(r >= sr.r0 && r <= sr.r1 && c >= sr.c0 && c <= sr.c1)) {
+      setCellSel(null);
+      sr = null;
+    }
+    if (sr) e.preventDefault(); // keep the selection painted (no caret into the cell)
+    const rows = sr ? { from: Math.max(1, sr.r0), to: sr.r1 } : { from: r, to: r };
+    const cols = sr ? { from: sr.c0, to: sr.c1 } : { from: c, to: c };
+    const nRowsSel = Math.max(0, rows.to - rows.from + 1);
+    const nColsSel = cols.to - cols.from + 1;
     const items: (MenuItem | "-")[] = [
+      ...(sr
+        ? ([
+            {
+              label: "Clear cells",
+              run: () =>
+                editKeepSel(wrap, (m) => {
+                  const all = [m.header, ...m.rows];
+                  for (let i = sr!.r0; i <= sr!.r1; i++) for (let j = sr!.c0; j <= sr!.c1; j++) all[i][j] = "";
+                }),
+            },
+            "-",
+          ] as (MenuItem | "-")[])
+        : []),
       { label: "Insert row above", run: () => edit(wrap, (m) => (r > 0 ? (m.rows.splice(body, 0, m.header.map(() => "")), { r, c }) : null)) },
       { label: "Insert row below", run: () => edit(wrap, (m) => (m.rows.splice(body + 1, 0, m.header.map(() => "")), { r: r + 1, c })) },
       { label: "Insert column before", run: () => edit(wrap, (m) => (insertCol(m, c), { r, c })) },
@@ -688,16 +994,25 @@ function wire(wrap: HTMLElement) {
       { label: "Format table", run: () => edit(wrap, () => null) },
       { label: "Edit as Markdown", run: () => editRaw(wrap) },
       "-",
-      { label: "Delete row", danger: true, run: () => edit(wrap, (m) => (body >= 0 ? (m.rows.splice(body, 1), null) : null)) },
       {
-        label: "Delete column",
+        label: nRowsSel > 1 ? `Delete ${nRowsSel} rows` : "Delete row",
         danger: true,
-        run: () =>
-          m0.header.length > 1
-            ? edit(wrap, (m) => {
-                for (const row of [m.header, m.aligns, ...m.rows]) row.splice(c, 1);
-              })
-            : deleteTable(wrap),
+        run: () => {
+          setCellSel(null);
+          edit(wrap, (m) => (rows.from >= 1 && nRowsSel > 0 ? (m.rows.splice(rows.from - 1, nRowsSel), null) : null));
+        },
+      },
+      {
+        label: nColsSel > 1 ? `Delete ${nColsSel} columns` : "Delete column",
+        danger: true,
+        run: () => {
+          setCellSel(null);
+          if (m0.header.length > nColsSel) {
+            edit(wrap, (m) => {
+              for (const row of [m.header, m.aligns, ...m.rows]) row.splice(cols.from, nColsSel);
+            });
+          } else deleteTable(wrap);
+        },
       },
       { label: "Delete table", danger: true, run: () => deleteTable(wrap) },
     ];

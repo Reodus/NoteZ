@@ -2,14 +2,15 @@
 // headings without `#`, bold without `**`, links as links, checkboxes,
 // math, images, rules — everywhere except on the lines the cursor is on,
 // where the raw source comes back for editing.
-import { EditorState, Extension, Range, StateField } from "@codemirror/state";
-import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from "@codemirror/view";
+import { EditorState, Extension, Prec, Range, StateField } from "@codemirror/state";
+import { BlockInfo, BlockType, Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { fileSrc } from "../core/native";
 import { parseAttrs } from "./format";
 import { canRender, previewsEnabled } from "./widgets";
 import { TableWidget, rawTableField } from "./tables";
 import { PropertiesWidget } from "./properties";
+import { holdDecorations, released } from "./pointer";
 
 export interface LiveOptions {
   /** Open a link target (note name, path or URL). */
@@ -396,9 +397,14 @@ class FenceWidget extends WidgetType {
     return o.lang === this.lang && o.closing === this.closing;
   }
   toDOM() {
+    // Outer box carries the gap (block widgets can't have vertical margins);
+    // the inner box is the visible code-card edge.
     const d = document.createElement("div");
     d.className = this.closing ? "cm-nz-lp-fence end" : "cm-nz-lp-fence";
-    if (!this.closing) d.textContent = this.lang || "code";
+    const box = document.createElement("div");
+    box.className = "cm-nz-lp-fence-box";
+    if (!this.closing) box.textContent = this.lang || "code";
+    d.append(box);
     return d;
   }
 }
@@ -511,7 +517,8 @@ function blockDecorations(state: EditorState): DecorationSet {
 const blockField = StateField.define<DecorationSet>({
   create: blockDecorations,
   update(value, tr) {
-    if (tr.docChanged || tr.selection || tr.reconfigured || syntaxTree(tr.startState) !== syntaxTree(tr.state)) {
+    if (holdDecorations(tr)) return value;
+    if (tr.docChanged || tr.selection || tr.reconfigured || released(tr) || syntaxTree(tr.startState) !== syntaxTree(tr.state)) {
       return blockDecorations(tr.state);
     }
     return value;
@@ -818,6 +825,39 @@ function build(view: EditorView): DecorationSet {
   return Decoration.set(decos, true);
 }
 
+/** A rendered block (math, code fence, diagram, comment…) that hides source lines. */
+function hiddenBlock(b: BlockInfo): boolean {
+  if (b.type !== BlockType.WidgetRange || b.from >= b.to) return false;
+  return !(b.widget instanceof TableWidget); // tables have their own keys
+}
+
+/**
+ * Up/Down next to a rendered block go *into* it, showing its source, instead
+ * of jumping over the whole block to the line beyond (which looked like the
+ * caret skipping lines).
+ */
+function arrowIntoBlock(view: EditorView, forward: boolean): boolean {
+  const { state } = view;
+  const sel = state.selection.main;
+  if (!sel.empty || state.selection.ranges.length > 1) return false;
+  const line = state.doc.lineAt(sel.head);
+  if (forward ? line.to >= state.doc.length : line.from === 0) return false;
+  // Wrapped line: move within it first.
+  if (state.doc.lineAt(view.moveVertically(sel, forward).head).number === line.number) return false;
+  const next = view.lineBlockAt(forward ? line.to + 1 : line.from - 1);
+  if (!hiddenBlock(next)) return false;
+  const anchor = forward ? next.from : state.doc.lineAt(next.to).from;
+  view.dispatch({ selection: { anchor }, scrollIntoView: true, userEvent: "select" });
+  return true;
+}
+
+const blockArrows = Prec.high(
+  keymap.of([
+    { key: "ArrowDown", run: (v) => arrowIntoBlock(v, true) },
+    { key: "ArrowUp", run: (v) => arrowIntoBlock(v, false) },
+  ]),
+);
+
 export function livePreview(enabled: boolean, typstMode: boolean, opts: LiveOptions): Extension {
   if (!enabled || typstMode) return [];
   liveOpts = opts;
@@ -828,7 +868,10 @@ export function livePreview(enabled: boolean, typstMode: boolean, opts: LiveOpti
         this.decorations = build(view);
       }
       update(u: ViewUpdate) {
-        if (u.docChanged || u.viewportChanged || u.selectionSet || u.focusChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) {
+        const rel = u.transactions.some(released);
+        // Button held and only the selection moved: lines keep their look until release.
+        if (!rel && !u.docChanged && !u.viewportChanged && u.transactions.length && u.transactions.every(holdDecorations)) return;
+        if (rel || u.docChanged || u.viewportChanged || u.selectionSet || u.focusChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) {
           this.decorations = build(u.view);
         }
       }
@@ -846,5 +889,5 @@ export function livePreview(enabled: boolean, typstMode: boolean, opts: LiveOpti
       return true;
     },
   });
-  return [rawTableField, plugin, blockField, clicks, EditorView.editorAttributes.of({ class: "cm-nz-live" })];
+  return [rawTableField, plugin, blockField, clicks, blockArrows, EditorView.editorAttributes.of({ class: "cm-nz-live" })];
 }

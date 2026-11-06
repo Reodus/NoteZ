@@ -1429,9 +1429,13 @@ mark {
 }
 
 /* Inline diagram previews */
+/* Block widget roots never get vertical margins: CodeMirror measures their
+   height without them, and the drift breaks clicks and Up/Down below. */
+.cm-nz-block-outer {
+  padding: 6px 0;
+}
 .cm-nz-block-preview {
   position: relative;
-  margin: 6px 0;
   padding: 18px 14px 14px;
   border-radius: var(--radius);
   background: #ffffff;
@@ -2826,7 +2830,7 @@ input[type="range"] {
 
 /* tables */
 .cm-nz-lp-table {
-  margin: 6px 0;
+  padding: 6px 0;
   overflow-x: auto;
   cursor: text;
 }
@@ -2868,6 +2872,9 @@ input[type="range"] {
 }
 
 /* properties (frontmatter) */
+.nz-props-wrap {
+  display: flow-root; /* keeps the card/title margins inside the widget */
+}
 .cm-nz-lp-props {
   margin: 0 0 14px;
   padding: 10px 14px 12px;
@@ -2923,6 +2930,13 @@ input[type="range"] {
   padding-bottom: 8px !important;
 }
 .cm-nz-lp-fence {
+  padding-top: 4px;
+  cursor: text;
+}
+.cm-nz-lp-fence.end {
+  padding: 0 0 4px;
+}
+.cm-nz-lp-fence-box {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--fg-faint);
@@ -2931,15 +2945,13 @@ input[type="range"] {
   direction: ltr;
   height: 22px;
   line-height: 14px;
-  cursor: text;
+  box-sizing: border-box;
   background: var(--code-bg);
   border-radius: 8px 8px 0 0;
-  margin-top: 4px;
 }
-.cm-nz-lp-fence.end {
+.cm-nz-lp-fence.end .cm-nz-lp-fence-box {
   height: 8px;
   padding: 0;
-  margin: 0 0 4px;
   border-radius: 0 0 8px 8px;
 }
 .cm-nz-live .cm-nz-lp-fence + .cm-nz-lp-code.first {
@@ -3275,7 +3287,7 @@ body,
 .cm-nz-lp-table.nz-edit-table {
   overflow: visible;
   text-align: center;
-  padding: 2px 16px 14px;
+  padding: 8px 16px 20px; /* includes the old 6px outer margin */
   cursor: default;
 }
 .nz-table-box {
@@ -3853,4 +3865,19 @@ html.no-anim *::after {
 .cm-nz-lp-pdf.missing {
   color: #dc2626;
   padding: 6px 10px;
+}
+
+/* table cells selected with the mouse (drag or Shift+click) */
+.nz-edit-table.nz-selecting,
+.nz-edit-table.nz-selecting * {
+  user-select: none;
+}
+.cm-nz-lp-table.nz-edit-table td.nz-cell-selected,
+.cm-nz-lp-table.nz-edit-table th.nz-cell-selected,
+.cm-nz-lp-table.nz-edit-table tbody tr:hover td.nz-cell-selected {
+  background: rgba(var(--accent-rgb), 0.18);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45);
+}
+.nz-edit-table:focus {
+  outline: none;
 }

@@ -5,6 +5,7 @@ import { EditorState, Range, StateField, Extension, Facet } from "@codemirror/st
 import { Decoration, DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 import { app } from "../core/app";
 import { ipc } from "../core/ipc";
+import { holdDecorations, released } from "./pointer";
 
 /** Langs the Rust side can render (see core/src/render/blocks.rs). */
 export const NATIVE_BLOCKS = new Set([
@@ -101,7 +102,13 @@ class BlockPreview extends WidgetType {
       view.dispatch({ selection: { anchor: this.codeFrom }, scrollIntoView: false });
       view.focus();
     });
-    return wrap;
+    // Block widgets must not have vertical margins (CodeMirror measures them
+    // without margins, which skews clicks and Up/Down); the outer box's
+    // padding makes the gap instead.
+    const outer = document.createElement("div");
+    outer.className = "cm-nz-block-outer";
+    outer.append(wrap);
+    return outer;
   }
 
   get estimatedHeight() {
@@ -168,7 +175,8 @@ function decorations(state: EditorState): DecorationSet {
 const field = StateField.define<DecorationSet>({
   create: decorations,
   update(value, tr) {
-    if (tr.docChanged || tr.selection || tr.reconfigured) return decorations(tr.state);
+    if (holdDecorations(tr)) return value;
+    if (tr.docChanged || tr.selection || tr.reconfigured || released(tr)) return decorations(tr.state);
     return value;
   },
   provide: (f) => EditorView.decorations.from(f),

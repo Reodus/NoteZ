@@ -3,6 +3,7 @@
 //                         |
 //                         $$
 // Lines inside callouts/quotes keep their `> ` prefix on every line.
+import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { isTypst } from "./format";
 
@@ -28,5 +29,34 @@ export const mathAutoPair = EditorView.inputHandler.of((view, from, to, text) =>
     return true;
   }
   view.dispatch({ changes: { from, insert: "$$$" }, selection: { anchor: from + 1 }, userEvent: "input.type" });
+  return true;
+});
+
+/** Closing mark for a symbol typed over a selection. */
+export const WRAP_PAIRS: Record<string, string> = {
+  $: "$", "`": "`", "*": "*", _: "_", "=": "=", "~": "~", '"': '"', "'": "'", "(": ")", "[": "]", "{": "}",
+};
+const TYPST_WRAP = new Set(["$", "`", "*", "_", '"', "(", "[", "{"]);
+
+/**
+ * Typing a symbol over selected text wraps it instead of replacing it, like
+ * Obsidian: `$` → $x$, `` ` `` → `x`, `*` twice → **x**, `=` twice → ==x==.
+ * The text stays selected so the marks can be stacked.
+ */
+export const wrapSelection = EditorView.inputHandler.of((view, _from, _to, text) => {
+  const close = WRAP_PAIRS[text];
+  if (!close || (isTypst() && !TYPST_WRAP.has(text))) return false;
+  const { state } = view;
+  if (state.selection.ranges.some((r) => r.empty)) return false;
+  view.dispatch(
+    state.changeByRange((r) => ({
+      changes: [
+        { from: r.from, insert: text },
+        { from: r.to, insert: close },
+      ],
+      range: EditorSelection.range(r.anchor + text.length, r.head + text.length),
+    })),
+    { userEvent: "input.type" },
+  );
   return true;
 });

@@ -25,12 +25,14 @@ import { typst } from "./typst-lang";
 import { styling, themeCss } from "./styling";
 import { blockPreviews } from "./widgets";
 import { livePreview } from "./livepreview";
-import { mathAutoPair } from "./autopair";
+import { mathAutoPair, wrapSelection } from "./autopair";
+import { richPaste } from "./paste";
+import { pointerHold } from "./pointer";
 import { slashCompletion, slashIconRender } from "./slash";
 import { attachmentDrop } from "./attachments";
 import { trailingLine } from "./trailing";
 import { tableKeys, skipTableCaret } from "./tables";
-import { editorContextMenu } from "./contextmenu";
+import { editorContextMenu, clipboard } from "./contextmenu";
 import { openUrl } from "../core/native";
 import { toggleInline, setBlockStyle, setTitle, insertLink, BlockStyle } from "./format";
 
@@ -47,7 +49,7 @@ function editorPrefs(): Extension {
   return [
     EditorState.tabSize.of(prefs.tabSize),
     indentUnit.of(" ".repeat(prefs.tabSize)),
-    prefs.autoPair ? closeBrackets() : [],
+    prefs.autoPair ? [closeBrackets(), wrapSelection] : [],
     EditorView.contentAttributes.of({ spellcheck: prefs.spellcheck ? "true" : "false" }),
   ];
 }
@@ -194,6 +196,8 @@ function formattingKeymap() {
     { key: "Mod-e", run: (v) => (toggleInline(v, "code"), true) },
     { key: "Mod-k", run: (v) => (insertLink(v), true) },
     { key: "Mod-Shift-t", run: (v) => (setTitle(v), true) },
+    // Paste exactly as copied: no HTML → Markdown, no PDF re-flow.
+    { key: "Mod-Shift-v", run: (v) => (void clipboard(v, "plain"), true) },
     { key: "Mod-0", run: style("p") },
     { key: "Mod-1", run: style("h1") },
     { key: "Mod-2", run: style("h2") },
@@ -256,7 +260,9 @@ export default function Editor() {
         editorContextMenu(openLinkTarget),
         tableKeys,
         skipTableCaret,
+        pointerHold,
         attachmentDrop,
+        richPaste,
         trailingLine(path.endsWith(".typ")),
         placeholder(path.endsWith(".typ") ? "= Start writing Typst…" : "شروع به نوشتن کنید… / Start writing…"),
         previewsComp.of(blockPreviews(prefs.inlinePreviews, isDark())),

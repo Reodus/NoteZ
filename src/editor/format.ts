@@ -1,7 +1,8 @@
 // Formatting actions behind the toolbar. Markdown uses NoteZ attribute
 // syntax (`::: {align=center}` blocks, `[text]{color=red}` spans); Typst
 // files get native Typst markup.
-import { EditorSelection, EditorState, Line } from "@codemirror/state";
+import { EditorSelection, EditorState, Line, SelectionRange } from "@codemirror/state";
+import { syntaxTree } from "@codemirror/language";
 import type { EditorView } from "@codemirror/view";
 import { state as store } from "../core/store";
 import { setFrontmatter } from "../core/frontmatter";
@@ -29,7 +30,7 @@ export function formatAttrs(a: Attrs): string {
 
 // ---------------------------------------------------------------- inline
 
-type InlineKind = "bold" | "italic" | "strike" | "code" | "underline";
+export type InlineKind = "bold" | "italic" | "strike" | "code" | "underline";
 
 const MD_MARKS: Record<InlineKind, [string, string]> = {
   bold: ["**", "**"],
@@ -47,11 +48,90 @@ const TYP_MARKS: Record<InlineKind, [string, string]> = {
   underline: ["#underline[", "]"],
 };
 
+/** Markdown syntax nodes for each inline style, and their marker nodes. */
+const MD_NODES: Partial<Record<InlineKind, { node: string; mark: string }>> = {
+  bold: { node: "StrongEmphasis", mark: "EmphasisMark" },
+  italic: { node: "Emphasis", mark: "EmphasisMark" },
+  strike: { node: "Strikethrough", mark: "StrikethroughMark" },
+  code: { node: "InlineCode", mark: "CodeMark" },
+};
+
+/** Opening and closing marker ranges of a formatted span. */
+interface Span {
+  open: [number, number];
+  close: [number, number];
+}
+
+/**
+ * The `kind` span that contains `range` (cursor anywhere in it, markers
+ * included), e.g. the cursor inside **blah** → the bold around it.
+ */
+export function enclosingSpan(state: EditorState, range: { from: number; to: number }, kind: InlineKind): Span | null {
+  const typ = isTypst();
+  const spec = typ ? undefined : MD_NODES[kind];
+  if (spec) {
+    const tree = syntaxTree(state);
+    for (const side of [1, -1] as const) {
+      for (let n: any = tree.resolveInner(range.from, side); n; n = n.parent) {
+        if (n.name !== spec.node || n.from > range.from || n.to < range.to) continue;
+        const marks: { from: number; to: number }[] = [];
+        for (let c = n.firstChild; c; c = c.nextSibling) if (c.name === spec.mark) marks.push({ from: c.from, to: c.to });
+        if (marks.length < 2) continue;
+        const a = marks[0];
+        const b = marks[marks.length - 1];
+        return { open: [a.from, a.to], close: [b.from, b.to] };
+      }
+    }
+    return null;
+  }
+  // Underline (<u>…</u>) and Typst markup: scan the line.
+  const [open, close] = (typ ? TYP_MARKS : MD_MARKS)[kind];
+  const line = state.doc.lineAt(range.from);
+  if (range.to > line.to) return null;
+  const t = line.text;
+  let best: Span | null = null;
+  for (let i = t.indexOf(open); i >= 0; i = t.indexOf(open, i + 1)) {
+    const j = t.indexOf(close, i + open.length);
+    if (j < 0) break;
+    const s = line.from + i;
+    const e = line.from + j + close.length;
+    if (s <= range.from && e >= range.to) best = { open: [s, s + open.length], close: [line.from + j, e] };
+    if (s > range.to) break;
+    i = j + close.length - 1;
+  }
+  return best;
+}
+
+/** Is the cursor/selection inside a `kind` span? (Toolbar button state.) */
+export function inlineActive(state: EditorState, kind: InlineKind): boolean {
+  const r = state.selection.main;
+  if (enclosingSpan(state, r, kind)) return true;
+  const [open, close] = (isTypst() ? TYP_MARKS : MD_MARKS)[kind];
+  return !r.empty && state.sliceDoc(r.from - open.length, r.from) === open && state.sliceDoc(r.to, r.to + close.length) === close;
+}
+
+/** Remove the markers of `span`, keeping `range` on the same text. */
+function unwrap(span: Span, range: SelectionRange) {
+  const [os, oe] = span.open;
+  const [cs, ce] = span.close;
+  const map = (p: number) => p - Math.max(0, Math.min(p, oe) - os) - Math.max(0, Math.min(p, ce) - cs);
+  return {
+    changes: [
+      { from: os, to: oe },
+      { from: cs, to: ce },
+    ],
+    range: EditorSelection.range(map(range.anchor), map(range.head)),
+  };
+}
+
 export function toggleInline(view: EditorView, kind: InlineKind) {
   const [open, close] = (isTypst() ? TYP_MARKS : MD_MARKS)[kind];
   const { state } = view;
   view.dispatch(
     state.changeByRange((range) => {
+      // Inside a formatted span (cursor anywhere in **blah**): remove it.
+      const span = enclosingSpan(state, range, kind);
+      if (span) return unwrap(span, range);
       const text = state.sliceDoc(range.from, range.to);
       const before = state.sliceDoc(range.from - open.length, range.from);
       const after = state.sliceDoc(range.to, range.to + close.length);
@@ -118,6 +198,9 @@ export function applySpan(view: EditorView, changes: Record<string, string | nul
     const innerEnd = innerStart + m[1].length;
     if (range.from >= start && range.to <= end && (range.from >= innerStart || range.empty) && range.to <= Math.max(innerEnd, range.from)) {
       const attrs = { ...parseAttrs(m[2]) };
+      // Applying the value the span already has removes it (toggle).
+      const same = Object.entries(changes).every(([k, v]) => v !== null && attrs[k] === v);
+      if (same) for (const k of Object.keys(changes)) changes = { ...changes, [k]: null };
       for (const [k, v] of Object.entries(changes)) {
         if (v === null) delete attrs[k];
         else attrs[k] = v;
@@ -204,6 +287,8 @@ function selectedLines(state: EditorState): Line[] {
 
 export function setBlockStyle(view: EditorView, style: BlockStyle) {
   const typ = isTypst();
+  // Applying the style every selected line already has turns it off.
+  if (style !== "p" && selectedLines(view.state).every((l) => blockStyleAt(view.state, l.from) === style)) style = "p";
   const changes = selectedLines(view.state).map((l) => {
     const strip = l.text.replace(typ ? TYP_PREFIX : MD_PREFIX, "");
     let prefix = "";

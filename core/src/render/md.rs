@@ -45,22 +45,36 @@ fn first_strong(text: &str) -> Option<Dir> {
 }
 
 /// Paragraph direction: that of the first strong character, except that
-/// text starting with a Latin word but mostly Persian (`Windows یک سیستم
-/// عامل است`) is right-to-left. The editor uses the same rule
-/// (src/editor/bidi.ts).
+/// text starting with a Latin word is right-to-left when at least as many of
+/// its words are Persian (`Windows یک سیستم عامل است`, `hello سلام`). A word
+/// ends at whitespace or where the script changes, so `helloسلام` is two.
+/// The editor uses the same rule (src/editor/bidi.ts).
 pub fn detect_dir(text: &str) -> Option<Dir> {
     match first_strong(text)? {
         Dir::Rtl => Some(Dir::Rtl),
         Dir::Ltr => {
             let (mut rtl, mut ltr) = (0, 0);
-            for w in text.split_whitespace() {
-                match first_strong(w) {
-                    Some(Dir::Rtl) => rtl += 1,
-                    Some(Dir::Ltr) => ltr += 1,
-                    None => {}
+            let mut prev = None;
+            for c in text.chars() {
+                let d = if c.is_whitespace() {
+                    prev = None;
+                    continue;
+                } else if is_rtl_char(c) {
+                    Dir::Rtl
+                } else if c.is_alphabetic() {
+                    Dir::Ltr
+                } else {
+                    continue;
+                };
+                if prev != Some(d) {
+                    match d {
+                        Dir::Rtl => rtl += 1,
+                        Dir::Ltr => ltr += 1,
+                    }
+                    prev = Some(d);
                 }
             }
-            Some(if rtl > ltr { Dir::Rtl } else { Dir::Ltr })
+            Some(if rtl >= ltr { Dir::Rtl } else { Dir::Ltr })
         }
     }
 }
@@ -463,7 +477,16 @@ impl<'a> Converter<'a> {
     }
 
     /// Wrap `content` so it uses direction `d` if that differs from the base.
+    /// A `dir` set on an enclosing `::: {dir=…}` block wins over detection
+    /// (the block already sets it for its contents).
     fn directed(&self, plain: &str, content: String) -> String {
+        let explicit = self.stack.iter().rev().find_map(|n| match &n.frame {
+            Frame::Div(attrs) => attrs.iter().rev().find(|(k, v)| k == "dir" && (v == "rtl" || v == "ltr")),
+            _ => None,
+        });
+        if explicit.is_some() {
+            return content;
+        }
         match detect_dir(plain) {
             Some(d) if d != self.base => {
                 format!("#[#set text(dir: {}, lang: {})\n{}]", dir_kw(d), lang_of(d), content)
@@ -1155,9 +1178,22 @@ mod tests {
     }
 
     #[test]
+    fn explicit_div_dir_wins() {
+        let out = conv("::: {dir=rtl}\nHello world\n:::\n");
+        assert!(out.contains("dir: rtl"), "{out}");
+        assert!(!out.contains("dir: ltr"), "{out}");
+        let out = conv("::: {dir=ltr}\nسلام دنیا\n:::\n");
+        assert!(out.contains("dir: ltr"), "{out}");
+        assert!(!out.contains("set text(dir: rtl"), "{out}");
+    }
+
+    #[test]
     fn direction_detection() {
         assert_eq!(detect_dir("سلام world"), Some(Dir::Rtl));
-        assert_eq!(detect_dir("123 hello سلام"), Some(Dir::Ltr));
+        assert_eq!(detect_dir("123 hello world سلام"), Some(Dir::Ltr));
+        assert_eq!(detect_dir("123 hello سلام"), Some(Dir::Rtl));
+        assert_eq!(detect_dir("asdsaasdsشسیسشی"), Some(Dir::Rtl));
+        assert_eq!(detect_dir("hello worldسلام"), Some(Dir::Ltr));
         assert_eq!(detect_dir("123 !!"), None);
         assert_eq!(detect_dir("windows یک سیستم عامل باحال"), Some(Dir::Rtl));
         assert_eq!(detect_dir("Visual Studio Code ویرایشگر"), Some(Dir::Ltr));
