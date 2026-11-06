@@ -1,4 +1,5 @@
 import { createSignal, For, Show, createEffect, on, createRoot, Switch, Match } from "solid-js";
+import { startResize } from "./resize";
 import {
   Files, Search, FilePlus, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, FileText, FileCode2,
   FolderInput, Settings, Sun, Moon, Monitor, ArrowLeftRight, ChevronsDownUp, Waypoints, File, FileImage, FileType2,
@@ -288,20 +289,9 @@ export default function Sidebar() {
       <div
         class="resizer end"
         title="Drag to resize · double-click to reset"
-        onMouseDown={(e) => {
-          e.preventDefault();
-          const startX = e.clientX;
-          const startW = prefs.sidebarWidth;
-          const onDrag = (m: MouseEvent) => setPrefs("sidebarWidth", Math.round(Math.max(200, Math.min(520, startW + m.clientX - startX))));
-          const stop = () => {
-            window.removeEventListener("mousemove", onDrag);
-            window.removeEventListener("mouseup", stop);
-            document.body.classList.remove("resizing");
-          };
-          document.body.classList.add("resizing");
-          window.addEventListener("mousemove", onDrag);
-          window.addEventListener("mouseup", stop);
-        }}
+        onPointerDown={(e) =>
+          startResize(e, e.currentTarget.parentElement!, 1, (w) => setPrefs("sidebarWidth", Math.max(200, Math.min(520, w))))
+        }
         onDblClick={() => setPrefs("sidebarWidth", 264)}
       />
       <div class="sidebar-head">

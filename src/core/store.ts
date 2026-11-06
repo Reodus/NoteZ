@@ -208,10 +208,19 @@ export function rememberVault(path: string) {
   setPrefs("recentVaults", (r) => [path, ...r.filter((p) => p !== path)].slice(0, 8));
 }
 
+/**
+ * Reload the file tree. Saving a note also reaches here (through the vault
+ * watcher), but leaves the tree as it was: keep the old one then, so the
+ * list isn't rebuilt (rows re-rendered, hover and scroll lost) on every save.
+ * "vault:changed" still fires: plugins may care about content changes.
+ */
 export async function refreshTree() {
   try {
-    setTree(await ipc.tree());
-    setNotesList(await ipc.notes());
+    const [t, n] = await Promise.all([ipc.tree(), ipc.notes()]);
+    const sameTree = JSON.stringify(t) === JSON.stringify(tree());
+    const sameNotes = JSON.stringify(n) === JSON.stringify(notesList());
+    if (!sameTree) setTree(t);
+    if (!sameNotes) setNotesList(n);
     app.events.emit("vault:changed", undefined);
   } catch (e) {
     notify(String(e), "error");

@@ -1,9 +1,9 @@
 [package]
 name = "notez-core"
-version = "0.5.4"
+version = "0.5.5"
 description = "NoteZ core (vault + Typst rendering)"
 authors = ["Amir Mohammad Jahangirzad"]
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/Reodus/NoteZ"
 edition = "2024"
 

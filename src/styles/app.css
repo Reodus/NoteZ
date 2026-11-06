@@ -106,6 +106,16 @@ body.resizing {
   cursor: col-resize;
   user-select: none;
 }
+/* Embedded PDFs and frames would swallow the drag. */
+body.resizing iframe,
+body.resizing embed,
+body.resizing object,
+body.resizing webview {
+  pointer-events: none;
+}
+.resizer {
+  touch-action: none;
+}
 
 ::selection {
   background: rgba(var(--accent-rgb), 0.25);

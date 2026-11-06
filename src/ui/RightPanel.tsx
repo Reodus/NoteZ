@@ -1,4 +1,5 @@
 import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js";
+import { startResize } from "./resize";
 import {
   Eye, Palette, ZoomIn, ZoomOut, AlertTriangle, CheckCircle2, Loader2, FileDown,
   FileCode, Pencil,
@@ -186,27 +187,16 @@ export default function RightPanel() {
     { id: "styles", title: "Styles", icon: () => <Palette size={16} /> },
   ];
   const plugins = () => app.panels.items();
-  let startX = 0;
-  let startW = 0;
-  const onDrag = (e: MouseEvent) => setPrefs("previewWidth", Math.max(320, Math.min(window.innerWidth * 0.7, startW + (startX - e.clientX))));
-  const stop = () => {
-    window.removeEventListener("mousemove", onDrag);
-    window.removeEventListener("mouseup", stop);
-    document.body.classList.remove("resizing");
-  };
-
   return (
     <section class="right-panel" style={prefs.layout === "split" ? { width: `${prefs.previewWidth}px` } : {}}>
       <Show when={prefs.layout === "split"}>
         <div
           class="resizer"
-          onMouseDown={(e) => {
-            startX = e.clientX;
-            startW = prefs.previewWidth;
-            document.body.classList.add("resizing");
-            window.addEventListener("mousemove", onDrag);
-            window.addEventListener("mouseup", stop);
-          }}
+          onPointerDown={(e) =>
+            startResize(e, e.currentTarget.parentElement!, -1, (w) =>
+              setPrefs("previewWidth", Math.max(320, Math.min(window.innerWidth * 0.7, w))),
+            )
+          }
           onDblClick={() => setPrefs("previewWidth", 520)}
         />
       </Show>

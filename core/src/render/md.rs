@@ -835,8 +835,15 @@ impl<'a> Converter<'a> {
             } else if inner == "nz:/div" {
                 self.close_div();
             } else if let Some(n) = inner.strip_prefix("nz:vspace") {
-                let n: f32 = n.trim().parse().unwrap_or(1.0);
-                self.deliver(format!("#v({:.1}em)\n\n", n * 1.2), String::new(), None);
+                // One text line per extra blank line, as in the editor: the
+                // advance between two lines in the current font, size and
+                // line spacing.
+                let n: u32 = n.trim().parse().unwrap_or(1).clamp(1, 50);
+                self.deliver(
+                    format!("#context v({n} * (measure([x \\ x]).height - measure([x]).height))\n\n"),
+                    String::new(),
+                    None,
+                );
             } else if inner.eq_ignore_ascii_case("pagebreak") {
                 self.deliver("#pagebreak()\n\n".into(), String::new(), None);
             } else if inner.eq_ignore_ascii_case("toc") {
@@ -1218,14 +1225,14 @@ mod tests {
     fn blank_lines_become_space() {
         let out = conv("a\nb\n\n\n\nc\n\nd\n");
         assert!(out.contains("a \\\nb"), "{out}");
-        assert_eq!(out.matches("#v(").count(), 1, "{out}");
-        assert!(out.contains("#v(2.4em)"), "{out}");
+        assert_eq!(out.matches(" v(").count(), 1, "{out}");
+        assert!(out.contains("v(2 * (measure("), "{out}");
         // Lists stay one list; indented continuations stay attached.
         let out = conv("- x\n\n\n- y\n\n\n  more\n");
-        assert!(!out.contains("#v("), "{out}");
+        assert!(!out.contains(" v("), "{out}");
         // Inside code fences nothing changes.
         let out = conv("```\nx\n\n\n\ny\n```\n");
-        assert!(!out.contains("#v("), "{out}");
+        assert!(!out.contains(" v("), "{out}");
         // Line count is preserved.
         assert_eq!(preprocess("a\n\n\n\nb\n").lines().count(), 5);
     }

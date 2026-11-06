@@ -1,6 +1,6 @@
 {
   "name": "notez",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Bilingual notes with beautiful PDF export",
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
     "dist": "npm run build && electron-builder --linux",
     "dist:win": "npm run build && electron-builder --win"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "devDependencies": {
     "@codemirror/autocomplete": "^6.20.4",
     "@codemirror/commands": "^6.11.1",

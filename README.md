@@ -91,5 +91,5 @@ An existing tag can be rebuilt from the Actions tab (Release → Run workflow).
 
 ## License
 
-[MIT](LICENSE). Bundled fonts and Typst packages keep their own licenses
+[Apache License 2.0](LICENSE). Bundled fonts and Typst packages keep their own licenses
 (see the license files next to them; Vazirmatn is under the SIL OFL).
