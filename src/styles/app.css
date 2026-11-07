@@ -3086,6 +3086,11 @@ input[type="range"] {
   max-width: 30vw;
   min-width: min(200px, 30vw);
 }
+/* The slot must follow the same cap, or it stays at the stored width and
+   leaves an empty strip between the sidebar and the workspace. */
+.sidebar-slot {
+  max-width: 30vw;
+}
 .work-area.layout-split .right-panel {
   flex: 0 1 auto;
   max-width: 55%;
@@ -3106,7 +3111,8 @@ input[type="range"] {
   }
 }
 @media (max-width: 760px) {
-  .sidebar {
+  .sidebar,
+  .sidebar-slot {
     display: none;
   }
 }

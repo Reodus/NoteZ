@@ -8,6 +8,10 @@ folder; the PDF engine is Typst, embedded — no TeX installation needed.
 
 ## Features
 
+Every feature can be typed by hand, no toolbar needed. See
+**[docs/MARKDOWN.md](docs/MARKDOWN.md)** for the full syntax (formatting, callouts,
+annotations, styled spans, layout blocks, math, charts, frontmatter).
+
 - **Persian & English side by side** — every line picks its own direction
   (RTL/LTR), in the editor and in the PDF.
 - **Beautiful PDF** — Markdown and `.typ` notes are typeset by embedded Typst,
