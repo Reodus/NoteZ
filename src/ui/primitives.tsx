@@ -51,6 +51,26 @@ export function Modal(props: {
 
 // ---------------------------------------------------------------- Popover
 
+/** Floating panels (popovers, combo lists) live in portals; each remembers
+ * the element that opened it, so "inside" can follow nesting. */
+const OWNER = Symbol("owner");
+function markPortal(el: HTMLElement, owner: Element) {
+  el.dataset.portal = "";
+  (el as any)[OWNER] = owner;
+}
+
+/** Is `t` inside `root`, counting panels opened from within `root`? */
+export function within(root: Element | undefined, t: EventTarget | null): boolean {
+  let n = t instanceof Node ? t : null;
+  for (let hops = 0; n && root && hops < 16; hops++) {
+    if (root.contains(n)) return true;
+    const el = n instanceof Element ? n : n.parentElement;
+    const portal = el?.closest("[data-portal]") as HTMLElement | null;
+    n = portal ? ((portal as any)[OWNER] as Element | undefined) ?? null : null;
+  }
+  return false;
+}
+
 /** A button that opens a floating panel below it. */
 export function Popover(props: {
   trigger: (open: boolean) => JSX.Element;
@@ -73,7 +93,7 @@ export function Popover(props: {
   };
   const onDoc = (e: MouseEvent) => {
     if (!open()) return;
-    if (panel?.contains(e.target as Node) || btn.contains(e.target as Node)) return;
+    if (within(panel, e.target) || btn.contains(e.target as Node)) return;
     setOpen(false);
   };
   const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
@@ -104,6 +124,7 @@ export function Popover(props: {
           <div
             ref={(el) => {
               panel = el;
+              markPortal(el, btn);
               // Keep inside the window.
               requestAnimationFrame(() => {
                 const r = el.getBoundingClientRect();
@@ -145,6 +166,11 @@ export interface MenuItem {
 
 const [menu, setMenu] = createSignal<{ x: number; y: number; items: (MenuItem | "-")[] } | null>(null);
 
+/** Open the context menu at a point (e.g. under a "more" button). */
+export function openMenuAt(x: number, y: number, items: (MenuItem | "-")[]) {
+  setMenu({ x, y, items });
+}
+
 export function openMenu(e: MouseEvent, items: (MenuItem | "-")[]) {
   e.preventDefault();
   e.stopPropagation();
@@ -167,7 +193,15 @@ export function MenuHost() {
         <Portal>
           <div
             class="context-menu"
-            style={{ left: `${Math.min(m().x, window.innerWidth - 220)}px`, top: `${Math.min(m().y, window.innerHeight - m().items.length * 32 - 16)}px` }}
+            ref={(el) => {
+              // Keep inside the window, measured once laid out.
+              requestAnimationFrame(() => {
+                const r = el.getBoundingClientRect();
+                if (r.right > window.innerWidth - 8) el.style.left = `${Math.max(8, window.innerWidth - r.width - 8)}px`;
+                if (r.bottom > window.innerHeight - 8) el.style.top = `${Math.max(8, window.innerHeight - r.height - 8)}px`;
+              });
+            }}
+            style={{ left: `${m().x}px`, top: `${m().y}px` }}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <MenuList items={m().items} close={close} />
@@ -403,16 +437,25 @@ export function ComboBox(props: {
     const s = q().toLowerCase();
     return (s ? props.options.filter((o) => o.toLowerCase().includes(s)) : props.options).slice(0, 200);
   };
-  const onDoc = (e: MouseEvent) => !wrap.contains(e.target as Node) && setOpen(false);
+  let list: HTMLDivElement | undefined;
+  const [pos, setPos] = createSignal({ x: 0, y: 0, w: 0 });
+  const onDoc = (e: MouseEvent) => !within(wrap, e.target) && !within(list, e.target) && setOpen(false);
   onMount(() => document.addEventListener("mousedown", onDoc));
   onCleanup(() => document.removeEventListener("mousedown", onDoc));
+  const show = () => {
+    const r = wrap.getBoundingClientRect();
+    setPos({ x: r.left, y: r.bottom + 4, w: r.width });
+    setQ("");
+    setOpen(true);
+  };
   return (
     <div class={`combo ${props.class ?? ""}`} ref={wrap}>
       <input
         class="input"
         value={open() ? q() : props.value}
         placeholder={props.value || props.placeholder}
-        onFocus={() => (setQ(""), setOpen(true))}
+        onFocus={show}
+        onBlur={() => setOpen(false)}
         onInput={(e) => setQ(e.currentTarget.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
@@ -425,24 +468,40 @@ export function ComboBox(props: {
         }}
       />
       <Show when={open()}>
-        <div class="combo-list">
-          <For each={filtered()} fallback={<div class="combo-empty">No matches</div>}>
-            {(o) => (
-              <button
-                type="button"
-                class="combo-item"
-                classList={{ active: o === props.value }}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  props.onChange(o);
-                  setOpen(false);
-                }}
-              >
-                {props.renderOption ? props.renderOption(o) : o}
-              </button>
-            )}
-          </For>
-        </div>
+        {/* In a portal: toolbars and popovers clip overflowing children. */}
+        <Portal>
+          <div
+            class="combo-list"
+            ref={(el) => {
+              list = el;
+              markPortal(el, wrap);
+              requestAnimationFrame(() => {
+                const r = el.getBoundingClientRect();
+                if (r.right > window.innerWidth - 8) el.style.left = `${Math.max(8, window.innerWidth - r.width - 8)}px`;
+                if (r.bottom > window.innerHeight - 8) el.style.top = `${Math.max(8, pos().y - r.height - wrap.offsetHeight - 8)}px`;
+              });
+            }}
+            style={{ left: `${pos().x}px`, top: `${pos().y}px`, "min-width": `${pos().w}px` }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <For each={filtered()} fallback={<div class="combo-empty">No matches</div>}>
+              {(o) => (
+                <button
+                  type="button"
+                  class="combo-item"
+                  classList={{ active: o === props.value }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    props.onChange(o);
+                    setOpen(false);
+                  }}
+                >
+                  {props.renderOption ? props.renderOption(o) : o}
+                </button>
+              )}
+            </For>
+          </div>
+        </Portal>
       </Show>
     </div>
   );

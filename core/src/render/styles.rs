@@ -8,59 +8,42 @@ use std::collections::BTreeMap;
 
 use super::typst_str as q;
 
-macro_rules! mergeable {
-    ($(#[$m:meta])* pub struct $name:ident { $($(#[$fm:meta])* pub $field:ident : Option<$ty:ty>,)* }) => {
-        $(#[$m])*
-        pub struct $name { $($(#[$fm])* pub $field: Option<$ty>,)* }
-        impl $name {
-            /// Fields set in `other` win.
-            pub fn merge(&mut self, other: &Self) {
-                $(if other.$field.is_some() { self.$field = other.$field.clone(); })*
-            }
-        }
-    };
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct TextStyle {
+    /// Latin font family.
+    pub font: Option<String>,
+    /// Persian/Arabic font family (fallback after the Latin one).
+    pub font_fa: Option<String>,
+    pub size: Option<String>,
+    pub weight: Option<String>,
+    pub italic: Option<bool>,
+    pub underline: Option<bool>,
+    pub color: Option<String>,
+    /// start | end | left | center | right | justify
+    pub align: Option<String>,
+    /// Word-style multiplier: 1.0 single, 1.5, 2.0 double.
+    pub line_spacing: Option<f64>,
+    pub space_before: Option<String>,
+    pub space_after: Option<String>,
+    /// First-line indent (body only).
+    pub indent: Option<String>,
+    /// Heading numbering pattern, e.g. "1.", "1.1.", "۱.", "I." or "none".
+    pub numbering: Option<String>,
+    /// Background fill (quote/code).
+    pub background: Option<String>,
+    /// Accent bar / border color (quote/code).
+    pub border: Option<String>,
 }
 
-mergeable! {
-    #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
-    #[serde(default, rename_all = "kebab-case")]
-    pub struct TextStyle {
-        /// Latin font family.
-        pub font: Option<String>,
-        /// Persian/Arabic font family (fallback after the Latin one).
-        pub font_fa: Option<String>,
-        pub size: Option<String>,
-        pub weight: Option<String>,
-        pub italic: Option<bool>,
-        pub underline: Option<bool>,
-        pub color: Option<String>,
-        /// start | end | left | center | right | justify
-        pub align: Option<String>,
-        /// Word-style multiplier: 1.0 single, 1.5, 2.0 double.
-        pub line_spacing: Option<f64>,
-        pub space_before: Option<String>,
-        pub space_after: Option<String>,
-        /// First-line indent (body only).
-        pub indent: Option<String>,
-        /// Heading numbering pattern, e.g. "1.", "1.1.", "۱.", "I." or "none".
-        pub numbering: Option<String>,
-        /// Background fill (quote/code).
-        pub background: Option<String>,
-        /// Accent bar / border color (quote/code).
-        pub border: Option<String>,
-    }
-}
-
-mergeable! {
-    #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
-    #[serde(default, rename_all = "kebab-case")]
-    pub struct HeaderFooter {
-        pub left: Option<String>,
-        pub center: Option<String>,
-        pub right: Option<String>,
-        /// Draw a thin rule between header/footer and body.
-        pub line: Option<bool>,
-    }
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct HeaderFooter {
+    pub left: Option<String>,
+    pub center: Option<String>,
+    pub right: Option<String>,
+    /// Draw a thin rule between header/footer and body.
+    pub line: Option<bool>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
@@ -85,20 +68,6 @@ pub struct PageStyle {
     pub heading_digits: Option<String>,
 }
 
-impl PageStyle {
-    pub fn merge(&mut self, o: &Self) {
-        macro_rules! take { ($($f:ident),*) => { $(if o.$f.is_some() { self.$f = o.$f.clone(); })* } }
-        take!(paper, orientation, margin, columns, skip_first, numbering, background, heading_digits);
-        for (mine, theirs) in [(&mut self.header, &o.header), (&mut self.footer, &o.footer)] {
-            match (mine.as_mut(), theirs) {
-                (Some(m), Some(t)) => m.merge(t),
-                (None, Some(t)) => *mine = Some(t.clone()),
-                _ => {}
-            }
-        }
-    }
-}
-
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct Theme {
@@ -111,16 +80,6 @@ pub struct Theme {
 }
 
 impl Theme {
-    pub fn merge(&mut self, o: &Theme) {
-        if o.lang.is_some() {
-            self.lang = o.lang.clone();
-        }
-        self.page.merge(&o.page);
-        for (k, v) in &o.styles {
-            self.styles.entry(k.clone()).or_default().merge(v);
-        }
-    }
-
     pub fn style(&self, key: &str) -> TextStyle {
         self.styles.get(key).cloned().unwrap_or_default()
     }
@@ -143,6 +102,41 @@ pub fn parse_theme(yaml: &str) -> Result<Theme, String> {
         return Ok(Theme::default());
     }
     serde_yaml_ng::from_str(yaml).map_err(|e| e.to_string())
+}
+
+/// Deep-merge theme YAML: keys of `over` win and an explicit `null` clears
+/// the value underneath (a saved theme removing a built-in footer slot, a
+/// heading numbering, a color…). A `null` over a section that must stay a
+/// map (`page`, `styles`, one style) is ignored; header/footer may be cleared.
+pub fn merge_value(base: &mut serde_yaml_ng::Value, over: &serde_yaml_ng::Value) {
+    use serde_yaml_ng::Value;
+    match (base, over) {
+        (Value::Mapping(b), Value::Mapping(o)) => {
+            for (k, v) in o {
+                match b.get_mut(k) {
+                    Some(slot) => {
+                        let clearable = matches!(k.as_str(), Some("header" | "footer"));
+                        if v.is_null() && slot.is_mapping() && !clearable {
+                            continue;
+                        }
+                        merge_value(slot, v);
+                    }
+                    None if v.is_null() => {}
+                    None => {
+                        b.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+        (b, o) => *b = o.clone(),
+    }
+}
+
+pub fn theme_from_value(v: &serde_yaml_ng::Value) -> Option<Theme> {
+    if v.is_null() {
+        return Some(Theme::default());
+    }
+    serde_yaml_ng::from_value(v.clone()).ok()
 }
 
 pub fn builtin(name: &str) -> Option<Theme> {
@@ -256,6 +250,18 @@ fn text_args(st: &TextStyle) -> Vec<String> {
     a
 }
 
+/// `, above: x, below: y` for a block from a style's space before/after.
+fn block_space(st: &TextStyle) -> String {
+    let mut o = String::new();
+    if let Some(b) = st.space_before.as_deref().and_then(length) {
+        o.push_str(&format!(", above: {b}"));
+    }
+    if let Some(a) = st.space_after.as_deref().and_then(length) {
+        o.push_str(&format!(", below: {a}"));
+    }
+    o
+}
+
 fn leading(st: &TextStyle) -> Option<String> {
     st.line_spacing.filter(|f| (0.5..=4.0).contains(f)).map(|f| format!("{:.2}em", 0.65 + (f - 1.0)))
 }
@@ -314,7 +320,8 @@ fn header_footer(
         };
         format!("#set text(dir: {dir})\n{}", placeholder_markup(s, page_pattern))
     };
-    if hf.left.is_none() && hf.center.is_none() && hf.right.is_none() {
+    let empty = |s: &Option<String>| s.as_deref().is_none_or(|s| s.trim().is_empty());
+    if empty(&hf.left) && empty(&hf.center) && empty(&hf.right) {
         return None;
     }
     let grid = format!(
@@ -399,12 +406,12 @@ pub fn prelude(theme: &Theme, meta: &Meta) -> String {
     }
     page.push(format!("numbering: {}", q(&pattern)));
     let skip = p.skip_first.unwrap_or(false);
-    if let Some(h) = p.header.as_ref().and_then(|h| header_footer(h, &pattern, true, skip, meta, theme.is_rtl())) {
-        page.push(format!("header: {h}"));
-    }
-    if let Some(f) = p.footer.as_ref().and_then(|f| header_footer(f, &pattern, false, skip, meta, theme.is_rtl())) {
-        page.push(format!("footer: {f}"));
-    }
+    // An empty header/footer is `none`, not Typst's automatic page number.
+    let hf = |x: &Option<HeaderFooter>, is_header| {
+        x.as_ref().and_then(|h| header_footer(h, &pattern, is_header, skip, meta, theme.is_rtl())).unwrap_or_else(|| "none".into())
+    };
+    page.push(format!("header: {}", hf(&p.header, true)));
+    page.push(format!("footer: {}", hf(&p.footer, false)));
     o.push_str(&format!("#set page({})\n", page.join(", ")));
 
     // Body text & paragraphs.
@@ -486,8 +493,15 @@ pub fn prelude(theme: &Theme, meta: &Meta) -> String {
     }
     let qbar = qs.border.as_deref().and_then(color).unwrap_or_else(|| "luma(180)".into());
     let qfill = qs.background.as_deref().and_then(color).unwrap_or_else(|| "none".into());
+    if let Some(a) = qs.align.as_deref().and_then(align) {
+        o.push_str(&format!("#show quote.where(block: true): set align({a})\n"));
+    }
+    if qs.underline == Some(true) {
+        o.push_str("#show quote.where(block: true): underline\n");
+    }
     o.push_str(&format!(
-        "#show quote.where(block: true): it => block(width: 100%, fill: {qfill}, inset: (x: 12pt, y: 8pt), radius: 2pt, stroke: (left: 2.5pt + {qbar}), it.body)\n"
+        "#show quote.where(block: true): it => block(width: 100%, fill: {qfill}, inset: (x: 12pt, y: 8pt), radius: 2pt, stroke: (left: 2.5pt + {qbar}){}, it.body)\n",
+        block_space(&qs)
     ));
 
     // Code: always LTR.
@@ -500,18 +514,40 @@ pub fn prelude(theme: &Theme, meta: &Meta) -> String {
     o.push_str(&format!("#show raw: set text({})\n", ct.join(", ")));
     let cfill = cs.background.as_deref().and_then(color).unwrap_or_else(|| "luma(245)".into());
     let cstroke = cs.border.as_deref().and_then(color).map(|c| format!("0.5pt + {c}")).unwrap_or_else(|| "none".into());
+    let calign = cs.align.as_deref().and_then(align).unwrap_or("left");
     o.push_str(&format!(
-        "#show raw.where(block: true): it => block(width: 100%, fill: {cfill}, stroke: {cstroke}, inset: 10pt, radius: 4pt, align(left, it))\n"
+        "#show raw.where(block: true): it => block(width: 100%, fill: {cfill}, stroke: {cstroke}, inset: 10pt, radius: 4pt{}, align({calign}, it))\n",
+        block_space(&cs)
     ));
+    if cs.underline == Some(true) {
+        o.push_str("#show raw: underline\n");
+    }
 
     // Links, captions, tables.
-    let link = text_args(&theme.style("link"));
+    let ls = theme.style("link");
+    let link = text_args(&ls);
     if !link.is_empty() {
         o.push_str(&format!("#show link: set text({})\n", link.join(", ")));
     }
-    let cap = text_args(&theme.style("caption"));
+    if ls.underline == Some(true) {
+        o.push_str("#show link: underline\n");
+    }
+    let caps = theme.style("caption");
+    let cap = text_args(&caps);
     if !cap.is_empty() {
         o.push_str(&format!("#show figure.caption: set text({})\n", cap.join(", ")));
+    }
+    if let Some(a) = caps.align.as_deref().and_then(align) {
+        o.push_str(&format!("#show figure.caption: set align({a})\n"));
+    }
+    if caps.underline == Some(true) {
+        o.push_str("#show figure.caption: underline\n");
+    }
+    if let Some(g) = caps.space_before.as_deref().and_then(length) {
+        o.push_str(&format!("#set figure(gap: {g})\n"));
+    }
+    if let Some(b) = caps.space_after.as_deref().and_then(length) {
+        o.push_str(&format!("#show figure: set block(below: {b})\n"));
     }
     o.push_str("#set table(stroke: 0.5pt + luma(170), inset: 7pt)\n");
     o.push_str("#show table.cell.where(y: 0): set text(weight: \"bold\")\n");
@@ -533,13 +569,28 @@ pub fn title_block(theme: &Theme, meta: &Meta, subtitle: Option<&str>) -> String
         targs.push("weight: \"bold\"".into());
     }
     let talign = ts.align.as_deref().and_then(align).unwrap_or("center");
-    let mut o = format!("#align({talign})[\n#text({})[{}]\n", targs.join(", "), super::escape_markup(title));
+    let ul = |st: &TextStyle, body: String| if st.underline == Some(true) { format!("#underline[{body}]") } else { body };
+    let mut o = String::new();
+    if let Some(b) = ts.space_before.as_deref().and_then(length) {
+        o.push_str(&format!("#v({b})\n"));
+    }
+    o.push_str(&format!(
+        "#align({talign})[\n#text({})[{}]\n",
+        targs.join(", "),
+        ul(&ts, super::escape_markup(title))
+    ));
     if let Some(s) = subtitle {
         let mut sargs = text_args(&ss);
         if sargs.is_empty() {
             sargs.push("size: 1.25em, fill: luma(90)".into());
         }
-        o.push_str(&format!("\n#text({})[{}]\n", sargs.join(", "), super::escape_markup(s)));
+        let mut sub = format!("#text({})[{}]", sargs.join(", "), ul(&ss, super::escape_markup(s)));
+        if let Some(a) = ss.align.as_deref().and_then(align) {
+            sub = format!("#align({a})[{sub}]");
+        }
+        let before = ss.space_before.as_deref().and_then(length).map(|b| format!("#v({b}, weak: true)\n")).unwrap_or_default();
+        let after = ss.space_after.as_deref().and_then(length).map(|b| format!("\n#v({b}, weak: true)")).unwrap_or_default();
+        o.push_str(&format!("\n{before}{sub}{after}\n"));
     }
     if meta.author.is_some() || meta.date.is_some() {
         o.push_str("\n#text(fill: luma(80))[#notez-meta.author");
@@ -580,13 +631,46 @@ mod tests {
 
     #[test]
     fn merge_overrides_fields_only() {
-        let mut base = builtin("default").unwrap();
-        let over = parse_theme("styles:\n  h1:\n    color: \"#ff0000\"\n").unwrap();
-        let before = base.style("h1");
-        base.merge(&over);
-        let after = base.style("h1");
+        let yaml = BUILTIN_THEMES.iter().find(|(n, _)| *n == "default").unwrap().1;
+        let mut v: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let over = serde_yaml_ng::from_str("styles:\n  h1:\n    color: \"#ff0000\"\n").unwrap();
+        let before = builtin("default").unwrap().style("h1");
+        merge_value(&mut v, &over);
+        let after = theme_from_value(&v).unwrap().style("h1");
         assert_eq!(after.color.as_deref(), Some("#ff0000"));
         assert_eq!(after.size, before.size);
+    }
+
+    /// A saved theme (every field written, cleared ones as `null`) must be
+    /// able to remove built-in values: the vault's default.yaml moved the
+    /// page number from the center to the right.
+    #[test]
+    fn explicit_null_clears() {
+        let yaml = BUILTIN_THEMES.iter().find(|(n, _)| *n == "academic").unwrap().1;
+        let mut v: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let over = serde_yaml_ng::from_str(
+            "page:\n  numbering: '1'\n  header: null\n  footer:\n    left: null\n    center: null\n    right: '{page}'\n    line: null\nstyles:\n  h1:\n    numbering: null\n    color: null\n  h9: null\n",
+        )
+        .unwrap();
+        merge_value(&mut v, &over);
+        let t = theme_from_value(&v).unwrap();
+        let f = t.page.footer.clone().unwrap();
+        assert_eq!(f.center, None);
+        assert_eq!(f.right.as_deref(), Some("{page}"));
+        assert_eq!(t.page.header, None);
+        assert_eq!(t.style("h1").numbering, None);
+        assert!(t.style("h1").size.is_some());
+        let p = prelude(&t, &Meta { title: None, author: None, date: None });
+        assert!(p.contains("align(center)[]"), "{p}");
+        assert!(p.contains("header: none"), "{p}");
+    }
+
+    #[test]
+    fn empty_footer_is_none() {
+        let mut t = builtin("default").unwrap();
+        t.page.footer = Some(HeaderFooter { center: Some(" ".into()), ..Default::default() });
+        let p = prelude(&t, &Meta { title: None, author: None, date: None });
+        assert!(p.contains("footer: none"), "{p}");
     }
 
     #[test]

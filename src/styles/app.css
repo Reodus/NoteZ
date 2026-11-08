@@ -448,8 +448,27 @@ select.input {
 /* ---------------------------------------------------------------- shell */
 
 .shell {
+  position: relative;
   display: flex;
   height: 100%;
+}
+/* The sidebar toggle stays in the top-left corner; the sidebar head and,
+   with the sidebar closed, the tab bar leave room for it. */
+.sidebar-toggle {
+  position: absolute;
+  top: 6px;
+  inset-inline-start: 8px;
+  z-index: 30;
+  width: 30px;
+  height: 30px;
+}
+.sidebar-toggle.active {
+  color: var(--fg);
+}
+.shell.no-sidebar .tabbar,
+.shell.no-sidebar.no-tabbar .toolbar,
+.shell.no-sidebar.no-tabbar .layout-preview .panel-tabs {
+  padding-inline-start: 46px;
 }
 .workspace {
   flex: 1;
@@ -470,7 +489,7 @@ select.input {
   min-width: 200px;
 }
 .sidebar-head {
-  padding: 10px 10px 6px;
+  padding: 4px 10px 6px 46px;
 }
 .vault-switch {
   width: 100%;
@@ -851,9 +870,42 @@ mark {
   padding: 0 10px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
+  overflow: hidden;
+}
+/* Groups that don't fit move into the "more" popover; they stay here,
+   invisible and out of flow, so they can be measured when space returns. */
+.tb-row {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.tb-group.tb-hidden {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+.tb-more {
+  margin-inline-start: auto;
+}
+.tb-overflow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 0;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 6px;
+}
+.tb-overflow .tb-group {
+  padding: 2px 6px;
+}
+.tb-overflow .tb-group:last-child {
+  border: none;
 }
 .toolbar.disabled {
   opacity: 0.5;
@@ -867,16 +919,8 @@ mark {
   border-inline-end: 1px solid var(--border);
   flex-shrink: 0;
 }
-.tb-group:last-child,
-.tb-group.right {
+.tb-row > .tb-group:last-child {
   border: none;
-}
-.tb-group.right {
-  gap: 6px;
-}
-.tb-spacer {
-  flex: 1;
-  min-width: 8px;
 }
 .tb-btn,
 .pop-trigger.tb-btn {
@@ -969,15 +1013,6 @@ mark {
 .size-combo .input {
   height: 30px;
   font-size: 12.5px;
-}
-.theme-pill {
-  border: 1px solid var(--border) !important;
-  padding: 0 10px !important;
-  text-transform: capitalize;
-}
-.export-btn {
-  height: 30px;
-  flex-shrink: 0;
 }
 
 /* style gallery */
@@ -1158,11 +1193,8 @@ mark {
   position: relative;
 }
 .combo-list {
-  position: absolute;
+  position: fixed;
   z-index: 120;
-  top: calc(100% + 4px);
-  left: 0;
-  min-width: 100%;
   width: max-content;
   max-width: 320px;
   max-height: 300px;
@@ -3114,6 +3146,14 @@ input[type="range"] {
   .sidebar,
   .sidebar-slot {
     display: none;
+  }
+  .sidebar-toggle {
+    display: none;
+  }
+  .shell.no-sidebar .tabbar,
+  .shell.no-sidebar.no-tabbar .toolbar,
+  .shell.no-sidebar.no-tabbar .layout-preview .panel-tabs {
+    padding-inline-start: 8px;
   }
 }
 

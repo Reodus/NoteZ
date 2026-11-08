@@ -619,6 +619,11 @@ styles:
 - Anything set here overrides the theme for this note only. To change a theme
   for every note, edit it in **Styles → Themes**. Vault themes are saved in
   `<vault>/.notez/styles/`.
+- `null` removes a value the theme sets: `footer: { center: null, right: "{page}" }`
+  moves the page number from the center to the right, and `h1: { numbering: null }`
+  turns off heading numbers. A header or footer with no text left is not drawn
+  (no automatic page number either).
+- Theme, page setup and PDF export are in the note's **⋯** menu (top right).
 
 ## Templates
 

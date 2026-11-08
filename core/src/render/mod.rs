@@ -110,30 +110,60 @@ pub fn parse_frontmatter(text: &str) -> (FrontMatter, &str, usize, Option<String
     }
 }
 
-/// Built-in theme `name` (or default), overlaid with `<vault>/.notez/styles/<name>.yaml`.
-pub fn load_theme(vault: Option<&Path>, name: &str) -> Theme {
-    let mut theme = styles::builtin(name).or_else(|| styles::builtin("default")).unwrap_or_default();
-    if let Some(v) = vault {
-        let file = v.join(".notez/styles").join(format!("{name}.yaml"));
-        if let Ok(y) = std::fs::read_to_string(file) {
-            if let Ok(t) = styles::parse_theme(&y) {
-                theme.merge(&t);
+/// Built-in theme `name` (or default) as YAML, overlaid with
+/// `<vault>/.notez/styles/<name>.yaml`.
+fn theme_value(vault: Option<&Path>, name: &str) -> serde_yaml_ng::Value {
+    let builtin = styles::BUILTIN_THEMES
+        .iter()
+        .find(|(n, _)| *n == name)
+        .or_else(|| styles::BUILTIN_THEMES.iter().find(|(n, _)| *n == "default"))
+        .map(|(_, y)| *y)
+        .unwrap_or("");
+    let mut v: serde_yaml_ng::Value = serde_yaml_ng::from_str(builtin).unwrap_or_default();
+    if let Some(dir) = vault {
+        let file = dir.join(".notez/styles").join(format!("{name}.yaml"));
+        if let Some(over) = std::fs::read_to_string(file).ok().and_then(|y| serde_yaml_ng::from_str(&y).ok()) {
+            // Only a file that is a valid theme on its own may overlay.
+            if styles::theme_from_value(&over).is_some() {
+                styles::merge_value(&mut v, &over);
             }
         }
     }
+    v
+}
+
+/// Built-in theme `name` (or default), overlaid with `<vault>/.notez/styles/<name>.yaml`.
+/// An explicit `null` in the vault file clears the built-in value.
+pub fn load_theme(vault: Option<&Path>, name: &str) -> Theme {
+    let mut theme = styles::theme_from_value(&theme_value(vault, name))
+        .or_else(|| styles::builtin(name))
+        .or_else(|| styles::builtin("default"))
+        .unwrap_or_default();
     theme.name.get_or_insert_with(|| name.to_string());
     theme
 }
 
-pub fn theme_for(vault: Option<&Path>, fm: &FrontMatter) -> Theme {
-    let mut theme = load_theme(vault, fm.theme.as_deref().unwrap_or("default"));
-    let over = Theme {
-        lang: fm.lang.clone(),
-        page: fm.page.clone().unwrap_or_default(),
-        styles: fm.styles.clone(),
-        ..Default::default()
-    };
-    theme.merge(&over);
+/// Effective theme of a note: its theme plus the frontmatter's `lang`,
+/// `page` and `styles` (`fm_yaml` is the raw frontmatter, so an explicit
+/// `null` there clears a theme value too).
+pub fn theme_for(vault: Option<&Path>, fm: &FrontMatter, fm_yaml: Option<&str>) -> Theme {
+    let name = fm.theme.as_deref().unwrap_or("default");
+    let mut v = theme_value(vault, name);
+    let over = fm_yaml.and_then(|y| serde_yaml_ng::from_str::<serde_yaml_ng::Value>(y).ok());
+    if let Some(serde_yaml_ng::Value::Mapping(m)) = over {
+        let mut layer = serde_yaml_ng::Mapping::new();
+        for key in ["lang", "page", "styles"] {
+            if let Some(x) = m.get(key) {
+                layer.insert(key.into(), x.clone());
+            }
+        }
+        let layer = serde_yaml_ng::Value::Mapping(layer);
+        if styles::theme_from_value(&layer).is_some() {
+            styles::merge_value(&mut v, &layer);
+        }
+    }
+    let mut theme = styles::theme_from_value(&v).unwrap_or_else(|| load_theme(vault, name));
+    theme.name.get_or_insert_with(|| name.to_string());
     theme
 }
 
@@ -271,7 +301,7 @@ pub fn build(vault: Option<&Path>, note_path: &str, text: &str, rendered: &md::R
 
     let (fm, body, body_line, fm_err) = parse_frontmatter(text);
     notes.extend(fm_err);
-    let theme = theme_for(vault, &fm);
+    let theme = theme_for(vault, &fm, split_frontmatter(text).0);
     let meta = Meta { title: fm.title.as_deref(), author: fm.author.as_deref(), date: fm.date.as_deref() };
     let base = if theme.is_rtl() { md::Dir::Rtl } else { md::Dir::Ltr };
     let resolve = |url: &str| resolve_image(vault, note_dir, url);

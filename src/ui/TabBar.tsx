@@ -1,17 +1,15 @@
 import { For, Show } from "solid-js";
-import { X, FileText, FileCode2, FileImage, FileType2, PanelLeft, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2 } from "lucide-solid";
-import { state, setState, isDirty, closeTab, prefs, setPrefs, sidebarOpen, setSidebarOpen, setFocusMode } from "../core/store";
+import { X, FileText, FileCode2, FileImage, FileType2, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2 } from "lucide-solid";
+import { state, setState, isDirty, closeTab, prefs, setPrefs, setFocusMode } from "../core/store";
 import { stem, basename, fileKind, isNotePath } from "../core/ipc";
 import { fileMenu, entryFor } from "./fileMenu";
 import { openMenu } from "./primitives";
+import { NoteMenuButton } from "./NoteMenu";
 
 export default function TabBar() {
   let dragFrom = -1;
   return (
     <div class="tabbar">
-      <button class="icon-btn" title="Toggle sidebar (Ctrl+\\)" onClick={() => setSidebarOpen(!sidebarOpen())}>
-        <PanelLeft size={17} />
-      </button>
       <div class="tabs">
         <For each={state.tabs}>
           {(path, i) => (
@@ -92,6 +90,7 @@ export default function TabBar() {
           <PanelRight size={15} />
         </button>
       </div>
+      <NoteMenuButton />
     </div>
   );
 }

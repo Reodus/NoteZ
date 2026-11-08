@@ -45,16 +45,48 @@ async function refreshTheme() {
   runPreview();
 }
 
-/** Fields of `edited` that differ from `base` (for minimal frontmatter). */
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const norm = (v: unknown) => (v === undefined || v === "" ? null : v);
+
+/**
+ * Fields of `edited` that differ from `base` (for minimal frontmatter).
+ * A field cleared in `edited` but set in `base` comes out as `null`, which
+ * the core reads as "remove the theme's value"; nested objects (header,
+ * footer) are diffed field by field.
+ */
 function diff<T extends object>(edited: T, base: T): Partial<T> {
-  const out: Partial<T> = {};
-  for (const k of Object.keys(edited) as (keyof T)[]) {
-    const a = edited[k];
-    const b = base[k];
-    if (a !== undefined && a !== null && a !== "" && JSON.stringify(a) !== JSON.stringify(b)) out[k] = a;
+  const out: Record<string, unknown> = {};
+  const e = edited as Record<string, unknown>;
+  const b = base as Record<string, unknown>;
+  for (const k of new Set([...Object.keys(e), ...Object.keys(b)])) {
+    const x = norm(e[k]);
+    const y = norm(b[k]);
+    if (isObj(x) && isObj(y)) {
+      const d = diff(x, y);
+      if (Object.keys(d).length) out[k] = d;
+    } else if (JSON.stringify(x) !== JSON.stringify(y)) {
+      out[k] = x;
+    }
   }
-  return out;
+  return out as Partial<T>;
 }
+
+/** The active note's effective theme (theme + its frontmatter overrides). */
+async function effectiveTheme(fallback: Theme): Promise<Theme> {
+  const path = state.active;
+  if (!path) return fallback;
+  try {
+    return await ipc.noteTheme(path, state.buffers[path]?.content ?? "");
+  } catch {
+    return fallback;
+  }
+}
+
+/** "12" → "12pt" for spacing fields; empty → null. */
+const pt = (v: string) => (/^\d+(\.\d+)?$/.test(v.trim()) ? `${v.trim()}pt` : v.trim() || null);
+
+/** "2" → "2cm": a bare number in a length field means centimetres. */
+const withUnit = (v: string) => (/^\d+(\.\d+)?$/.test(v.trim()) ? `${v.trim()}cm` : v.trim());
 
 const WEIGHTS = ["light", "regular", "medium", "semibold", "bold", "extrabold"];
 const SPACING = [
@@ -128,15 +160,15 @@ export function StyleDialog(props: { styleKey: string; scope: "note" | "theme"; 
   const [st, setSt] = createStore<TextStyle>({});
   const [base] = createResource(async () => {
     const t = await ipc.theme(themeId);
-    const baseStyle = t.styles[props.styleKey] ?? {};
-    const text = state.active ? state.buffers[state.active]?.content ?? "" : "";
-    const noteOver = (readFrontmatter(text).styles ?? {})[props.styleKey] ?? {};
-    setSt(reconcile({ ...baseStyle, ...noteOver }));
+    const eff = await effectiveTheme(t);
+    setSt(reconcile(structuredClone(eff.styles[props.styleKey] ?? {})));
     return t;
   });
   const isHeading = /^h\d$/.test(props.styleKey);
   const boxy = props.styleKey === "quote" || props.styleKey === "code";
   const body = props.styleKey === "body";
+  // Links are inline: alignment and paragraph spacing don't apply.
+  const inline = props.styleKey === "link";
   const fonts = () => fontList();
 
   const save = async () => {
@@ -215,6 +247,7 @@ export function StyleDialog(props: { styleKey: string; scope: "note" | "theme"; 
             </div>
           </Field>
           <ColorField label="Color" value={st.color} onChange={(c) => set("color", c)} />
+          <Show when={!inline}>
           <Field label="Alignment" wide>
             <Segmented
               value={st.align ?? "inherit"}
@@ -229,6 +262,7 @@ export function StyleDialog(props: { styleKey: string; scope: "note" | "theme"; 
               ]}
             />
           </Field>
+          </Show>
           <Show when={body}>
             <Field label="Line spacing">
               <select class="input" value={st["line-spacing"] ?? ""} onChange={(e) => set("line-spacing", e.currentTarget.value ? Number(e.currentTarget.value) : null)}>
@@ -237,17 +271,19 @@ export function StyleDialog(props: { styleKey: string; scope: "note" | "theme"; 
               </select>
             </Field>
             <Field label="First-line indent" hint="e.g. 1.2em, 0.5cm">
-              <input class="input" value={st.indent ?? ""} placeholder="none" onChange={(e) => set("indent", e.currentTarget.value.trim() || null)} />
+              <input class="input" value={st.indent ?? ""} placeholder="none" onChange={(e) => set("indent", pt(e.currentTarget.value))} />
             </Field>
           </Show>
-          <Show when={!body}>
-            <Field label="Space before" hint="e.g. 12pt, 1em">
-              <input class="input" value={st["space-before"] ?? ""} placeholder="Inherit" onChange={(e) => set("space-before", e.currentTarget.value.trim() || null)} />
+          <Show when={!body && !inline}>
+            <Field label={props.styleKey === "caption" ? "Gap above caption" : "Space before"} hint="e.g. 12pt, 1em">
+              <input class="input" value={st["space-before"] ?? ""} placeholder="Inherit" onChange={(e) => set("space-before", pt(e.currentTarget.value))} />
             </Field>
           </Show>
+          <Show when={!inline}>
           <Field label={body ? "Paragraph spacing" : "Space after"} hint="e.g. 8pt, 0.8em">
-            <input class="input" value={st["space-after"] ?? ""} placeholder="Inherit" onChange={(e) => set("space-after", e.currentTarget.value.trim() || null)} />
+            <input class="input" value={st["space-after"] ?? ""} placeholder="Inherit" onChange={(e) => set("space-after", pt(e.currentTarget.value))} />
           </Field>
+          </Show>
           <Show when={isHeading}>
             <Field label="Numbering">
               <select class="input" value={st.numbering ?? "none"} onChange={(e) => set("numbering", e.currentTarget.value === "none" ? null : e.currentTarget.value)}>
@@ -298,8 +334,7 @@ export function PageSetupDialog(props: { onClose: () => void }) {
   const [margins, setMargins] = createStore({ top: "", right: "", bottom: "", left: "" });
   const [base] = createResource(async () => {
     const t = await ipc.theme(themeId);
-    const text = state.active ? state.buffers[state.active]?.content ?? "" : "";
-    const merged: PageStyle = { ...t.page, ...(readFrontmatter(text).page ?? {}) };
+    const merged: PageStyle = (await effectiveTheme(t)).page ?? {};
     setPg(reconcile(structuredClone(merged)));
     const parts = (merged.margin ?? "2.5cm").split(/\s+/);
     const [a, b, c, d] = parts.length === 4 ? parts : parts.length === 2 ? [parts[0], parts[1], parts[0], parts[1]] : [parts[0], parts[0], parts[0], parts[0]];
@@ -310,7 +345,7 @@ export function PageSetupDialog(props: { onClose: () => void }) {
   const save = async () => {
     const theme = base();
     if (!theme) return;
-    const m = margins;
+    const m = { top: withUnit(margins.top), right: withUnit(margins.right), bottom: withUnit(margins.bottom), left: withUnit(margins.left) };
     const margin = m.top === m.right && m.right === m.bottom && m.bottom === m.left ? m.top : `${m.top} ${m.right} ${m.bottom} ${m.left}`;
     const page: PageStyle = { ...unwrap(pg), margin };
     try {

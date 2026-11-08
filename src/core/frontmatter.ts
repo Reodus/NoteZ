@@ -33,12 +33,14 @@ export function readFrontmatter(text: string): Record<string, any> {
   }
 }
 
+/** Drop undefined/"" and empty objects. A nested `null` is kept: in style
+ * and page overrides it means "clear the theme's value". */
 function prune(v: any): any {
   if (v && typeof v === "object" && !Array.isArray(v)) {
     const o: Record<string, any> = {};
     for (const [k, x] of Object.entries(v)) {
       const p = prune(x);
-      if (p !== undefined && p !== null && p !== "" && !(typeof p === "object" && Object.keys(p).length === 0)) o[k] = p;
+      if (p !== undefined && p !== "" && !(p && typeof p === "object" && Object.keys(p).length === 0)) o[k] = p;
     }
     return o;
   }

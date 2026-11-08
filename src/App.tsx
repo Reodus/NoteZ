@@ -1,8 +1,8 @@
 import { createEffect, onCleanup, onMount, Show, Switch, Match } from "solid-js";
-import { Copy, Minimize2 } from "lucide-solid";
+import { Copy, Minimize2, PanelLeft } from "lucide-solid";
 import { app, notify } from "./core/app";
 import {
-  root, prefs, isDark, openVault, openNote, dialog, setDialog, sidebarOpen, saveAll, state,
+  root, prefs, isDark, openVault, openNote, dialog, setDialog, sidebarOpen, setSidebarOpen, saveAll, state,
   focusMode, setFocusMode, viewLayout,
 } from "./core/store";
 import { ipc } from "./core/ipc";
@@ -118,7 +118,18 @@ export default function App() {
   return (
     <>
       <Show when={root()} fallback={<Welcome />}>
-        <div class="shell" classList={{ "no-sidebar": !sidebarOpen() || focusMode(), focus: focusMode() }}>
+        <div class="shell" classList={{ "no-sidebar": !sidebarOpen() || focusMode(), focus: focusMode(), "no-tabbar": !prefs.showTabBar }}>
+          {/* Fixed in the top-left corner whether the sidebar is open or not. */}
+          <Show when={!focusMode()}>
+            <button
+              class="icon-btn sidebar-toggle"
+              classList={{ active: sidebarOpen() }}
+              title={sidebarOpen() ? "Hide sidebar (Ctrl+\\)" : "Show sidebar (Ctrl+\\)"}
+              onClick={() => setSidebarOpen(!sidebarOpen())}
+            >
+              <PanelLeft size={17} />
+            </button>
+          </Show>
           <div
             class="sidebar-slot"
             style={{ width: sidebarOpen() && !focusMode() ? `${prefs.sidebarWidth}px` : "0px" }}

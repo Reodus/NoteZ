@@ -305,7 +305,7 @@ fn note_theme(state: &AppState, path: String, text: String) -> Theme {
         return render::load_theme(root.as_deref(), &id);
     }
     let (fm, ..) = render::parse_frontmatter(&text);
-    render::theme_for(root.as_deref(), &fm)
+    render::theme_for(root.as_deref(), &fm, render::split_frontmatter(&text).0)
 }
 
 /// Save a theme into the vault (`.notez/styles/<id>.yaml`).
