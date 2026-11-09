@@ -533,6 +533,26 @@ mod tests {
             let (errs, pages) = compile_errors(&format!("{name}.md"), &text);
             assert!(errs.is_empty(), "{name}: {errs:#?}");
             assert_eq!(pages, 1, "{name}");
+            // No glyph fell back to .notdef (a box): every script found a font.
+            let mut world = world::NoteWorld::new(world::dev_packages_dir());
+            world.prepare(&built.main_path, built.source.clone(), vec![]).unwrap();
+            let doc = typst::compile::<typst_layout::PagedDocument>(&world).output.expect("compiles");
+            fn tofu(f: &typst::layout::Frame, out: &mut Vec<String>) {
+                for (_, item) in f.items() {
+                    match item {
+                        typst::layout::FrameItem::Group(g) => tofu(&g.frame, out),
+                        typst::layout::FrameItem::Text(t) => {
+                            for g in t.glyphs.iter().filter(|g| g.id == 0) {
+                                out.push(t.text[g.range()].to_string());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let mut missing = vec![];
+            doc.pages().iter().for_each(|p| tofu(&p.frame, &mut missing));
+            assert!(missing.is_empty(), "{name}: no font for {missing:?}");
         }
         // Mixed: spans and blocks with their own languages.
         let text = std::fs::read_to_string(dir.join("Mixed.md")).unwrap();
