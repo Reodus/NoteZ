@@ -19,7 +19,7 @@ written as plain Typst). Each example below shows what to type. Unless marked
 - [Annotating notes](#annotating-notes)
 - [Styled text: spans](#styled-text-spans)
 - [Layout blocks: divs](#layout-blocks-divs)
-- [Persian and English (direction)](#persian-and-english-direction)
+- [Languages and direction](#languages-and-direction)
 - [Math](#math)
 - [Code](#code)
 - [Charts and diagrams](#charts-and-diagrams)
@@ -105,9 +105,16 @@ under an item to keep it part of the item.
 [[Other note|shown text]]          with different text
 [[Other note#Some heading]]        to a heading in another note
 [[#Some heading]]                  to a heading in this note
+[[Other note#^block-id]]           to one block (paragraph, list item…) of a note
 [jump](#some-heading)              Markdown-style heading link
+
+![[Other note]]                    show a note inside this one
+![[Other note#Some heading]]       … one heading's section
+![[Other note#^block-id]]          … one block
 ```
 
+- Type `((` to search every block of the vault and link to one; see
+  [Blocks, references and embeds](BLOCKS.md).
 - Renaming a note or folder in NoteZ rewrites the links that point to it.
 - In the PDF, links to headings in the same note are clickable. Links to
   other notes are shown in link color without a target, and web links open
@@ -278,7 +285,8 @@ with spaces, and put a value that contains spaces in double quotes.
 [struck]{strike}
 [highlighted]{highlight=#fff3a3}
 [centered line]{align=center}
-[English inside a Persian line]{dir=ltr}
+[English inside an Arabic line]{dir=ltr}
+[日本語]{lang=ja}
 [all at once]{font="Vazirmatn" size=14pt color=#1d2b4f bold underline highlight=#e9f1fd}
 ```
 
@@ -286,13 +294,14 @@ with spaces, and put a value that contains spaces in double quotes.
 |----------------------|-----------------------------------------------------------|
 | `color`              | `#rgb`, `#rrggbb` (also with alpha), or one of `black gray silver white navy blue aqua teal purple fuchsia maroon red orange yellow olive green lime` |
 | `size`               | a length: `12pt`, `1.2em`, `5mm`                          |
-| `font`               | any installed font family. Persian falls back to Vazirmatn |
+| `font`               | any installed font family; letters it lacks fall back to the theme's fonts |
 | `bold`, `italic`     | no value                                                  |
 | `weight`             | `100`–`900`, or `light`, `medium`, `semibold`, `bold`, …  |
 | `underline`, `strike`| no value                                                  |
 | `highlight` / `bg`   | a color (yellow if left empty)                            |
 | `align`              | `left`, `right`, `center`, `start`, `end`                 |
 | `dir`                | `rtl` or `ltr`                                            |
+| `lang`               | a language code (`ar`, `ja`, `zh-TW`, `hi`…): its direction, hyphenation and fonts |
 
 `<center>text</center>` (from Obsidian) is the same as
 `[text]{align=center}`.
@@ -340,22 +349,36 @@ A div takes all the span text attributes (`color`, `size`, `font`, `bold`,
 
 Divs can be nested. Each `:::` closes the innermost open one.
 
-## Persian and English (direction)
+## Languages and direction
 
-You normally don't need to do anything here. Each paragraph, heading, list
-item and table cell picks its direction from its first letter, in the editor
-and in the PDF:
+You normally don't need to do anything here. NoteZ works with any language.
+Each note's language is detected from its text, and each paragraph, heading,
+list item and table cell picks its direction from its first letter, in the
+editor and in the PDF:
 
-- `سلام دنیا` is right-to-left, and `Hello world` is left-to-right.
-- A line that starts with an English word but is mostly Persian is still
-  right-to-left: `Windows یک سیستم عامل است`.
+- `مرحبا بالعالم` and `سلام دنیا` run right-to-left; `Hello world`,
+  `Привет мир`, `नमस्ते दुनिया` and `你好，世界` run left-to-right.
+- A line that starts with a left-to-right word but is mostly right-to-left is
+  still right-to-left: `Windows یک سیستم عامل است`.
 
-To force a direction:
+To set the language of a whole note, add `lang:` to its
+[frontmatter](#frontmatter-properties) (`lang: ar`, `lang: ja`, `lang: pt-BR`…).
+The language decides the base direction, hyphenation, quotation marks, the
+regional shapes of Chinese/Japanese/Korean characters and the digits of
+`digits: auto` numbering. See [Languages](LANGUAGES.md) for the details.
+
+To set the language or direction of one block or phrase:
 
 ```markdown
+::: {lang=ar}
+
+A block in Arabic: right-to-left, with Arabic hyphenation and fonts.
+
+:::
+
 ::: {dir=ltr}
 
-A block that always runs left-to-right, even if it starts with Persian.
+A block that always runs left-to-right, even if it starts with Arabic.
 
 :::
 
@@ -365,11 +388,8 @@ A block that always runs right-to-left.
 
 :::
 
-متن فارسی با [an English phrase]{dir=ltr} در وسط.
+English text with [日本語のフレーズ]{lang=ja} and [an English phrase]{dir=ltr} inside.
 ```
-
-The note's base language (and the PDF's default direction) is set by `lang:`
-in the [frontmatter](#frontmatter-properties) or by the theme.
 
 ## Math
 
@@ -412,6 +432,48 @@ def hello():
 The language after the opening fence turns on syntax highlighting. `~~~`
 works as a fence too. A few language names are special and draw something
 instead, as covered in the next section.
+
+### Assembly
+
+Assembly is highlighted in the editor and in the PDF. Mnemonics, registers,
+labels, directives, numbers, strings and comments each get their own colour.
+
+````markdown
+```nasm
+section .text
+global _start
+_start:
+    mov rax, 60      ; exit
+    xor edi, edi
+    syscall
+```
+````
+
+One set of rules covers the common dialects. Use any of these names after the
+fence:
+
+| Dialect | Fence names |
+|---|---|
+| x86 / x86-64, Intel syntax (NASM, YASM, FASM, MASM) | `asm`, `nasm`, `yasm`, `fasm`, `masm`, `x86`, `x64`, `x86asm`, `x86_64` |
+| x86 AT&T syntax (GNU as) | `gas`, `att`, `s` |
+| ARM, Thumb, AArch64 | `arm`, `armasm`, `thumb`, `arm64`, `aarch64` |
+| RISC-V | `riscv`, `riscv32`, `riscv64`, `rv32`, `rv64` |
+| MIPS | `mips`, `mips64` |
+| AVR | `avr` |
+
+What is recognized:
+- Comments: `; …`, `// …`, `/* … */`, `# …` and `@ …` (ARM). For the last
+  two, the `#` or `@` must have a space after it, because `#8` is an ARM
+  immediate.
+- Labels (`loop:`, `.L1:`, `1:`), and references to local labels like `1b` and
+  `2f`.
+- Directives (`.text`, `section`, `db`, `%define`, `#include`, `name PROC`).
+- Registers: `rax`, `%rax`, `x0`, `w1`, `v0.16b`, `a0`, `$t0`, `r16`…
+- Numbers: `0x1f`, `0FFh`, `0b101`, `$1` (AT&T), `#8` (ARM).
+- Relocations: `%hi(sym)`, `:lo12:sym`, `sym@PLT`.
+
+`$1` is read as an AT&T immediate, not as MIPS register 1. Write MIPS
+registers by name (`$t0`, `$sp`).
 
 Raw Typst, for anything Markdown can't express:
 
@@ -557,7 +619,7 @@ content((0, 0), [Circle])
 ```
 ````
 
-Labels in every diagram type can be Persian or English.
+Labels in every diagram type can be in any language and script.
 
 ## Page breaks, table of contents, spacing
 
@@ -583,15 +645,16 @@ subtitle: Chapter 2 — Threat models
 author: Reo
 date: 2026-11-08
 tags: [security, hardware]
-theme: academic          # default, academic, modern, minimal, report or your own
-lang: en                 # fa (right-to-left base) or en
+theme: academic          # any built-in theme (see PDF-THEMES.md) or your own
+lang: en                 # the note's language (ISO code: en, ar, fa, ja, pt-BR…); omit to detect it
 toc: true                # table of contents after the title
 page:
   paper: a4              # a4, a5, us-letter, …
   orientation: portrait  # or landscape
   margin: 2cm
   columns: 1
-  numbering: "1"         # page number style: "1", "۱", "i", "I", …
+  numbering: "1"         # page number style: "1", "i", "I", "a", "1 / 1", …
+  digits: auto           # digits for page and heading numbers: auto (the language's own), latin, persian, arabic-indic, devanagari, thai…
   skip-first: true       # no header/footer on the first page
   header:
     right: "{title}"
@@ -612,10 +675,12 @@ styles:
   include `{page}`, `{total}`, `{title}`, `{author}`, `{date}` and `{chapter}`
   (the current level-1 heading).
 - The style names are `body`, `title`, `subtitle`, `h1`–`h6`, `quote`, `code`,
-  `link` and `caption`. Style keys: `font`, `font-fa` (Persian font), `size`,
-  `weight`, `italic`, `underline`, `color`, `background`, `border`, `align`,
-  `line-spacing`, `space-before`, `space-after`, `indent`, `numbering`
-  (headings: `"1."`, `"1.1."`, `"۱."`, `"I."`, `"none"`).
+  `link` and `caption`. Style keys: `font`, `fonts` (a font per script, e.g.
+  `{ arabic: Vazirmatn, cjk: Noto Serif CJK JP }`), `size`, `weight`, `italic`,
+  `underline`, `smallcaps`, `tracking` (letter spacing), `color`, `background`,
+  `border`, `align`, `line-spacing`, `space-before`, `space-after`, `indent`,
+  `numbering` (headings: `"1."`, `"1.1."`, `"I."`, `"α."`, `"none"`). The full
+  reference is in [PDF themes](PDF-THEMES.md).
 - Anything set here overrides the theme for this note only. To change a theme
   for every note, edit it in **Styles → Themes**. Vault themes are saved in
   `<vault>/.notez/styles/`.
@@ -656,6 +721,9 @@ These placeholders are filled in when a template is used:
 | `Ctrl+Shift+S`     | export PDF                      |
 | `Ctrl+N` / `Ctrl+P` / `Ctrl+Shift+P` | new note / quick open / commands |
 | `Ctrl+Shift+Enter` | focus mode                      |
+| `((`               | link to a block (search the vault) |
+| `Ctrl+Shift+[` / `]` | fold / unfold                 |
+| `Ctrl+Shift+.` / `,` | zoom into / out of a section or list item |
 
 ## Quick reference
 
@@ -665,7 +733,8 @@ These placeholders are filled in when a template is used:
 ::: {align=center columns=2 box=#7b93d1 dir=rtl font="Libertinus Serif" size=10pt}  …  :::
 # H1 … ###### H6        ## Heading {#id}        ---
 - item   1. item   - [ ] task   - [x] done
-[[Note]]  [[Note|text]]  [[Note#Heading]]  [[#Heading]]  [text](https://…)
+[[Note]]  [[Note|text]]  [[Note#Heading]]  [[#Heading]]  [[Note#^id]]  [text](https://…)
+text ^id     ((search → block link     ![[Note#^id]]  ![[Note#Heading]]
 ![[img.png|300]]  ![Caption](img.png)  ![[doc.pdf#page=2|400]]
 > quote        > [!tip] Title        > [!note]- folded (Obsidian)
 text[^1]   [^1]: footnote          %% hidden comment %%

@@ -3,11 +3,14 @@ import { startResize } from "./resize";
 import {
   Files, Search, FilePlus, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, FileText, FileCode2,
   FolderInput, Settings, Sun, Moon, Monitor, ArrowLeftRight, ChevronsDownUp, Waypoints, File, FileImage, FileType2,
+  Hash, Bookmark,
 } from "lucide-solid";
+import { noteIcon } from "../core/meta";
+import { SearchPane, TagsPane, BookmarksPane, newBookmarkGroup, searchFor, openReplace } from "./SidebarPanes";
 import { fileMenu, newNoteIn, newFolderIn } from "./fileMenu";
 import { graphOpen, setGraphOpen } from "./GraphView";
 import { app } from "../core/app";
-import { Entry, dirname, ipc, SearchHit, stem, fileKind } from "../core/ipc";
+import { Entry, stem, fileKind } from "../core/ipc";
 import {
   tree, root, state, openNote, moveEntry,
   sidebarTab, setSidebarTab, setDialog, prefs, setPrefs, closeVault, newNoteDir,
@@ -62,7 +65,7 @@ function entryMenu(e: MouseEvent, entry: Entry | null) {
 function visible(e: Entry): boolean {
   if (e.is_dir) return true;
   const k = fileKind(e.path);
-  return k === "note" || (k === "other" ? prefs.showAllFiles : prefs.showAttachments || prefs.showAllFiles);
+  return k === "note" || k === "base" || (k === "other" ? prefs.showAllFiles : prefs.showAttachments || prefs.showAllFiles);
 }
 
 /** Open every folder up to `path`, then scroll its row into view and flash it. */
@@ -93,6 +96,7 @@ function FileIcon(props: { path: string }) {
   const k = () => fileKind(props.path);
   return (
     <Switch fallback={<File size={15} class="ti other" />}>
+      <Match when={noteIcon(props.path)}>{(i) => <span class="note-icon">{i()}</span>}</Match>
       <Match when={props.path.endsWith(".typ")}><FileCode2 size={15} class="ti typ" /></Match>
       <Match when={k() === "note"}><FileText size={15} class="ti" /></Match>
       <Match when={k() === "image"}><FileImage size={15} class="ti image" /></Match>
@@ -203,86 +207,13 @@ function FilesPane() {
   );
 }
 
-function SearchPane() {
-  const [q, setQ] = createSignal("");
-  const [hits, setHits] = createSignal<SearchHit[]>([]);
-  const [busy, setBusy] = createSignal(false);
-  let timer: number | undefined;
-  let input!: HTMLInputElement;
-
-  createEffect(on(q, (query) => {
-    clearTimeout(timer);
-    timer = window.setTimeout(async () => {
-      if (!query.trim()) return setHits([]);
-      setBusy(true);
-      try {
-        setHits(await ipc.search(query, [...prefs.excludedFolders]));
-      } finally {
-        setBusy(false);
-      }
-    }, 180);
-  }));
-
-  createEffect(() => sidebarTab() === "search" && setTimeout(() => input?.focus()));
-
-  const grouped = () => {
-    const m = new Map<string, SearchHit[]>();
-    for (const h of hits()) m.set(h.path, [...(m.get(h.path) ?? []), h]);
-    return [...m.entries()];
-  };
-
-  const mark = (text: string) => {
-    const query = q().trim();
-    if (!query) return text;
-    const i = text.toLowerCase().indexOf(query.toLowerCase());
-    if (i < 0) return text;
-    return (
-      <>
-        {text.slice(0, i)}
-        <mark>{text.slice(i, i + query.length)}</mark>
-        {text.slice(i + query.length)}
-      </>
-    );
-  };
-
-  return (
-    <div class="search-pane">
-      <div class="search-box">
-        <Search size={15} />
-        <input ref={input} dir="auto" placeholder="Search notes… / جستجو" value={q()} onInput={(e) => setQ(e.currentTarget.value)} />
-      </div>
-      <div class="search-meta">
-        <Show when={q().trim()}>{busy() ? "Searching…" : `${hits().length} results`}</Show>
-      </div>
-      <div class="search-results">
-        <For each={grouped()}>
-          {([path, list]) => (
-            <div class="search-group">
-              <div class="search-file" onClick={() => openNote(path)}>
-                <FileText size={14} /> <span dir="auto">{stem(path)}</span>
-                <span class="search-dir">{dirname(path)}</span>
-              </div>
-              <For each={list.filter((h) => h.line > 0).slice(0, 8)}>
-                {(h) => (
-                  <div class="search-hit" dir="auto" onClick={() => openNote(path, { line: h.line })}>
-                    <span class="ln">{h.line}</span>
-                    {mark(h.snippet)}
-                  </div>
-                )}
-              </For>
-            </div>
-          )}
-        </For>
-      </div>
-    </div>
-  );
-}
-
 export default function Sidebar() {
   const vaultName = () => root()?.split(/[\\/]/).filter(Boolean).pop() ?? "";
   const panes = () => [
     { id: "files", title: "Files", icon: <Files size={17} /> },
     { id: "search", title: "Search (Ctrl+Shift+F)", icon: <Search size={17} /> },
+    { id: "tags", title: "Tags", icon: <Hash size={17} /> },
+    { id: "bookmarks", title: "Bookmarks", icon: <Bookmark size={17} /> },
   ];
   return (
     <aside class="sidebar" style={{ width: `${prefs.sidebarWidth}px` }}>
@@ -350,6 +281,9 @@ export default function Sidebar() {
             setExpanded(new Set());
           }}><ChevronsDownUp size={16} /></button>
         </Show>
+        <Show when={sidebarTab() === "bookmarks"}>
+          <button class="icon-btn" title="New bookmark group" onClick={() => newBookmarkGroup()}><FolderPlus size={16} /></button>
+        </Show>
       </div>
 
       <div class="sidebar-body">
@@ -358,6 +292,12 @@ export default function Sidebar() {
         </Show>
         <Show when={sidebarTab() === "search"}>
           <SearchPane />
+        </Show>
+        <Show when={sidebarTab() === "tags"}>
+          <TagsPane />
+        </Show>
+        <Show when={sidebarTab() === "bookmarks"}>
+          <BookmarksPane />
         </Show>
       </div>
 
@@ -377,3 +317,7 @@ export default function Sidebar() {
 }
 
 app.commands.register({ id: "search.focus", title: "Search in vault", key: "Mod-Shift-f", run: () => setSidebarTab("search") });
+app.commands.register({ id: "search.replace", title: "Replace in vault", key: "Mod-Shift-h", run: () => openReplace() });
+app.commands.register({ id: "tags.show", title: "Show tags", run: () => setSidebarTab("tags") });
+app.commands.register({ id: "bookmarks.show", title: "Show bookmarks", run: () => setSidebarTab("bookmarks") });
+export { searchFor };

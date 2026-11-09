@@ -1,5 +1,6 @@
-# Builds the Linux packages (AppImage, .deb, .rpm) and the Windows installer
-# and portable .exe, then publishes them all as one GitHub release. Runs when
+# Builds the Linux packages (AppImage, .deb, .rpm), the Windows installer and
+# portable .exe, and the macOS .dmg/.zip (Apple Silicon and Intel), then
+# publishes them all as one GitHub release. Runs when
 # a version tag is pushed:
 #   git tag v0.4.2 && git push origin v0.4.2
 # The tag must match "version" in package.json.
@@ -36,6 +37,18 @@ jobs:
             platform: win
             files: |
               release/*.exe
+          - os: macos-latest # Apple Silicon
+            platform: mac
+            arch: arm64
+            files: |
+              release/*.dmg
+              release/*.zip
+          - os: macos-15-intel
+            platform: mac
+            arch: x64
+            files: |
+              release/*.dmg
+              release/*.zip
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -77,11 +90,11 @@ jobs:
       - name: Package
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false" # unsigned builds
-        run: npx electron-builder --${{ matrix.platform }} --publish never
+        run: npx electron-builder --${{ matrix.platform }} ${{ matrix.arch && format('--{0}', matrix.arch) || '' }} --publish never
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.platform }}
+          name: ${{ matrix.platform }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }}
           path: ${{ matrix.files }}
           if-no-files-found: error
 
@@ -106,3 +119,5 @@ jobs:
             release/*.deb
             release/*.rpm
             release/*.exe
+            release/*.dmg
+            release/*.zip

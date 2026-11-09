@@ -5,6 +5,8 @@
 //!   response {"id": 1, "ok": ...}  or  {"id": 1, "err": ...}
 //! Each request runs on its own thread, so a long PDF export never blocks
 //! saving or searching.
+// No console window on Windows: the shell talks to the core over pipes.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 use std::io::{BufRead, Write};
 use std::sync::{Arc, Mutex};
 

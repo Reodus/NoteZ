@@ -1,0 +1,21 @@
+name: Technical
+description: Documentation style — sans text, numbered sections with rules, roomy code blocks.
+page:
+  paper: a4
+  margin: 2.2cm
+  numbering: "1"
+  digits: auto
+  header: { left: "{title}", right: "{chapter}", line: true }
+  footer: { right: "{page} / {total}" }
+styles:
+  body: { font: Noto Sans, fonts: { arabic: Vazirmatn }, size: 10pt, line-spacing: 1.5, align: start, space-after: 0.8em }
+  title: { size: 24pt, weight: bold, color: "#14233c", align: start, space-after: 1.2em }
+  subtitle: { size: 13pt, color: "#56627a" }
+  h1: { size: 17pt, weight: bold, color: "#14233c", numbering: "1", border: "#c8d1e0", space-before: 1.6em, space-after: 0.7em }
+  h2: { size: 13.5pt, weight: semibold, color: "#14233c", numbering: "1.1", space-before: 1.3em, space-after: 0.5em }
+  h3: { size: 11.5pt, weight: semibold, color: "#30415f", numbering: "1.1.1", space-before: 1em, space-after: 0.4em }
+  h4: { size: 10.5pt, weight: semibold, color: "#30415f" }
+  quote: { color: "#30415f", background: "#eef3fb", border: "#3d6fd6" }
+  code: { size: 9pt, background: "#f4f6fa", border: "#dce2ee" }
+  link: { color: "#2a5bd1" }
+  caption: { size: 9pt, color: "#56627a" }

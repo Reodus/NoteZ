@@ -1,18 +1,13 @@
 //! Latin runs inside right-to-left text. The Unicode bidi algorithm gives
 //! neutral characters at the end of a Latin run the paragraph's direction,
-//! so in Persian text `read()` shows as `()read` and `C++` as `++C`. When a
+//! so in right-to-left text `read()` shows as `()read` and `C++` as `++C`. When a
 //! run ends in such characters that belong to it (closing brackets that
 //! close something in the run, or `+ # %` stuck to it), a left-to-right
 //! mark after the run keeps them with it. Sentence punctuation (. ! ? :)
-//! after the run still follows the Persian sentence.
+//! after the run still follows the right-to-left sentence.
 //! The editor applies the same rule (src/editor/bidi.ts).
 
 const LRM: char = '\u{200E}';
-
-/// Arabic-script letters (Persian, Arabic, Urdu …).
-pub fn is_rtl_char(c: char) -> bool {
-    matches!(c, '\u{0590}'..='\u{08FF}' | '\u{FB1D}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
-}
 
 fn latin(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'

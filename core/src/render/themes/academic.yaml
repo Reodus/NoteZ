@@ -1,21 +1,20 @@
 name: Academic
 description: LaTeX-style paper — numbered sections, serif text, running header.
-lang: fa
 page:
   paper: a4
   margin: 3cm 2.5cm 3cm 2.5cm
-  numbering: "۱"
-  heading-digits: auto
+  numbering: "1"
+  digits: auto
   skip-first: true
   header: { left: "{title}", right: "{chapter}", line: true }
   footer: { center: "{page}" }
 styles:
-  body: { font: New Computer Modern, font-fa: Vazirmatn, size: 11pt, line-spacing: 1.5, align: justify, space-after: 0.8em, indent: 1.2em }
+  body: { font: New Computer Modern, fonts: { arabic: Vazirmatn }, size: 11pt, line-spacing: 1.5, align: justify, space-after: 0.8em, indent: 1.2em }
   title: { size: 22pt, weight: bold, align: center, space-after: 2em }
   subtitle: { size: 13pt, italic: true }
-  h1: { size: 16pt, weight: bold, numbering: "۱.", space-before: 1.6em, space-after: 0.8em }
-  h2: { size: 13pt, weight: bold, numbering: "۱.۱.", space-before: 1.2em, space-after: 0.6em }
-  h3: { size: 11.5pt, weight: bold, numbering: "۱.۱.۱.", space-before: 1em, space-after: 0.5em }
+  h1: { size: 16pt, weight: bold, numbering: "1.", space-before: 1.6em, space-after: 0.8em }
+  h2: { size: 13pt, weight: bold, numbering: "1.1.", space-before: 1.2em, space-after: 0.6em }
+  h3: { size: 11.5pt, weight: bold, numbering: "1.1.1.", space-before: 1em, space-after: 0.5em }
   h4: { size: 11pt, weight: semibold, italic: true }
   quote: { italic: true, border: "#999999" }
   code: { size: 9pt, background: "#f7f7f7" }

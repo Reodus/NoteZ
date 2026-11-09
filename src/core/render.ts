@@ -62,6 +62,8 @@ export async function renderPluginBlocks(text: string): Promise<RenderedBlock[]>
 export interface PreviewState {
   path: string | null;
   pages: string[];
+  /** Content hash per page (to skip unchanged pages on the next render). */
+  hashes: string[];
   diagnostics: Diagnostic[];
   notes: string[];
   millis: number;
@@ -71,6 +73,7 @@ export interface PreviewState {
 export const [preview, setPreview] = createSignal<PreviewState>({
   path: null,
   pages: [],
+  hashes: [],
   diagnostics: [],
   notes: [],
   millis: 0,
@@ -85,6 +88,14 @@ export function schedulePreview(delay = prefs.previewDelayMs) {
   timer = window.setTimeout(runPreview, delay);
 }
 
+// Notes with ```base / ```query blocks or ![[x.base]] embeds show other notes'
+// data: re-render when the vault changes.
+const DATA = /^\s*(`{3,}|~{3,})\s*(base|query)\s*$|!\[\[[^\]]+\.base[\]#|]/im;
+app.events.on("vault:changed", () => {
+  const path = state.active;
+  if (path && /\.md$/i.test(path) && DATA.test(state.buffers[path]?.content ?? "")) schedulePreview(400);
+});
+
 export async function runPreview() {
   const path = state.active;
   if (!path || viewLayout() === "editor") return;
@@ -93,13 +104,20 @@ export async function runPreview() {
   setPreview((p) => ({ ...p, busy: true }));
   try {
     const blocks = await renderPluginBlocks(text);
-    const r = await ipc.renderPreview(path, text, blocks);
+    // Pages we already have are not sent again: a long note is megabytes of
+    // SVG, and typing changes one or two pages.
+    const prev = preview();
+    const have = new Map<string, string>();
+    if (prev.path === path) prev.hashes.forEach((h, i) => prev.pages[i] && have.set(h, prev.pages[i]));
+    const r = await ipc.renderPreview(path, text, blocks, [...have.keys()]);
     if (my !== seq) return; // a newer render started
+    const pages = r.pages.map((p, i) => p ?? have.get(r.hashes[i]) ?? "");
     const errors = r.diagnostics.filter((d) => d.severity === "error").length;
     setPreview({
       path,
       // Keep the last good pages while the user fixes an error.
-      pages: r.pages.length || preview().path !== path ? r.pages : preview().pages,
+      pages: pages.length || prev.path !== path ? pages : prev.pages,
+      hashes: pages.length || prev.path !== path ? r.hashes : prev.hashes,
       diagnostics: r.diagnostics,
       notes: r.notes,
       millis: r.millis,

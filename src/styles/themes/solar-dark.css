@@ -1,0 +1,29 @@
+/* @name Solar Dark
+   @mode dark
+   @description Deep blue-green background with muted text, inspired by Solarized dark.
+   @accent #2aa198 */
+:root {
+  --bg: #00212b;
+  --surface: #002b36;
+  --surface-2: #03313d;
+  --sidebar: #00252f;
+  --border: #0b3c48;
+  --border-strong: #164c59;
+  --fg: #e3e0d2;
+  --fg-soft: #b9bdb3;
+  --fg-muted: #839496;
+  --fg-faint: #586e75;
+  --hover: rgba(147, 161, 161, 0.08);
+  --hover-strong: rgba(147, 161, 161, 0.13);
+  --canvas: #001b23;
+  --code-bg: rgba(147, 161, 161, 0.1);
+  --danger: #dc322f;
+  --success: #859900;
+  --warning: #b58900;
+  --syn-keyword: #9d9fe0;
+  --syn-func: #4ea8e8;
+  --syn-string: #2aa198;
+  --syn-number: #e0703f;
+  --syn-atom: #e05aa0;
+  --syn-type: #a3b52c;
+}

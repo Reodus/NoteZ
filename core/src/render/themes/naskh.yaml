@@ -1,0 +1,20 @@
+name: Arabic Naskh
+description: Arabic, Persian and Urdu documents in Noto Naskh Arabic — right-to-left, Arabic-Indic numbering by language.
+sample: ar
+page:
+  paper: a4
+  margin: 2.5cm
+  numbering: "1"
+  digits: auto
+  footer: { center: "{page}" }
+styles:
+  body: { font: Noto Naskh Arabic, fonts: { latin: Noto Serif }, size: 13pt, line-spacing: 1.6, align: justify, space-after: 0.8em }
+  title: { size: 26pt, weight: bold, color: "#14452f", align: center, space-after: 1.6em }
+  subtitle: { size: 15pt, color: "#4f6b5c", align: center }
+  h1: { size: 20pt, weight: bold, color: "#14452f", space-before: 1.4em, space-after: 0.7em }
+  h2: { size: 16pt, weight: bold, color: "#1f6b48", space-before: 1.2em, space-after: 0.6em }
+  h3: { size: 14pt, weight: bold, space-before: 1em, space-after: 0.5em }
+  quote: { color: "#2f3d36", background: "#f1f7f3", border: "#2f8a5f" }
+  code: { size: 9.5pt, background: "#f5f6f5" }
+  link: { color: "#1f6b48" }
+  caption: { size: 11pt, color: "#4f6b5c" }

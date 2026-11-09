@@ -1,0 +1,32 @@
+/* @name High Contrast Light
+   @mode light
+   @description Pure white, black text and strong borders for maximum legibility.
+   @accent #0050c8 */
+:root {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #ffffff;
+  --sidebar: #f4f4f4;
+  --border: #6b6b6b;
+  --border-strong: #000000;
+  --fg: #000000;
+  --fg-soft: #000000;
+  --fg-muted: #2b2b2b;
+  --fg-faint: #555555;
+  --hover: rgba(0, 0, 0, 0.08);
+  --hover-strong: rgba(0, 0, 0, 0.14);
+  --canvas: #e8e8e8;
+  --code-bg: rgba(0, 0, 0, 0.07);
+  --danger: #b00020;
+  --success: #006b2e;
+  --warning: #8a5a00;
+  --syn-keyword: #6a00a8;
+  --syn-func: #0040a8;
+  --syn-string: #006b2e;
+  --syn-number: #9a3c00;
+  --syn-atom: #a8004a;
+  --syn-type: #005f6b;
+  --shadow-sm: none;
+  --shadow-md: 0 0 0 1px #000;
+  --shadow-lg: 0 0 0 2px #000;
+}

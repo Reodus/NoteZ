@@ -1,5 +1,5 @@
 // Viewer tab for vault files that are not notes: images (zoom, fit, 1:1)
-// and PDFs (Chromium's built-in viewer). The header has the same file
+// and PDFs (pdf.js with annotations, src/ui/PdfView.tsx). The header has the same file
 // actions as the file tree.
 import { createEffect, createMemo, createSignal, on, onCleanup, Show } from "solid-js";
 import { ZoomIn, ZoomOut, Maximize, ExternalLink, FolderOpen, Link2, FileText, Image as ImageIcon } from "lucide-solid";
@@ -7,6 +7,7 @@ import { fileSrc, openPath, showInFolder } from "../core/native";
 import { notify } from "../core/app";
 import { basename, dirname, fileKind } from "../core/ipc";
 import { fileRev, root } from "../core/store";
+import PdfView from "./PdfView";
 
 /** `![[name]]` (Obsidian style); the full path when the name isn't unique is left to the user. */
 export const embedLink = (path: string) => `![[${basename(path)}]]`;
@@ -85,7 +86,7 @@ export default function FileView(props: { path: string }) {
       <Show when={!missing()} fallback={<div class="pane-empty">This file no longer exists.</div>}>
         <Show
           when={kind() === "image"}
-          fallback={<iframe class="fv-pdf" src={url()} title={basename(props.path)} />}
+          fallback={<Show when={`${props.path}\n${url()}`} keyed>{(_k: string) => <PdfView path={props.path} url={url()} />}</Show>}
         >
           <div
             ref={setStage}

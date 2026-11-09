@@ -1,7 +1,8 @@
 // Per-line text direction: the line's first strong character decides
-// (Persian → RTL, Latin → LTR), except that a line starting with a Latin word
-// is RTL when at least as many of its words are Persian ("windows یک سیستم
-// عامل", "hello سلام"). A word ends at whitespace or where the script
+// (Arabic, Persian, Urdu, Syriac, Thaana, NKo … → RTL; every other
+// script → LTR), except that a line starting with a left-to-right word is RTL
+// when at least as many of its words are right-to-left ("windows یک سیستم
+// عامل", "hello مرحبا"). A word ends at whitespace or where the script
 // changes, so "helloسلام" is two. Same rule as
 // detect_dir in core/src/render/md.rs.
 // perLineTextDirection makes CodeMirror's cursor motion respect it.
@@ -12,7 +13,8 @@
 // are isolated as left-to-right (same rule as core/src/render/bidi.rs).
 //
 // Lines inside a `::: {dir=rtl}` / `::: {dir=ltr}` block (the toolbar's
-// paragraph-direction buttons) take that direction instead of the guess.
+// paragraph-direction buttons) or a `::: {lang=ar}` block take that direction
+// instead of the guess.
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, DecorationSet, Direction, EditorView, ViewPlugin, ViewUpdate } from "@codemirror/view";
 import { parseAttrs } from "./format";
@@ -22,9 +24,14 @@ const rtlDir = Decoration.line({ attributes: { dir: "rtl" } });
 const ltrDir = Decoration.line({ attributes: { dir: "ltr" } });
 const ltrRun = Decoration.mark({ bidiIsolate: Direction.LTR, class: "cm-nz-ltr-run", attributes: { dir: "ltr" } });
 
-const RTL = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
+/** Strong right-to-left characters (same ranges as core/src/render/script.rs). */
+export const RTL = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
+
+const RTL_LANGS = new Set(["ar", "fa", "ur", "ps", "sd", "ug", "ku", "ckb", "syr", "dv", "nqo", "ks", "bal", "prs", "pnb", "arc", "sam", "mzn", "glk", "lrc", "azb"]);
+/** Is `lang` (an ISO 639 code, optionally with a region) right-to-left? */
+export const isRtlLang = (lang: string) => RTL_LANGS.has(lang.split(/[-_]/)[0].toLowerCase());
 const LATIN = /[A-Za-z0-9_]/;
-const RUN = /[A-Za-z0-9][A-Za-z0-9_ .,:;'"!?+\-*/=<>@#$%&|~^\\(){}[\]]*/g;
+const RUN = /[A-Za-z0-9_][A-Za-z0-9_ .,:;'"!?+\-*/=<>@#$%&|~^\\(){}[\]]*/g;
 
 /** Direction of the first strong character of `text`, if any. */
 function firstStrong(text: string): "rtl" | "ltr" | null {
@@ -36,7 +43,7 @@ function firstStrong(text: string): "rtl" | "ltr" | null {
 }
 
 /** Is the line right-to-left (see the rule at the top)? */
-function rtlLine(text: string): boolean {
+export function rtlLine(text: string): boolean {
   const first = firstStrong(text);
   if (first !== "ltr") return first === "rtl";
   let rtl = 0;
@@ -79,6 +86,26 @@ export function runsNeedingIsolation(text: string): [number, number][] {
   return out;
 }
 
+/** Inline code spans (`…`, ``…``) with no right-to-left letters in them. */
+function codeSpans(text: string): [number, number][] {
+  const out: [number, number][] = [];
+  for (const m of text.matchAll(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g)) {
+    if (!RTL.test(m[2])) out.push([m.index!, m.index! + m[0].length]);
+  }
+  return out;
+}
+
+/**
+ * Ranges of a right-to-left line shown left-to-right: inline code spans as a
+ * whole (backticks, leading `__` and trailing `()` included — `__libc_malloc()`
+ * would otherwise show as `libc_malloc()__`), then the Latin runs outside them.
+ */
+export function ltrRanges(text: string): [number, number][] {
+  const code = codeSpans(text);
+  const runs = runsNeedingIsolation(text).filter(([a, b]) => !code.some(([c, d]) => a < d && b > c));
+  return [...code, ...runs].sort((x, y) => x[0] - y[0]);
+}
+
 interface Decos {
   lines: DecorationSet;
   runs: DecorationSet;
@@ -103,8 +130,9 @@ function explicitDirs(view: EditorView, last: number): ("rtl" | "ltr" | null)[] 
     else {
       const m = DIV_OPEN.exec(text);
       if (m) {
-        const d = parseAttrs(m[1]).dir;
-        stack.push(d === "rtl" || d === "ltr" ? d : cur);
+        const a = parseAttrs(m[1]);
+        const d = a.dir === "rtl" || a.dir === "ltr" ? a.dir : a.lang ? (isRtlLang(a.lang) ? "rtl" : "ltr") : cur;
+        stack.push(d);
       }
     }
   }
@@ -123,9 +151,7 @@ function build(view: EditorView): Decos {
       const forced = dirs[line.number];
       const rtl = forced ? forced === "rtl" : RTL.test(line.text) && rtlLine(line.text);
       lines.add(line.from, line.from, rtl ? rtlDir : forced === "ltr" ? ltrDir : autoDir);
-      if (rtl) {
-        for (const [a, b] of runsNeedingIsolation(line.text)) runs.add(line.from + a, line.from + b, ltrRun);
-      }
+      if (rtl) for (const [a, b] of ltrRanges(line.text)) runs.add(line.from + a, line.from + b, ltrRun);
       pos = line.to + 1;
     }
   }

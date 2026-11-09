@@ -1,0 +1,30 @@
+/* @name Forest
+   @mode dark
+   @description Deep greens and moss with warm amber highlights.
+   @accent #7fb069 */
+:root {
+  --bg: #141a16;
+  --surface: #1a211c;
+  --surface-2: #1e2620;
+  --sidebar: #161d18;
+  --border: #27322a;
+  --border-strong: #344238;
+  --fg: #e4ebe2;
+  --fg-soft: #c3cfc0;
+  --fg-muted: #8f9e8c;
+  --fg-faint: #5c6b5a;
+  --hover: rgba(200, 230, 200, 0.05);
+  --hover-strong: rgba(200, 230, 200, 0.09);
+  --canvas: #0f1411;
+  --code-bg: rgba(200, 230, 200, 0.06);
+  --accent-fg: #0f1411;
+  --danger: #e07a5f;
+  --success: #7fb069;
+  --warning: #e6b450;
+  --syn-keyword: #d4a5e0;
+  --syn-func: #8cc7e8;
+  --syn-string: #a8d08d;
+  --syn-number: #f0a868;
+  --syn-atom: #f08aa8;
+  --syn-type: #7fd1b9;
+}

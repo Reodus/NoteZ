@@ -4,14 +4,15 @@ import { createSignal } from "solid-js";
 import * as cmState from "@codemirror/state";
 import * as cmView from "@codemirror/view";
 import * as cmLanguage from "@codemirror/language";
-import { app, notify, Disposer, Command, ToolbarButton, StatusItem, Panel, BlockRenderer, Events } from "./app";
+import { app, notify, Disposer, Command, ToolbarButton, StatusItem, Panel, BlockRenderer, Events, SlashCommand } from "./app";
+import type { CompletionSource } from "@codemirror/autocomplete";
 import { ipc } from "./ipc";
 import { prefs, setPrefs, state, editorView, openNote, root, isDark } from "./store";
 import { askText } from "../ui/primitives";
 import { insertText, insertBlock } from "../editor/format";
 import { clearPreviewCache } from "../editor/widgets";
 
-export const API_VERSION = "1.0.0";
+export const API_VERSION = "1.1.0";
 
 export interface NoteZPlugin {
   onload(api: NoteZApi): void | Promise<void>;
@@ -44,6 +45,7 @@ export function createApi(pluginId: string, track: (d: Disposer) => void) {
     toolbar: { addButton: reg<ToolbarButton>((b) => app.toolbar.add({ group: "plugins", ...b, id: `${pluginId}.${b.id}` })) },
     statusBar: { addItem: reg<StatusItem>((s) => app.statusBar.add({ ...s, id: `${pluginId}.${s.id}` })) },
     panels: { add: reg<Panel>((p) => app.panels.add({ ...p, id: `${pluginId}.${p.id}` })) },
+    slash: { register: reg<SlashCommand>((c) => app.slash.add(c)) },
     blocks: {
       register: (r: BlockRenderer) => {
         const d = app.blocks.register(r);
@@ -54,6 +56,8 @@ export function createApi(pluginId: string, track: (d: Disposer) => void) {
     },
     editor: {
       registerExtension: reg<cmState.Extension>((e) => app.editorExtensions.add(e)),
+      /** Add a CodeMirror completion source (runs next to the built-in ones). */
+      registerCompletion: reg<CompletionSource>((source) => app.completions.add({ id: `${pluginId}.${Math.random().toString(36).slice(2)}`, source })),
       view: () => editorView(),
       insert: (text: string) => {
         const v = editorView();
@@ -82,6 +86,10 @@ export function createApi(pluginId: string, track: (d: Disposer) => void) {
       read: (path: string) => ipc.read(path),
       write: (path: string, content: string) => ipc.write(path, content),
       search: (q: string) => ipc.search(q),
+      /** Every tag with its note count. */
+      tags: () => ipc.tags(),
+      /** Tags, icon, cover, title and aliases of every note that has them. */
+      meta: () => ipc.noteMeta(),
     },
     ui: {
       notify: (msg: string, kind: "info" | "success" | "error" = "info") => notify(msg, kind),

@@ -1,0 +1,21 @@
+name: Book
+description: A5 book pages — classic serif, first-line indents, running chapter header, centered page numbers.
+page:
+  paper: a5
+  margin: 2cm 1.8cm 2.2cm 2.2cm
+  numbering: "1"
+  digits: auto
+  skip-first: true
+  header: { center: "{chapter}" }
+  footer: { center: "{page}" }
+styles:
+  body: { font: Libertinus Serif, fonts: { arabic: Vazirmatn, devanagari: Noto Serif Devanagari }, size: 10.5pt, line-spacing: 1.35, align: justify, space-after: 0em, indent: 1.2em }
+  title: { size: 24pt, weight: regular, smallcaps: true, tracking: 0.04em, align: center, space-before: 3cm, space-after: 2.5em }
+  subtitle: { size: 12pt, italic: true, align: center }
+  h1: { size: 17pt, weight: regular, smallcaps: true, tracking: 0.03em, align: center, space-before: 3em, space-after: 2em }
+  h2: { size: 12.5pt, weight: semibold, space-before: 1.6em, space-after: 0.8em }
+  h3: { size: 11pt, weight: semibold, italic: true, space-before: 1.2em, space-after: 0.6em }
+  quote: { size: 10pt, italic: true }
+  code: { size: 8.5pt, background: "#f7f5f0" }
+  link: { color: "#5a3a1a" }
+  caption: { size: 9pt, italic: true, align: center }

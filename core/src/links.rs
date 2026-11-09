@@ -40,7 +40,7 @@ fn join(dir: &str, rel: &str) -> String {
     if dir.is_empty() { rel.to_string() } else { format!("{dir}/{rel}") }
 }
 
-fn has_ext(t: &str) -> bool {
+pub(crate) fn has_ext(t: &str) -> bool {
     t.ends_with(".md") || t.ends_with(".typ")
 }
 
@@ -110,6 +110,45 @@ impl<'a> Resolver<'a> {
     pub fn is_note(&self, p: &str) -> bool {
         self.notes.binary_search_by(|n| n.as_str().cmp(p)).is_ok()
     }
+}
+
+/// A link found by [`scan_full`].
+pub(crate) struct Link {
+    /// Byte range of the target (note name or path) in the text.
+    pub target: std::ops::Range<usize>,
+    pub wiki: bool,
+    /// `![[…]]` / `![](…)`.
+    pub embed: bool,
+    /// What follows `#`: a heading or `^block-id`.
+    pub sub: Option<String>,
+}
+
+/// Every link in `text`, with its `#heading` / `#^block` part.
+pub(crate) fn scan_full(text: &str) -> Vec<Link> {
+    scan(text)
+        .into_iter()
+        .map(|(s, e, wiki)| {
+            let embed = s >= if wiki { 3 } else { 2 } && {
+                if wiki {
+                    text[..s - 2].ends_with('!')
+                } else {
+                    // ![alt](target): find the `[` that opens this link.
+                    let head = &text[..s - 2];
+                    head.rfind('[').is_some_and(|i| head[..i].ends_with('!'))
+                }
+            };
+            let rest = &text[e..];
+            let sub = rest.strip_prefix('#').map(|r| {
+                let end = r.find(if wiki { &['|', ']', '\n'][..] } else { &[')', ' ', '\n'][..] }).unwrap_or(r.len());
+                super_decode(&r[..end])
+            });
+            Link { target: s..e, wiki, embed, sub: sub.filter(|x| !x.is_empty()) }
+        })
+        .collect()
+}
+
+fn super_decode(s: &str) -> String {
+    crate::render::percent_decode(s)
 }
 
 /// Every link in `text`: (byte range of the target, the target text, is_wikilink).

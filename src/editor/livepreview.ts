@@ -6,6 +6,7 @@ import { EditorState, Extension, Prec, Range, StateField } from "@codemirror/sta
 import { BlockInfo, BlockType, Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { fileSrc } from "../core/native";
+import { coverField } from "./cover";
 import { parseAttrs } from "./format";
 import { canRender, previewsEnabled } from "./widgets";
 import { TableWidget, rawTableField } from "./tables";
@@ -27,7 +28,7 @@ export const getLiveOpts = () => liveOpts;
 const resolved = new Map<string, Promise<string | null>>();
 
 /** Image URL the webview can load, or null when the file can't be found. */
-function resolveImage(src: string): Promise<string | null> {
+export function resolveImage(src: string): Promise<string | null> {
   if (/^(https?:|data:)/.test(src)) return Promise.resolve(src);
   const o = liveOpts;
   if (!o?.resolveAsset) return Promise.resolve(null);
@@ -545,20 +546,27 @@ function build(view: EditorView): DecorationSet {
   const decos: Range<Decoration>[] = [];
   const taken: [number, number][] = [];
   const free = (from: number, to: number) => !taken.some(([a, b]) => from < b && to > a);
+  // Only the element the cursor (or selection) is in shows its source: the
+  // rest of the line — other math, links, emphasis — stays rendered.
+  const ranges = state.selection.ranges;
+  /** The selection touches [from, to] (the cursor right before or after counts). */
+  const near = (from: number, to: number) => ranges.some((r) => r.to >= from && r.from <= to);
+  /** The cursor is on a line marker itself ([from, to), not just after it). */
+  const onMark = (from: number, to: number) => ranges.some((r) => r.to >= from && r.from < to);
+  /** The element being decorated: when it is revealed, nothing of it is hidden. */
+  let reveal = false;
   const add = (from: number, to: number, deco: Decoration) => {
     if (from > to || (from < to && !free(from, to))) return;
     if (from < to) taken.push([from, to]);
+    if (reveal) return;
     decos.push(deco.range(from, to));
   };
-
-  // Lines touched by a selection keep their source.
-  const active = new Set<number>();
-  for (const r of state.selection.ranges) {
+  const headingLines = new Set<number>();
+  for (const r of ranges) {
     const a = doc.lineAt(r.from).number;
     const b = doc.lineAt(r.to).number;
-    for (let i = a; i <= b; i++) active.add(i);
+    for (let i = a; i <= b; i++) headingLines.add(i);
   }
-  const isActive = (pos: number) => active.has(doc.lineAt(pos).number);
   const fmEnd = frontmatterEnd(view);
   const tree = syntaxTree(state);
   const inCode = (pos: number) => {
@@ -583,7 +591,7 @@ function build(view: EditorView): DecorationSet {
       if (n === last.number) cls.push("last");
       decos.push(Decoration.line({ class: cls.join(" ") }).range(l.from));
     }
-    if (!active.has(first.number)) {
+    if (!onMark(first.from, first.from + m[0].length)) {
       const end = first.from + m[0].length;
       const title = first.text.slice(m[0].length).trim();
       add(first.from, end, Decoration.replace({ widget: new CalloutIcon(type, title ? "" : CALLOUTS[type]?.label ?? kind) }));
@@ -596,7 +604,8 @@ function build(view: EditorView): DecorationSet {
     while (pos <= to && pos <= doc.length) {
       const line = doc.lineAt(pos);
       pos = line.to + 1;
-      if (active.has(line.number) || line.from <= fmEnd) continue;
+      if (line.from <= fmEnd) continue;
+      reveal = near(line.from, line.to);
       const text = line.text;
       const codeAtStart = inCode(line.from);
       if (codeAtStart === "FencedCode" || codeAtStart === "CodeBlock") continue;
@@ -722,7 +731,11 @@ function build(view: EditorView): DecorationSet {
       for (const [re, fn] of inline) {
         re.lastIndex = 0;
         let m: RegExpExecArray | null;
-        while ((m = re.exec(text))) fn(m, line.from + m.index);
+        while ((m = re.exec(text))) {
+          const s0 = line.from + m.index;
+          reveal = near(s0, s0 + m[0].length);
+          fn(m, s0);
+        }
       }
     }
 
@@ -734,10 +747,28 @@ function build(view: EditorView): DecorationSet {
         if (node.from <= fmEnd) return;
         const name = node.name;
         if (name === "FencedCode" || name === "CodeBlock" || name === "HTMLBlock") return false;
-        if (name === "Blockquote") calloutLines(node.from, node.to);
-        if (isActive(node.from)) {
-          // Multi-line nodes may continue on inactive lines.
-          return;
+        if (name === "Blockquote") (reveal = false), calloutLines(node.from, node.to);
+        const parent = node.node.parent;
+        switch (name) {
+          case "HeaderMark":
+            // Headings show their # while the cursor is anywhere on them.
+            reveal = headingLines.has(doc.lineAt(node.from).number);
+            break;
+          case "EmphasisMark":
+          case "StrikethroughMark":
+          case "CodeMark":
+            reveal = parent ? near(parent.from, parent.to) : false;
+            break;
+          case "QuoteMark":
+          case "ListMark":
+          case "TaskMarker":
+            reveal = onMark(node.from, node.to + (doc.sliceString(node.to, node.to + 1) === " " ? 1 : 0));
+            break;
+          case "URL":
+            reveal = false;
+            break;
+          default:
+            reveal = near(node.from, node.to);
         }
         switch (name) {
           case "HeaderMark": {
@@ -778,6 +809,7 @@ function build(view: EditorView): DecorationSet {
           case "TaskMarker": {
             const checked = /x/i.test(doc.sliceString(node.from, node.to));
             add(node.from, node.to, Decoration.replace({ widget: new CheckboxWidget(checked) }));
+            reveal = false;
             if (checked) {
               const line = doc.lineAt(node.from);
               if (node.to < line.to) add(node.to, line.to, Decoration.mark({ class: "cm-nz-lp-done" }));
@@ -889,5 +921,5 @@ export function livePreview(enabled: boolean, typstMode: boolean, opts: LiveOpti
       return true;
     },
   });
-  return [rawTableField, plugin, blockField, clicks, blockArrows, EditorView.editorAttributes.of({ class: "cm-nz-live" })];
+  return [rawTableField, plugin, blockField, clicks, blockArrows, coverField, EditorView.editorAttributes.of({ class: "cm-nz-live" })];
 }

@@ -2,17 +2,22 @@ import { createEffect, onCleanup, onMount, Show, Switch, Match } from "solid-js"
 import { Copy, Minimize2, PanelLeft } from "lucide-solid";
 import { app, notify } from "./core/app";
 import {
-  root, prefs, isDark, openVault, openNote, dialog, setDialog, sidebarOpen, setSidebarOpen, saveAll, state,
+  root, prefs, isDark, openVault, openNote, openOsPath, dialog, setDialog, sidebarOpen, setSidebarOpen, saveAll, state,
   focusMode, setFocusMode, viewLayout,
 } from "./core/store";
-import { ipc } from "./core/ipc";
-import { setZoom, setSpellcheck } from "./core/native";
+import { fileKind, ipc } from "./core/ipc";
+import { setZoom, setSpellcheck, takeOpenedFiles, onOpenPath, onVaultFs, onCapture, setCaptureShortcut } from "./core/native";
+import { applyTheme, loadUserCss, themeById } from "./core/uithemes";
 import { loadBuiltins, loadVaultPlugins } from "./core/plugins";
 import { corePlugin, readingTimePlugin } from "./plugins/core";
 import { mermaidPlugin } from "./plugins/mermaid";
 import { outlinePlugin, backlinksPlugin, pdfExportPlugin, diagramsPlugin } from "./plugins/builtins";
 import { templatesPlugin } from "./plugins/templates";
+import { dailyNotesPlugin, captureText, captureNote } from "./plugins/daily";
 import Welcome from "./ui/Welcome";
+import HistoryDialog from "./ui/HistoryDialog";
+import ReviewView from "./ui/ReviewView";
+import "./core/safety";
 import Sidebar from "./ui/Sidebar";
 import TabBar from "./ui/TabBar";
 import Toolbar from "./ui/Toolbar";
@@ -20,15 +25,19 @@ import RightPanel from "./ui/RightPanel";
 import StatusBar from "./ui/StatusBar";
 import CommandPalette from "./ui/CommandPalette";
 import Settings from "./ui/Settings";
+import HelpView from "./ui/HelpView";
 import DiagramGallery from "./ui/DiagramGallery";
 import { StyleDialog, PageSetupDialog, ThemesDialog } from "./ui/StyleDialogs";
 import { MenuHost, Modal, PromptHost, Toasts } from "./ui/primitives";
 import { Logo } from "./ui/Logo";
 import Editor from "./editor/Editor";
 import FileView from "./ui/FileView";
+import { BaseFile } from "./ui/BaseView";
 import { isNotePath } from "./core/ipc";
 import GraphView, { graphOpen } from "./ui/GraphView";
 import "./styles/app.css";
+
+const DEFAULT_ACCENT = "#6d5efc";
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace("#", "");
@@ -77,15 +86,24 @@ export default function App() {
   // Appearance → CSS.
   createEffect(() => {
     const el = document.documentElement;
-    el.dataset.theme = isDark() ? "dark" : "light";
-    const [r, g, b] = hexToRgb(prefs.accent);
-    el.style.setProperty("--accent", prefs.accent);
+    const mode = isDark() ? "dark" : "light";
+    const wanted = themeById(mode === "dark" ? prefs.uiThemeDark : prefs.uiThemeLight);
+    const theme = wanted?.mode === mode ? wanted : themeById(mode)!;
+    applyTheme(theme, [...prefs.enabledSnippets]);
+    const accent = prefs.accent || theme.accent || DEFAULT_ACCENT;
+    const [r, g, b] = hexToRgb(accent);
+    el.style.setProperty("--accent", accent);
     el.style.setProperty("--accent-rgb", `${r}, ${g}, ${b}`);
   });
+  // User themes and snippets follow the open vault and changes on disk.
+  createEffect(() => void loadUserCss(root()));
+  onCleanup(onVaultFs((paths) => {
+    if (paths.some((p) => /^\.notez\/(themes|snippets)\//.test(p))) void loadUserCss(root());
+  }));
 
   createEffect(() => setZoom(prefs.uiZoom));
   createEffect(() => document.documentElement.classList.toggle("no-anim", !prefs.animations));
-  createEffect(() => void setSpellcheck(prefs.spellcheck).catch(() => {}));
+  createEffect(() => void setSpellcheck(prefs.spellcheck, [...prefs.spellcheckLanguages]).catch(() => {}));
 
   const onKey = (e: KeyboardEvent) => {
     if (e.defaultPrevented || dialog()) return;
@@ -101,11 +119,20 @@ export default function App() {
   onMount(async () => {
     window.addEventListener("keydown", onKey);
     window.addEventListener("beforeunload", onUnload);
-    await loadBuiltins([corePlugin, readingTimePlugin, mermaidPlugin, outlinePlugin, backlinksPlugin, pdfExportPlugin, diagramsPlugin, templatesPlugin]);
+    await loadBuiltins([corePlugin, readingTimePlugin, mermaidPlugin, outlinePlugin, backlinksPlugin, pdfExportPlugin, diagramsPlugin, templatesPlugin, dailyNotesPlugin]);
     const args = await ipc.startupArgs().catch(() => [] as string[]);
     const vault = args[0] ?? prefs.lastVault;
     if (vault) await openVault(vault);
     if (args[0] && args[1]) await openNote(args[1].startsWith(args[0]) ? args[1].slice(args[0].length).replace(/^\/+/, "") : args[1]);
+    for (const f of await takeOpenedFiles().catch(() => [] as string[])) await openOsPath(f);
+  });
+  onCleanup(onOpenPath((p) => void openOsPath(p)));
+  onCleanup(onCapture((text) => void captureText(text)));
+  createEffect(() => {
+    const accel = prefs.captureShortcut;
+    void setCaptureShortcut(accel, root() ? captureNote() : "").then((ok) => {
+      if (!ok) notify(`The quick capture shortcut ${accel} is used by another app. Choose another in Settings → Daily notes & capture.`, "error");
+    });
   });
   onCleanup(() => {
     window.removeEventListener("keydown", onKey);
@@ -143,7 +170,7 @@ export default function App() {
             </Show>
             <Show when={!graphOpen() || focusMode()} fallback={<GraphView />}>
             <Show when={state.active} fallback={<EmptyState />}>
-            <Show when={isNotePath(state.active)} fallback={<FileView path={state.active!} />}>
+            <Show when={isNotePath(state.active)} fallback={fileKind(state.active!) === "base" ? <BaseFile path={state.active!} /> : <FileView path={state.active!} />}>
               <Show when={viewLayout() !== "preview" && !focusMode()}>
                 <Toolbar />
               </Show>
@@ -183,6 +210,9 @@ export default function App() {
         <Match when={dialog()?.kind === "style" && dialog()}>
           {(d) => <StyleDialog styleKey={(d() as any).key} scope={(d() as any).scope} onClose={() => setDialog(null)} />}
         </Match>
+        <Match when={dialog()?.kind === "help" && dialog()}>
+          {(d) => <HelpView doc={(d() as any).doc} anchor={(d() as any).anchor} onClose={() => setDialog(null)} />}
+        </Match>
         <Match when={dialog()?.kind === "page"}>
           <PageSetupDialog onClose={() => setDialog(null)} />
         </Match>
@@ -194,6 +224,12 @@ export default function App() {
         </Match>
         <Match when={dialog()?.kind === "typst" && dialog()}>
           {(d) => <TypstSource source={(d() as any).source} onClose={() => setDialog(null)} />}
+        </Match>
+        <Match when={dialog()?.kind === "history" && dialog()}>
+          {(d) => <HistoryDialog tab={(d() as any).tab} path={(d() as any).path} onClose={() => setDialog(null)} />}
+        </Match>
+        <Match when={dialog()?.kind === "review" && dialog()}>
+          {(d) => <ReviewView deck={(d() as any).deck} onClose={() => setDialog(null)} />}
         </Match>
       </Switch>
 

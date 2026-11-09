@@ -1,6 +1,7 @@
 // Built-in plugin: ```mermaid blocks, rendered by Mermaid.js in the
 // frontend and embedded into the PDF as vector SVG.
 import type { BuiltinPlugin } from "../core/plugins";
+import { fontStack } from "../core/fonts";
 
 let mermaidPromise: Promise<typeof import("mermaid").default> | null = null;
 let counter = 0;
@@ -14,7 +15,7 @@ function load(dark: boolean) {
       startOnLoad: false,
       securityLevel: "strict",
       theme: dark ? "dark" : "neutral",
-      fontFamily: "Vazirmatn, Inter, sans-serif",
+      fontFamily: fontStack("Noto Sans"),
       // Typst renders SVG text, not HTML: keep labels as <text>.
       htmlLabels: false,
       flowchart: { htmlLabels: false, curve: "basis" },

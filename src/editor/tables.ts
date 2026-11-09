@@ -20,6 +20,7 @@ import { root } from "../core/store";
 import { saveFiles } from "./attachments";
 import { getLiveOpts, hydrateImages, hydrateMath, inlineHtml } from "./livepreview";
 import { WRAP_PAIRS } from "./autopair";
+import { ltrRanges, rtlLine, RTL } from "./bidi";
 
 type Align = "" | "left" | "center" | "right";
 
@@ -154,7 +155,7 @@ export class TableWidget extends WidgetType {
       td.style.textAlign = m.aligns[c] || "";
       if (cell === document.activeElement) {
         if (cell !== writingCell && cell.innerText.replace(/\n$/, "") !== unesc(raw)) {
-          cell.textContent = unesc(raw);
+          setRaw(cell, unesc(raw));
           caretToEnd(cell);
         }
         cell.dataset.raw = raw;
@@ -445,6 +446,29 @@ function focusCell(wrap: HTMLElement, r: number, c: number) {
 function focusedCell(wrap: HTMLElement) {
   const a = document.activeElement as HTMLElement | null;
   return a && wrap.contains(a) && a.classList.contains("nz-cell") ? { r: Number(a.dataset.r), c: Number(a.dataset.c) } : null;
+}
+
+/**
+ * The cell's Markdown while it is edited. In right-to-left text, inline code
+ * and Latin runs are wrapped as left-to-right (as on editor lines), so
+ * `free()` doesn't show as `()free`; the text itself is unchanged.
+ */
+function setRaw(cell: HTMLElement, text: string) {
+  if (!RTL.test(text) || !rtlLine(text)) {
+    cell.textContent = text;
+    return;
+  }
+  cell.textContent = "";
+  let at = 0;
+  for (const [a, b] of ltrRanges(text)) {
+    if (a > at) cell.append(text.slice(at, a));
+    const span = document.createElement("span");
+    span.dir = "ltr";
+    span.textContent = text.slice(a, b);
+    cell.append(span);
+    at = b;
+  }
+  if (at < text.length) cell.append(text.slice(at));
 }
 
 function caretToEnd(el: HTMLElement) {
@@ -759,7 +783,7 @@ function wire(wrap: HTMLElement) {
     setCurrentCell(cell);
     if (cell.classList.contains("editing")) return;
     cell.classList.add("editing");
-    cell.textContent = unesc(cell.dataset.raw ?? "");
+    setRaw(cell, unesc(cell.dataset.raw ?? ""));
     caretToEnd(cell);
   });
 

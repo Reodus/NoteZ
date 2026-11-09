@@ -38,7 +38,10 @@ export function previewCss(st: TextStyle | undefined, bodyPt = 11): JSX.CSSPrope
     "font-size": `${Math.max(12, Math.min(26, (pt / bodyPt) * 14))}px`,
   };
   if (st.color) css.color = st.color;
-  if (st.font || st["font-fa"]) css["font-family"] = [st.font, st["font-fa"]].filter(Boolean).map((f) => `"${f}"`).join(",") + ",var(--font-editor)";
+  const families = [st.font, ...Object.values(st.fonts ?? {}), st["font-fa"]].filter(Boolean) as string[];
+  if (families.length) css["font-family"] = families.map((f) => `"${f.replace(/"/g, "")}"`).join(",") + ",var(--font-editor)";
+  if (st.smallcaps) css["font-variant"] = "small-caps";
+  if (st.tracking) css["letter-spacing"] = st.tracking;
   if (st.weight) css["font-weight"] = ({ bold: 700, semibold: 600, medium: 500, light: 300 } as any)[st.weight] ?? st.weight;
   if (st.italic) css["font-style"] = "italic";
   return css;

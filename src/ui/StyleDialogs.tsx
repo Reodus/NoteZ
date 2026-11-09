@@ -7,6 +7,7 @@ import { editorView, state, setActiveTheme, prefs, setPrefs } from "../core/stor
 import { readFrontmatter, setFrontmatter } from "../core/frontmatter";
 import { runPreview } from "../core/render";
 import { fontList, FONT_SIZES } from "../core/fonts";
+import { DIGIT_OPTIONS, SCRIPT_FONT_KEYS, languageOptions } from "../core/languages";
 import { isTypst } from "../editor/format";
 import { ColorGrid, ComboBox, Field, Modal, Popover, Segmented, askText } from "./primitives";
 import { previewCss } from "./Toolbar";
@@ -86,7 +87,55 @@ async function effectiveTheme(fallback: Theme): Promise<Theme> {
 const pt = (v: string) => (/^\d+(\.\d+)?$/.test(v.trim()) ? `${v.trim()}pt` : v.trim() || null);
 
 /** "2" → "2cm": a bare number in a length field means centimetres. */
-const withUnit = (v: string) => (/^\d+(\.\d+)?$/.test(v.trim()) ? `${v.trim()}cm` : v.trim());
+const withUnit = (v: string, unit = "cm") => (/^-?\d+(\.\d+)?$/.test(v.trim()) ? `${v.trim()}${unit}` : v.trim());
+
+/**
+ * Fonts for other scripts (`fonts:` of a style): one row per script that has
+ * its own font. Scripts without one use the main font if it has the letters,
+ * else the bundled Noto font. The old `font-fa` shows as the Arabic-script row.
+ */
+function ScriptFonts(props: {
+  value: Record<string, string>;
+  legacy?: string | null;
+  fonts: string[];
+  onChange: (fonts: Record<string, string>, clearLegacy: boolean) => void;
+}) {
+  const rows = () => {
+    const m = { ...props.value };
+    if (props.legacy && !m.arabic) m.arabic = props.legacy;
+    return m;
+  };
+  const used = () => Object.keys(rows());
+  const unused = () => SCRIPT_FONT_KEYS.filter((k) => !used().includes(k.key));
+  const put = (m: Record<string, string>) => props.onChange(m, true);
+  const label = (key: string) => SCRIPT_FONT_KEYS.find((k) => k.key === key)?.label ?? key;
+  const sample = (key: string) => SCRIPT_FONT_KEYS.find((k) => k.key === key)?.sample ?? "";
+  return (
+    <div class="field wide script-fonts">
+      <span class="field-label">Fonts for other scripts</span>
+      <For each={used()}>
+        {(key) => (
+          <div class="script-font-row">
+            <span class="script-name" title={label(key)}>{label(key)}</span>
+            <ComboBox value={rows()[key] ?? ""} placeholder="Bundled default" options={props.fonts}
+              onChange={(v) => put(v ? { ...rows(), [key]: v } : Object.fromEntries(Object.entries(rows()).filter(([k]) => k !== key)))}
+              renderOption={(f) => <span style={{ "font-family": `"${f}", var(--font-ui)` }}>{f} — {sample(key)}</span>} />
+            <button type="button" class="icon-btn small" title="Remove" onClick={() => put(Object.fromEntries(Object.entries(rows()).filter(([k]) => k !== key)))}>×</button>
+          </div>
+        )}
+      </For>
+      <select class="input add-script" value="" onChange={(e) => {
+        const key = e.currentTarget.value;
+        e.currentTarget.value = "";
+        if (key) put({ ...rows(), [key]: SCRIPT_FONT_KEYS.find((k) => k.key === key)?.font ?? "" });
+      }}>
+        <option value="">+ Add a font for a script…</option>
+        <For each={unused()}>{(k) => <option value={k.key}>{k.label} ({k.sample})</option>}</For>
+      </select>
+      <span class="field-hint">Scripts not listed use this style's font when it has their letters, else a bundled Noto font.</span>
+    </div>
+  );
+}
 
 const WEIGHTS = ["light", "regular", "medium", "semibold", "bold", "extrabold"];
 const SPACING = [
@@ -102,15 +151,18 @@ const NUMBERING = [
   { v: "1.", l: "1.  2.  3." },
   { v: "1.1.", l: "1.1.  1.2." },
   { v: "1.1.1.", l: "1.1.1." },
-  { v: "۱.", l: "۱.  ۲.  ۳." },
-  { v: "۱.۱.", l: "۱.۱.  ۱.۲." },
-  { v: "۱.۱.۱.", l: "۱.۱.۱." },
+  { v: "1", l: "1  2  3 (no period)" },
+  { v: "1.1", l: "1.1  1.2 (no period)" },
   { v: "I.", l: "I.  II.  III." },
   { v: "A.", l: "A.  B.  C." },
   { v: "a)", l: "a)  b)  c)" },
   { v: "1)", l: "1)  2)  3)" },
   { v: "(1)", l: "(1)  (2)  (3)" },
   { v: "1-1", l: "1-1  1-2" },
+  { v: "i.", l: "i.  ii.  iii." },
+  { v: "α.", l: "α.  β.  γ." },
+  { v: "一、", l: "一、 二、 三、" },
+  { v: "第1章", l: "第1章  第2章" },
   { v: "i.", l: "i.  ii.  iii." },
   { v: "α.", l: "α.  β.  γ." },
 ];
@@ -216,18 +268,14 @@ export function StyleDialog(props: { styleKey: string; scope: "note" | "theme"; 
       <Show when={!base.loading} fallback={<div class="pane-empty">Loading…</div>}>
         <div class="style-preview" dir="auto">
           <span style={{ ...previewCss(st), "text-align": (st.align === "justify" ? "justify" : st.align ?? "start") as any, "text-decoration": st.underline ? "underline" : undefined }}>
-            {isHeading || props.styleKey === "title" ? "عنوان نمونه — Sample Heading" : "این یک متن نمونه است. The quick brown fox jumps over the lazy dog."}
+            {isHeading || props.styleKey === "title" ? "Sample Heading — عنوان — 見出し" : "The quick brown fox jumps over the lazy dog. Съешь ещё этих булок. 敏捷的棕色狐狸。"}
           </span>
         </div>
 
         <div class="form-grid">
-          <Field label="Font (Latin)">
+          <Field label="Font" hint="Used for every script it has letters for.">
             <ComboBox value={st.font ?? ""} placeholder="Inherit" options={fonts()} onChange={(v) => set("font", v)}
               renderOption={(f) => <span style={{ "font-family": `"${f}"` }}>{f}</span>} />
-          </Field>
-          <Field label="Font (Persian)">
-            <ComboBox value={st["font-fa"] ?? ""} placeholder="Inherit" options={fonts()} onChange={(v) => set("font-fa", v)}
-              renderOption={(f) => <span style={{ "font-family": `"${f}"` }}>{f} — فارسی</span>} />
           </Field>
           <Field label="Size">
             <ComboBox value={st.size ?? ""} placeholder="Inherit" options={FONT_SIZES}
@@ -244,9 +292,17 @@ export function StyleDialog(props: { styleKey: string; scope: "note" | "theme"; 
               <button type="button" class="tb-btn" classList={{ active: st.weight === "bold" }} onClick={() => set("weight", st.weight === "bold" ? null : "bold")} title="Bold"><BoldIcon size={15} /></button>
               <button type="button" class="tb-btn" classList={{ active: !!st.italic }} onClick={() => set("italic", st.italic ? null : true)} title="Italic"><ItalicIcon size={15} /></button>
               <button type="button" class="tb-btn" classList={{ active: !!st.underline }} onClick={() => set("underline", st.underline ? null : true)} title="Underline"><UnderlineIcon size={15} /></button>
+              <button type="button" class="tb-btn sc" classList={{ active: !!st.smallcaps }} onClick={() => set("smallcaps", st.smallcaps ? null : true)} title="Small capitals">Aᴀ</button>
             </div>
           </Field>
           <ColorField label="Color" value={st.color} onChange={(c) => set("color", c)} />
+          <Field label="Letter spacing" hint="e.g. 0.05em; empty = normal">
+            <input class="input" value={st.tracking ?? ""} placeholder="Normal" onChange={(e) => set("tracking", withUnit(e.currentTarget.value.trim(), "em") || null)} />
+          </Field>
+          <ScriptFonts value={st.fonts ?? {}} legacy={st["font-fa"]} fonts={fonts()} onChange={(m, clearLegacy) => {
+            setSt("fonts", Object.keys(m).length ? m : (null as any));
+            if (clearLegacy) setSt("font-fa", null as any);
+          }} />
           <Show when={!inline}>
           <Field label="Alignment" wide>
             <Segmented
@@ -332,9 +388,12 @@ export function PageSetupDialog(props: { onClose: () => void }) {
   const themeId = docThemeId();
   const [pg, setPg] = createStore<PageStyle>({});
   const [margins, setMargins] = createStore({ top: "", right: "", bottom: "", left: "" });
+  const [lang, setLang] = createSignal("");
   const [base] = createResource(async () => {
     const t = await ipc.theme(themeId);
-    const merged: PageStyle = (await effectiveTheme(t)).page ?? {};
+    const eff = await effectiveTheme(t);
+    setLang(eff.lang && eff.lang !== "auto" ? eff.lang : "");
+    const merged: PageStyle = eff.page ?? {};
     setPg(reconcile(structuredClone(merged)));
     const parts = (merged.margin ?? "2.5cm").split(/\s+/);
     const [a, b, c, d] = parts.length === 4 ? parts : parts.length === 2 ? [parts[0], parts[1], parts[0], parts[1]] : [parts[0], parts[0], parts[0], parts[0]];
@@ -351,13 +410,20 @@ export function PageSetupDialog(props: { onClose: () => void }) {
     try {
       if (scope() === "note") {
         const view = editorView();
-        if (view) setFrontmatter(view, ["page"], diff(page, theme.page));
+        if (view) {
+          setFrontmatter(view, ["page"], diff(page, theme.page));
+          setFrontmatter(view, ["lang"], lang() && lang() !== theme.lang ? lang() : null);
+        }
       } else {
         const t: Theme = structuredClone(unwrap(theme));
         t.page = page;
+        t.lang = lang() || null;
         await ipc.saveTheme(themeId, t);
         const view = editorView();
-        if (view && !isTypst()) setFrontmatter(view, ["page"], null);
+        if (view && !isTypst()) {
+          setFrontmatter(view, ["page"], null);
+          setFrontmatter(view, ["lang"], null);
+        }
         notify(`Updated theme “${themeId}”`, "success");
       }
       await refreshTheme();
@@ -370,7 +436,7 @@ export function PageSetupDialog(props: { onClose: () => void }) {
   return (
     <Modal
       title="Page setup"
-      subtitle="Paper, margins, columns, header and footer."
+      subtitle="Paper, margins, columns, language, numbering, header and footer."
       width="680px"
       onClose={props.onClose}
       footer={
@@ -416,22 +482,37 @@ export function PageSetupDialog(props: { onClose: () => void }) {
               <Segmented value={String(pg.columns ?? 1)} onChange={(v) => setPg("columns", v === "1" ? null : Number(v))}
                 options={[{ value: "1", label: "1" }, { value: "2", label: "2" }, { value: "3", label: "3" }]} />
             </Field>
+            <Field label="Document language" hint="Direction, hyphenation, quotes and automatic digits follow it.">
+              <select class="input" value={lang()} onChange={(e) => setLang(e.currentTarget.value)}>
+                <For each={languageOptions()}>{(o) => <option value={o.value}>{o.label}</option>}</For>
+              </select>
+            </Field>
             <Field label="Page numbers">
               <select class="input" value={pg.numbering ?? "1"} onChange={(e) => setPg("numbering", e.currentTarget.value)}>
                 <option value="1">1, 2, 3</option>
-                <option value="۱">۱، ۲، ۳</option>
+                <option value="1 / 1">1 / 3, 2 / 3 …</option>
                 <option value="i">i, ii, iii</option>
                 <option value="I">I, II, III</option>
                 <option value="a">a, b, c</option>
+                <option value="A">A, B, C</option>
+                <option value="α">α, β, γ</option>
+                <option value="一">一, 二, 三</option>
+                <option value="あ">あ, い, う</option>
+                <option value="가">가, 나, 다</option>
+                <Show when={!["1", "1 / 1", "i", "I", "a", "A", "α", "一", "あ", "가"].includes(pg.numbering ?? "1")}>
+                  <option value={pg.numbering!}>{pg.numbering}</option>
+                </Show>
               </select>
             </Field>
-            <Field label="Heading number digits" hint="Applies to numbered headings (set the numbering shape per heading style).">
+            <Field label="Digits" hint="For page numbers and numbered headings.">
+              <select class="input" value={pg.digits ?? ""} onChange={(e) => setPg("digits", e.currentTarget.value || null)}>
+                <For each={DIGIT_OPTIONS}>{(o) => <option value={o.value}>{o.label}</option>}</For>
+              </select>
+            </Field>
+            <Field label="Heading digits" hint="Overrides Digits for numbered headings only.">
               <select class="input" value={pg["heading-digits"] ?? ""} onChange={(e) => setPg("heading-digits", e.currentTarget.value || null)}>
-                <option value="">As set in each heading style</option>
-                <option value="auto">Automatic (Persian in Persian documents)</option>
-                <option value="persian">Persian — ۱.۲.۳</option>
-                <option value="latin">Western — 1.2.3</option>
-                <option value="arabic">Arabic-Indic — ١.٢.٣</option>
+                <option value="">Same as page numbers</option>
+                <For each={DIGIT_OPTIONS.slice(1)}>{(o) => <option value={o.value}>{o.label}</option>}</For>
               </select>
             </Field>
           </div>
@@ -453,6 +534,33 @@ export function PageSetupDialog(props: { onClose: () => void }) {
 }
 
 // ----------------------------------------------------------------- Themes
+
+/** Rendered first pages, kept while the app runs. */
+const thumbCache = new Map<string, Promise<string>>();
+
+/** The real first page of a sample note in the theme. */
+function ThemeThumb(props: { id: string; theme: Theme }) {
+  // Keyed by the theme's content: an edited theme renders again.
+  const [url] = createResource(
+    () => `${props.id}@${JSON.stringify(props.theme)}`,
+    (key) => {
+      if (!thumbCache.has(key)) {
+        thumbCache.set(
+          key,
+          ipc.themeThumbnail(props.id).then((svg) => URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }))),
+        );
+      }
+      return thumbCache.get(key)!.catch(() => "");
+    },
+  );
+  return (
+    <div class="theme-thumb">
+      <Show when={url()} fallback={<div class="theme-thumb-loading" />}>
+        <img src={url()} alt="" draggable={false} />
+      </Show>
+    </div>
+  );
+}
 
 export function ThemesDialog(props: { onClose: () => void }) {
   const current = docThemeId();
@@ -493,11 +601,7 @@ export function ThemesDialog(props: { onClose: () => void }) {
         <For each={themes() ?? []}>
           {({ info, theme }) => (
             <div class="theme-card" classList={{ active: info.id === current }} onClick={() => choose(info.id)}>
-              <div class="theme-thumb" style={{ "font-family": `"${theme.styles.body?.font ?? "serif"}", var(--font-editor)` }}>
-                <div class="tt-title" style={{ color: theme.styles.title?.color ?? theme.styles.h1?.color ?? "#222" }}>Aa · الف</div>
-                <div class="tt-h" style={{ color: theme.styles.h1?.color ?? "#222" }}>{theme.styles.h1?.numbering ? theme.styles.h1.numbering.replace(/\.$/, "") + ". " : ""}Heading</div>
-                <For each={[1, 2, 3]}>{() => <i class="tt-line" />}</For>
-              </div>
+              <ThemeThumb id={info.id} theme={theme} />
               <div class="theme-info">
                 <div class="theme-name">
                   {info.name}

@@ -1,9 +1,9 @@
 // Electron shell: one window running the Solid UI, plus the Rust core
 // (vault, Typst rendering, PDF export) as a helper process spoken to over
 // newline-delimited JSON (see core/src/main.rs).
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, net, protocol, safeStorage, screen, shell } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync, watch } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, watch, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -26,6 +26,8 @@ const coreBin = app.isPackaged
   ? path.join(process.resourcesPath, `notez-core${exe}`)
   : path.join(root, `core/bin/notez-core${exe}`); // npm run core
 const packagesDir = app.isPackaged ? path.join(process.resourcesPath, "typst-packages") : path.join(root, "core/typst-packages");
+// Bundled Noto fonts (scripts/fonts.mjs): used by the PDF engine and the editor.
+const fontsDir = app.isPackaged ? path.join(process.resourcesPath, "fonts") : path.join(root, "core/fonts/noto");
 
 let core = null;
 let nextId = 1;
@@ -33,7 +35,15 @@ const pending = new Map();
 let openVault = null; // replayed when the core restarts
 
 function startCore() {
-  const child = spawn(coreBin, [], { stdio: ["pipe", "pipe", "inherit"], env: { ...process.env, NOTEZ_PACKAGES: packagesDir } });
+  // windowsHide: no console window on Windows. stderr is piped (a GUI-subsystem
+  // core has no console to inherit) and forwarded to the shell's own log.
+  const child = spawn(coreBin, [], {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    env: { ...process.env, NOTEZ_PACKAGES: packagesDir, NOTEZ_FONTS: fontsDir },
+  });
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => process.stderr.write(chunk));
   let buf = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
@@ -83,6 +93,18 @@ function startupArgs() {
   return args.map((a) => (path.isAbsolute(a) || !existsSync(a) ? a : path.resolve(a)));
 }
 
+// macOS hands files opened from Finder (or dropped on the Dock icon) to
+// "open-file" instead of argv. Before the UI is up they join the startup
+// are queued until the UI asks for them; afterwards they go to the window.
+const openedFiles = [];
+let uiReady = false;
+app.on("open-file", (e, file) => {
+  e.preventDefault();
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win && uiReady) win.webContents.send("open-path", file);
+  else openedFiles.push(file);
+});
+
 // ------------------------------------------------------------- IPC
 
 // Errors cross the IPC boundary as plain values (string or diagnostics list),
@@ -104,6 +126,58 @@ ipcMain.handle("core", wrap(async (cmd, args) => {
   return r;
 }));
 ipcMain.handle("startup-args", wrap(async () => startupArgs()));
+// The bundled Noto fonts, so the editor shows every script like the PDF does.
+ipcMain.handle("bundled-fonts", wrap(async () => {
+  let files = [];
+  try {
+    files = readdirSync(fontsDir).filter((f) => /\.(ttf|otf)$/i.test(f));
+  } catch {}
+  return { dir: fontsDir, files };
+}));
+// UI themes and CSS snippets: <vault>/.notez/{themes,snippets}/*.css and the
+// same folders in the app's config directory (src/core/uithemes.ts).
+const configCssDir = (kind) => path.join(app.getPath("userData"), kind);
+function readCss(dir, kind, source) {
+  try {
+    return readdirSync(dir)
+      .filter((f) => f.toLowerCase().endsWith(".css"))
+      .map((f) => ({ name: f, kind: kind === "themes" ? "theme" : "snippet", source, path: path.join(dir, f), css: readFileSync(path.join(dir, f), "utf8") }));
+  } catch {
+    return [];
+  }
+}
+ipcMain.handle("user-css", wrap(async (vault) => {
+  const out = [];
+  for (const kind of ["themes", "snippets"]) {
+    out.push(...readCss(configCssDir(kind), kind, "global"));
+    if (vault) out.push(...readCss(path.join(vault, ".notez", kind), kind, "vault"));
+  }
+  return out;
+}));
+ipcMain.handle("css-folder", wrap(async (kind, vault) => {
+  const dir = vault ? path.join(vault, ".notez", kind) : configCssDir(kind);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}));
+// Global theme folders are outside the vault watcher: watch them separately.
+function watchConfigCss() {
+  for (const kind of ["themes", "snippets"]) {
+    const dir = configCssDir(kind);
+    try {
+      mkdirSync(dir, { recursive: true });
+      watch(dir, () => {
+        for (const w of BrowserWindow.getAllWindows()) w.webContents.send("vault-fs", [`.notez/${kind}/`]);
+      });
+    } catch (e) {
+      console.error("cannot watch", dir, e);
+    }
+  }
+}
+ipcMain.handle("take-opened-files", wrap(async () => {
+  uiReady = true;
+  setTimeout(deliverCaptures, 0); // text captured while the window was starting
+  return openedFiles.splice(0);
+}));
 ipcMain.handle("open-url", wrap(async (url) => {
   if (!/^(https?:|mailto:)/i.test(url)) throw "unsupported link";
   await shell.openExternal(url);
@@ -131,13 +205,24 @@ ipcMain.handle("trash", wrap(async (p) => {
   if (!openVault || !path.resolve(p).startsWith(path.resolve(openVault) + path.sep)) throw "outside the vault";
   await shell.trashItem(p);
 }));
-// Spell checking (English + Persian when the dictionaries are available).
-ipcMain.handle("spellcheck", wrap(async (on) => {
+// Spell checking in the languages chosen in Settings (empty = the system
+// language, plus English). macOS uses the system spell checker, which picks
+// languages itself.
+ipcMain.handle("spellcheck", wrap(async (on, langs) => {
   for (const w of BrowserWindow.getAllWindows()) {
     const s = w.webContents.session;
     s.setSpellCheckerEnabled(!!on);
-    if (on) s.setSpellCheckerLanguages(["en-US", "fa"].filter((l) => s.availableSpellCheckerLanguages.includes(l)));
+    if (!on || process.platform === "darwin") continue;
+    const available = s.availableSpellCheckerLanguages;
+    const pick = (l) => available.find((a) => a.toLowerCase() === l.toLowerCase()) ?? available.find((a) => a.split("-")[0] === l.split("-")[0]);
+    const wanted = Array.isArray(langs) && langs.length ? langs : [app.getLocale(), "en-US"];
+    const chosen = [...new Set(wanted.map(pick).filter(Boolean))];
+    if (chosen.length) s.setSpellCheckerLanguages(chosen);
   }
+}));
+ipcMain.handle("spellcheck-languages", wrap(async () => {
+  const w = BrowserWindow.getAllWindows()[0];
+  return process.platform === "darwin" ? [] : (w?.webContents.session.availableSpellCheckerLanguages ?? []);
 }));
 // Reveal a file in the system file manager (selected), like Obsidian.
 ipcMain.handle("show-in-folder", wrap(async (p) => shell.showItemInFolder(p)));
@@ -164,7 +249,7 @@ let changed = new Set();
 let flushTimer = null;
 
 /** Hidden paths are ignored, except NoteZ's own styles and plugins. */
-const watched = (rel) => !rel.split("/").some((s) => s.startsWith(".")) || /^\.notez\/(styles|plugins)\//.test(rel);
+const watched = (rel) => !rel.split("/").some((s) => s.startsWith(".")) || /^\.notez\/(styles|plugins|themes|snippets)\//.test(rel);
 
 function watchVault(dir) {
   watcher?.close();
@@ -196,6 +281,110 @@ async function flushChanges() {
 
 let quitting = false;
 
+// ------------------------------------------------------- quick capture
+
+// A global shortcut opens a small window anywhere on the desktop; its text is
+// handed to the main window, which adds it to the capture note.
+let captureAccel = "";
+let captureTarget = "";
+let captureWin = null;
+const pendingCaptures = [];
+
+function openCapture() {
+  if (captureWin && !captureWin.isDestroyed()) return captureWin.focus();
+  const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const width = 560;
+  const height = 150;
+  captureWin = new BrowserWindow({
+    width,
+    height,
+    x: Math.round(workArea.x + (workArea.width - width) / 2),
+    y: Math.round(workArea.y + workArea.height / 4),
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    title: "Quick capture",
+    webPreferences: { preload: path.join(here, "capture-preload.cjs"), contextIsolation: true, sandbox: true, spellcheck: true },
+  });
+  captureWin.once("ready-to-show", () => (captureWin.show(), captureWin.focus()));
+  captureWin.on("closed", () => (captureWin = null));
+  captureWin.loadFile(path.join(here, "capture.html"));
+}
+
+function deliverCaptures() {
+  const win = mainWindow();
+  if (!win || !uiReady) return;
+  while (pendingCaptures.length) win.webContents.send("capture", pendingCaptures.shift());
+}
+
+const mainWindow = () => BrowserWindow.getAllWindows().find((w) => w !== captureWin && !w.isDestroyed());
+
+ipcMain.on("capture-submit", (_e, text) => {
+  captureWin?.close();
+  pendingCaptures.push(String(text));
+  if (!mainWindow()) createWindow();
+  deliverCaptures();
+});
+ipcMain.on("capture-cancel", () => captureWin?.close());
+ipcMain.handle("capture-target", () => captureTarget);
+// Secrets (sync passwords and passphrase), encrypted with the system keychain
+// (Keychain, DPAPI, libsecret/KWallet) in <userData>/secrets.json.
+const secretsFile = () => path.join(app.getPath("userData"), "secrets.json");
+const readSecrets = () => {
+  try {
+    return JSON.parse(readFileSync(secretsFile(), "utf8"));
+  } catch {
+    return {};
+  }
+};
+/** "keychain", "plain" (Linux without a keyring: weakly protected), or "none". */
+const secretStore = () => {
+  if (!safeStorage.isEncryptionAvailable()) return "none";
+  const backend = process.platform === "linux" && safeStorage.getSelectedStorageBackend ? safeStorage.getSelectedStorageBackend() : "keychain";
+  return backend === "basic_text" ? "plain" : "keychain";
+};
+ipcMain.handle("secret-store", wrap(async () => secretStore()));
+ipcMain.handle("secret-get", wrap(async (key) => {
+  const v = readSecrets()[key];
+  if (!v || secretStore() === "none") return null;
+  try {
+    return safeStorage.decryptString(Buffer.from(v, "base64"));
+  } catch {
+    return null;
+  }
+}));
+ipcMain.handle("secret-set", wrap(async (key, value) => {
+  const all = readSecrets();
+  if (value == null || value === "") delete all[key];
+  else {
+    if (secretStore() === "none") throw "no system keychain to keep the secret in";
+    all[key] = safeStorage.encryptString(String(value)).toString("base64");
+  }
+  mkdirSync(path.dirname(secretsFile()), { recursive: true });
+  const tmp = secretsFile() + ".tmp";
+  writeFileSync(tmp, JSON.stringify(all), { mode: 0o600 });
+  renameSync(tmp, secretsFile());
+}));
+ipcMain.handle("capture-shortcut", wrap(async (accel, target) => {
+  captureTarget = target ?? "";
+  if (accel === captureAccel) return true;
+  if (captureAccel) globalShortcut.unregister(captureAccel);
+  captureAccel = "";
+  if (!accel) return true;
+  // false: another app owns the shortcut, or the syntax is invalid.
+  let ok = false;
+  try {
+    ok = globalShortcut.register(accel, openCapture);
+  } catch {
+    ok = false;
+  }
+  if (ok) captureAccel = accel;
+  return ok;
+}));
+
 function createWindow() {
   const win = new BrowserWindow({
     title: "NoteZ",
@@ -209,6 +398,7 @@ function createWindow() {
     webPreferences: { preload: path.join(here, "preload.cjs"), contextIsolation: true, sandbox: true, spellcheck: true, plugins: true },
   });
   win.once("ready-to-show", () => win.show());
+  win.on("closed", () => (uiReady = false));
   win.webContents.session.setSpellCheckerEnabled(false); // the UI turns it on (Settings → Editor)
   // Right-clicks the page didn't handle itself (the editor leaves them
   // through on purpose): tell the UI, with spelling suggestions, so it can
@@ -238,7 +428,11 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  Menu.setApplicationMenu(null);
+  // macOS needs an application menu for the standard shortcuts (copy, paste,
+  // undo, quit, hide) to work; elsewhere the app draws its own UI.
+  Menu.setApplicationMenu(process.platform === "darwin"
+    ? Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "windowMenu" }])
+    : null);
   const dist = path.join(root, "dist");
   protocol.handle("app", (req) => {
     const rel = decodeURIComponent(new URL(req.url).pathname).replace(/^\/+/, "") || "index.html";
@@ -262,10 +456,18 @@ app.whenReady().then(() => {
   });
   startCore();
   createWindow();
+  watchConfigCss();
 });
 
+app.on("will-quit", () => globalShortcut.unregisterAll());
 app.on("before-quit", () => {
   quitting = true;
   core?.kill();
 });
-app.on("window-all-closed", () => app.quit());
+// macOS apps stay open without windows and reopen one from the Dock.
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
+app.on("activate", () => {
+  if (app.isReady() && BrowserWindow.getAllWindows().length === 0) createWindow();
+});

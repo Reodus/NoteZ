@@ -1,0 +1,21 @@
+name: Newspaper
+description: Three justified columns under a bold masthead title — newsletters and bulletins.
+page:
+  paper: a4
+  margin: 1.6cm
+  columns: 3
+  numbering: "1"
+  digits: auto
+  header: { left: "{title}", right: "{date}", line: true }
+  footer: { center: "{page}" }
+styles:
+  body: { font: Libertinus Serif, fonts: { arabic: Vazirmatn }, size: 9.5pt, line-spacing: 1.25, align: justify, space-after: 0.3em, indent: 1em }
+  title: { size: 34pt, weight: black, tracking: -0.01em, align: center, space-after: 0.6em }
+  subtitle: { size: 11pt, italic: true, align: center }
+  h1: { size: 15pt, weight: black, space-before: 1em, space-after: 0.4em }
+  h2: { size: 11.5pt, weight: bold, italic: true, space-before: 0.8em, space-after: 0.3em }
+  h3: { size: 10pt, weight: bold, smallcaps: true, space-before: 0.6em, space-after: 0.2em }
+  quote: { size: 11pt, italic: true, align: center, border: "#222222" }
+  code: { size: 8pt, background: "#f2f2f2" }
+  link: { color: "#222222", underline: true }
+  caption: { size: 8pt, italic: true }

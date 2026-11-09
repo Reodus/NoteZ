@@ -1,0 +1,22 @@
+name: Thesis
+description: Dissertation layout — wide binding margin, numbered chapters and sections, 1.5 line spacing.
+page:
+  paper: a4
+  margin: 2.5cm 2.5cm 2.5cm 3.5cm
+  numbering: "1"
+  digits: auto
+  skip-first: true
+  header: { right: "{chapter}", line: true }
+  footer: { center: "{page}" }
+styles:
+  body: { font: New Computer Modern, fonts: { arabic: Vazirmatn }, size: 12pt, line-spacing: 1.5, align: justify, space-after: 0.6em, indent: 1.5em }
+  title: { size: 26pt, weight: bold, align: center, space-before: 4cm, space-after: 3em }
+  subtitle: { size: 15pt, italic: true, align: center }
+  h1: { size: 20pt, weight: bold, numbering: "1.", space-before: 2.5em, space-after: 1.2em }
+  h2: { size: 15pt, weight: bold, numbering: "1.1", space-before: 1.6em, space-after: 0.8em }
+  h3: { size: 13pt, weight: bold, numbering: "1.1.1", space-before: 1.2em, space-after: 0.6em }
+  h4: { size: 12pt, weight: bold, italic: true, space-before: 1em, space-after: 0.4em }
+  quote: { size: 11pt, italic: true, border: "#8a8a8a" }
+  code: { size: 9.5pt, background: "#f6f6f6", border: "#e2e2e2" }
+  link: { color: "#1a3f8f" }
+  caption: { size: 10pt, italic: true, align: center }

@@ -4,6 +4,35 @@ import { FolderOpen, FolderPlus, Clock, X, FileText, Sparkles, Languages, PenToo
 import { prefs, setPrefs, openVault } from "../core/store";
 import { ipc } from "../core/ipc";
 import { notify } from "../core/app";
+
+/** First note of a new vault: shows mixed scripts, a chart and the Help docs. */
+const WELCOME_NOTE = `---
+title: Welcome to NoteZ
+theme: default
+---
+
+# Getting started
+
+This is your first note. Format text with the toolbar or by typing Markdown, type \`/\` for the insert menu, and use **Export PDF** to typeset it.
+
+Write in any language — each paragraph picks its own direction and font:
+
+- English, Français, Español, Deutsch
+- العربية · فارسی · اردو
+- 中文 · 日本語 · 한국어
+- हिन्दी · বাংলা · ไทย · Русский · Ελληνικά
+
+Open **Help** (F1) for the full guide: Markdown syntax, themes, languages and more.
+
+\`\`\`chart
+type: bar
+title: A sample chart
+data:
+  Mon: 4
+  Tue: 7
+  Wed: 5
+\`\`\`
+`;
 import { Logo } from "./Logo";
 
 export async function chooseVault() {
@@ -20,7 +49,7 @@ async function createVault() {
     if (!notes.length) {
       await ipc.write(
         "Welcome.md",
-        `---\ntitle: به NoteZ خوش آمدید\ntheme: default\n---\n\n# شروع\n\nاین اولین یادداشت شماست. از نوار ابزار بالا برای قالب‌بندی استفاده کنید و با **Export PDF** خروجی بگیرید.\n\nThis is your first note — English and فارسی can be mixed freely.\n\n\`\`\`chart\ntype: bar\ntitle: نمونه نمودار\ndata:\n  الف: 4\n  ب: 7\n  ج: 5\n\`\`\`\n`,
+        WELCOME_NOTE,
       );
     }
   } catch (e) {
@@ -40,7 +69,7 @@ export default function Welcome() {
           <Logo size={56} />
           <div>
             <h1>NoteZ</h1>
-            <p>Notes in Markdown & Typst · فارسی و English · beautiful PDFs</p>
+            <p>Notes in Markdown & Typst · any language, any script · beautiful PDFs</p>
           </div>
         </div>
 
@@ -89,7 +118,7 @@ export default function Welcome() {
         </Show>
 
         <div class="welcome-features">
-          <span><Languages size={15} /> Persian ⇄ English bidi</span>
+          <span><Languages size={15} /> Every language & script, LTR and RTL</span>
           <span><Sparkles size={15} /> Typst-powered PDF</span>
           <span><PenTool size={15} /> Charts & diagrams</span>
         </div>

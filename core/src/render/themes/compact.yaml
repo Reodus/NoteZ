@@ -1,0 +1,20 @@
+name: Compact Notes
+description: Two columns, small sans text, tight spacing — fits a lot on a page (cheat sheets, study notes).
+page:
+  paper: a4
+  margin: 1.4cm
+  columns: 2
+  numbering: "1"
+  digits: auto
+  footer: { left: "{title}", right: "{page}" }
+styles:
+  body: { font: Noto Sans, fonts: { arabic: Vazirmatn }, size: 9pt, line-spacing: 1.25, align: justify, space-after: 0.4em }
+  title: { size: 18pt, weight: bold, color: "#0b5d6b", align: start, space-after: 0.8em }
+  subtitle: { size: 11pt, color: "#5d6b70" }
+  h1: { size: 12.5pt, weight: bold, color: "#0b5d6b", border: "#0b5d6b", space-before: 0.9em, space-after: 0.4em }
+  h2: { size: 10.5pt, weight: bold, color: "#1a7f8f", space-before: 0.7em, space-after: 0.3em }
+  h3: { size: 9.5pt, weight: semibold, space-before: 0.6em, space-after: 0.2em }
+  quote: { size: 8.5pt, background: "#eef7f8", border: "#1a7f8f" }
+  code: { size: 7.5pt, background: "#f3f6f7", border: "#dde6e8" }
+  link: { color: "#0b5d6b" }
+  caption: { size: 8pt, color: "#5d6b70" }

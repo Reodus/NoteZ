@@ -10,6 +10,21 @@ const call = async (channel, ...args) => {
 contextBridge.exposeInMainWorld("notezNative", {
   core: (cmd, args) => call("core", cmd, args),
   startupArgs: () => call("startup-args"),
+  takeOpenedFiles: () => call("take-opened-files"),
+  setCaptureShortcut: (accel, target) => call("capture-shortcut", accel, target),
+  onCapture: (cb) => {
+    const h = (_e, text) => cb(text);
+    ipcRenderer.on("capture", h);
+    return () => ipcRenderer.removeListener("capture", h);
+  },
+  bundledFonts: () => call("bundled-fonts"),
+  userCss: (vault) => call("user-css", vault),
+  cssFolder: (kind, vault) => call("css-folder", kind, vault),
+  onOpenPath: (cb) => {
+    const h = (_e, p) => cb(p);
+    ipcRenderer.on("open-path", h);
+    return () => ipcRenderer.removeListener("open-path", h);
+  },
   openUrl: (url) => call("open-url", url),
   openPath: (p) => call("open-path", p),
   showInFolder: (p) => call("show-in-folder", p),
@@ -24,8 +39,12 @@ contextBridge.exposeInMainWorld("notezNative", {
     }
   },
   trash: (p) => call("trash", p),
+  secretStore: () => call("secret-store"),
+  secretGet: (key) => call("secret-get", key),
+  secretSet: (key, value) => call("secret-set", key, value),
   setZoom: (f) => webFrame.setZoomFactor(f),
-  setSpellcheck: (on) => call("spellcheck", on),
+  setSpellcheck: (on, langs) => call("spellcheck", on, langs),
+  spellcheckLanguages: () => call("spellcheck-languages"),
   replaceMisspelling: (w) => call("replace-misspelling", w),
   addToDictionary: (w) => call("add-to-dictionary", w),
   onContextMenu: (cb) => {

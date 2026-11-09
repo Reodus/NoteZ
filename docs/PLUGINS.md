@@ -24,8 +24,35 @@ Full types: [`notez-plugin.d.ts`](./notez-plugin.d.ts). A complete working examp
 | `api.statusBar.addItem({id, render})` | text in the status bar |
 | `api.panels.add({id, title, icon, mount(el)})` | a tab in the right panel |
 | `api.blocks.register({lang, toTypst, preview})` | a new ```` ```lang ```` block, shown in the editor and the PDF |
+| `api.slash.register({id, title, args, run})` | a command in the `/` menu, with arguments: `/weather Paris` |
+| `api.editor.registerCompletion(source)` | completion as you type (a CodeMirror completion source) |
 | `api.editor.registerExtension(ext)` | any CodeMirror 6 extension (use `api.editor.cm.*`) |
 | `api.events.on("note:saved", fn)` | react to app events |
+
+## Slash commands
+
+```js
+api.slash.register({
+  id: "sig",                       // typed as /sig
+  title: "Signature",
+  icon: "✍",
+  args: [{ name: "style", options: () => ["formal", "short"] }],
+  run(view, [style]) {
+    const text = style === "short" ? "— A." : "Best regards,\nAlex";
+    view.dispatch(view.state.replaceSelection(text));
+  },
+});
+```
+
+The menu shows the command under *Plugins*; while the user types `/sig `, the argument
+names appear as a grey hint and `options` are offered as completions. See
+[Slash commands](SLASH.md) for how users see it.
+
+## Reading the vault
+
+`api.vault.search(query)` takes the same syntax as the search pane (`tag:x path:y "phrase"
+/regex/ type:task`, see [Search](SEARCH.md)). `api.vault.tags()` lists tags with counts;
+`api.vault.meta()` returns each note's tags, icon, cover, title and aliases.
 
 ## New block types
 

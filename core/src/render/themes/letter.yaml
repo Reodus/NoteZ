@@ -1,0 +1,21 @@
+name: Letter
+description: Business letter — sender in the header, airy body, no page numbers on the first page.
+page:
+  paper: a4
+  margin: 3cm 2.5cm 2.5cm 2.5cm
+  numbering: "1"
+  digits: auto
+  skip-first: true
+  header: { right: "{author}" }
+  footer: { right: "{page} / {total}" }
+styles:
+  body: { font: Libertinus Serif, fonts: { arabic: Vazirmatn }, size: 11.5pt, line-spacing: 1.4, align: start, space-after: 1em }
+  title: { size: 16pt, weight: semibold, align: start, space-after: 2em }
+  subtitle: { size: 11.5pt, color: "#555555", align: start }
+  h1: { size: 13pt, weight: bold, space-before: 1.4em, space-after: 0.6em }
+  h2: { size: 12pt, weight: semibold, space-before: 1.2em, space-after: 0.5em }
+  h3: { size: 11.5pt, weight: semibold, italic: true }
+  quote: { italic: true, border: "#b0b0b0" }
+  code: { size: 9.5pt, background: "#f6f6f6" }
+  link: { color: "#1f4e8c" }
+  caption: { size: 9.5pt, color: "#555555" }

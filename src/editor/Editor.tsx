@@ -7,6 +7,7 @@ import {
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
+import { codeLanguage } from "./asm";
 import { bracketMatching, indentOnInput, indentUnit } from "@codemirror/language";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, closeBrackets, closeBracketsKeymap, CompletionContext, completionKeymap } from "@codemirror/autocomplete";
@@ -16,7 +17,7 @@ import { app } from "../core/app";
 import {
   state, prefs, updateContent, setEditorView, setCursor, setActiveTheme, activeTheme,
   isDark, notesList, openNote, root,
-  editorView,
+  editorView, allFiles, setPdfJump,
 } from "../core/store";
 import { ipc, stem, LinkInfo } from "../core/ipc";
 import { preview, schedulePreview } from "../core/render";
@@ -28,7 +29,13 @@ import { livePreview } from "./livepreview";
 import { mathAutoPair, wrapSelection } from "./autopair";
 import { richPaste } from "./paste";
 import { pointerHold } from "./pointer";
-import { slashCompletion, slashIconRender } from "./slash";
+import { slashCompletion, slashIconRender, slashKeymap, slashGhost } from "./slash";
+import { COMPLETION_SOURCES } from "./completions";
+import { tagExtension } from "./tags";
+import { blockExtensions, blockRefCompletion, liveEmbeds } from "./blocks";
+import { blockTools } from "./handle";
+import { revealInOpenNote } from "../core/blocks";
+import { searchFor } from "../ui/SidebarPanes";
 import { attachmentDrop } from "./attachments";
 import { trailingLine } from "./trailing";
 import { tableKeys, skipTableCaret } from "./tables";
@@ -116,7 +123,7 @@ async function wikilinkCompletion(ctx: CompletionContext) {
   };
 }
 
-/** Open a link target: a note name/path, or an external URL. */
+/** Open a link target: a note name/path (with `#Heading` or `#^block`), or an external URL. */
 export function openLinkTarget(target: string): boolean {
   if (/^(https?:|mailto:)/i.test(target)) {
     void openUrl(target);
@@ -124,46 +131,41 @@ export function openLinkTarget(target: string): boolean {
   }
   const clean = target.split("|")[0].trim();
   let name = clean.split("#")[0];
-  const heading = clean.includes("#") ? clean.slice(clean.indexOf("#") + 1) : "";
+  const sub = clean.includes("#") ? clean.slice(clean.indexOf("#") + 1) : "";
   try {
     name = decodeURI(name);
   } catch {
     /* keep as typed */
   }
-  if (!name) return heading ? jumpToHeading(state.active, heading) : false;
+  if (!name) return sub ? revealInOpenNote(sub) : false;
   const hit =
     notesList().find((p) => p === name) ??
+    notesList().find((p) => p.replace(/\.(md|typ)$/, "") === name.replace(/\.(md|typ)$/, "")) ??
     notesList().find((p) => stem(p) === name.replace(/\.(md|typ)$/, "")) ??
     notesList().find((p) => p.endsWith("/" + name));
-  if (hit) void openNote(hit).then(() => heading && jumpToHeading(hit, heading));
-  return !!hit;
+  if (hit) {
+    void openNote(hit).then(() => sub && whenShown(hit, () => revealInOpenNote(sub)));
+    return true;
+  }
+  // A PDF, image or other file: [[paper.pdf#page=3&annotation=id]]
+  const lower = name.toLowerCase();
+  const files = allFiles();
+  const file = files.find((p) => p === name) ?? files.find((p) => p.toLowerCase() === lower) ?? files.find((p) => p.toLowerCase().endsWith("/" + lower));
+  if (!file) return false;
+  void openNote(file).then(() => {
+    if (!/\.pdf$/i.test(file) || !sub) return;
+    const q = new URLSearchParams(/^\d+$/.test(sub) ? `page=${sub}` : sub);
+    const page = Number(q.get("page")) || undefined;
+    setPdfJump({ path: file, page, annotation: q.get("annotation") ?? undefined, n: Date.now() });
+  });
+  return true;
 }
 
-const normHeading = (s: string) => s.replace(/[#*_`=~\[\]]/g, "").replace(/[\s\u200c-]+/g, " ").trim().toLowerCase();
-
-/** Move the cursor of the open note `path` to heading `h` (`[[#Heading]]`). */
-function jumpToHeading(path: string | null, h: string): boolean {
+/** Run `fn` once the editor shows note `path` (right after opening it). */
+function whenShown(path: string, fn: () => void, tries = 20) {
   const view = editorView();
-  if (!view || !path || state.active !== path) return false;
-  let want = h;
-  try {
-    want = decodeURIComponent(h);
-  } catch {
-    /* as is */
-  }
-  want = normHeading(want.replace(/^\^/, ""));
-  const doc = view.state.doc;
-  for (let n = 1; n <= doc.lines; n++) {
-    const line = doc.line(n);
-    const m = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line.text) ?? /^=+\s+(.*)$/.exec(line.text);
-    const text = m ? m[m.length - 1] : /\^([\w-]+)\s*$/.exec(line.text)?.[1] === h.replace(/^\^/, "") ? h : null;
-    if (text !== null && (normHeading(text) === want || text === h)) {
-      view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin: 40 }) });
-      view.focus();
-      return true;
-    }
-  }
-  return false;
+  if (view && state.active === path && view.state.doc.toString() === state.buffers[path]?.content) fn();
+  else if (tries > 0) setTimeout(() => whenShown(path, fn, tries - 1), 25);
 }
 
 /** Ctrl+click on [[wikilinks]] and [text](target) links opens them. */
@@ -208,7 +210,7 @@ function formattingKeymap() {
 
 function languageFor(path: string): Extension {
   if (path.endsWith(".typ")) return typst;
-  return markdown({ base: markdownLanguage, codeLanguages: languages });
+  return markdown({ base: markdownLanguage, codeLanguages: codeLanguage(languages) });
 }
 
 /** Editor state per open tab (undo history, cursor), kept while the editor
@@ -220,13 +222,15 @@ export default function Editor() {
   let view: EditorView | undefined;
   /** Editor state per open tab: keeps undo history and cursor when switching. */
   let current: string | null = null;
-  const live = (path: string) =>
+  const live = (path: string) => [
+    prefs.editorMode === "live" && !path.endsWith(".typ") ? liveEmbeds : [],
     livePreview(prefs.editorMode === "live", path.endsWith(".typ"), {
       openLink: (t) => void openLinkTarget(t),
       notePath: () => current,
       vaultRoot: () => root(),
       resolveAsset: (note, url) => ipc.resolveAsset(note, url),
-    });
+    }),
+  ];
 
   const makeState = (path: string, doc: string) =>
     EditorState.create({
@@ -249,7 +253,11 @@ export default function Editor() {
         bracketMatching(),
         mathAutoPair,
         EditorView.lineWrapping,
-        autocompletion({ override: [wikilinkCompletion, slashCompletion], icons: false, addToOptions: [slashIconRender], maxRenderedOptions: 60 }),
+        autocompletion({ override: [wikilinkCompletion, blockRefCompletion, slashCompletion, ...COMPLETION_SOURCES], icons: false, addToOptions: [slashIconRender], maxRenderedOptions: 80 }),
+        slashKeymap,
+        slashGhost,
+        tagExtension((tag) => searchFor(`tag:${tag}`)),
+        path.endsWith(".typ") ? [] : [blockExtensions(), blockTools()],
         Prec.high(formattingKeymap()),
         keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
         languageFor(path),
@@ -416,7 +424,7 @@ export default function Editor() {
       style={{
         "--editor-size": `${prefs.editorFontSize}px`,
         "--editor-line-height": String(prefs.lineHeight),
-        ...(prefs.editorFont ? { "--font-editor": `"${prefs.editorFont}", "Vazirmatn", "Inter Variable", sans-serif` } : {}),
+        ...(prefs.editorFont ? { "--font-editor": `"${prefs.editorFont.replace(/"/g, "")}", "Inter Variable", var(--font-scripts), sans-serif` } : {}),
       }}
     >
       <div class="editor-host" ref={host} />

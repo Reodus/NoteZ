@@ -1,0 +1,19 @@
+name: Elegant
+description: Refined serif with small-caps headings, letter-spaced title and muted gold accents.
+page:
+  paper: a4
+  margin: 3cm 2.8cm
+  numbering: "1"
+  digits: auto
+  footer: { center: "— {page} —" }
+styles:
+  body: { font: Libertinus Serif, fonts: { arabic: Vazirmatn }, size: 11.5pt, line-spacing: 1.5, align: justify, space-after: 0.8em }
+  title: { size: 26pt, weight: regular, smallcaps: true, tracking: 0.08em, color: "#6b5222", align: center, space-after: 0.6em }
+  subtitle: { size: 13pt, italic: true, color: "#7d7465", align: center }
+  h1: { size: 16pt, weight: regular, smallcaps: true, tracking: 0.05em, color: "#6b5222", align: center, space-before: 2em, space-after: 1em }
+  h2: { size: 13pt, weight: regular, italic: true, color: "#6b5222", space-before: 1.5em, space-after: 0.7em }
+  h3: { size: 11.5pt, weight: semibold, smallcaps: true, tracking: 0.03em, space-before: 1.2em, space-after: 0.5em }
+  quote: { italic: true, color: "#4f4a40", border: "#c9a961" }
+  code: { size: 9.5pt, background: "#faf7f0", border: "#ebe2cc" }
+  link: { color: "#8a6a2a" }
+  caption: { size: 9.5pt, italic: true, color: "#7d7465", align: center }

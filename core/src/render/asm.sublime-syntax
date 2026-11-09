@@ -1,0 +1,150 @@
+%YAML 1.2
+---
+# Assembly for the PDF (passed to Typst's `raw(syntaxes:)`, see styles.rs).
+# One grammar for the common dialects: x86/x86-64 (Intel, NASM, MASM and
+# AT&T/GAS), ARM and AArch64, RISC-V, MIPS and AVR. The editor uses the same
+# rules (src/editor/asm.ts). Scopes are picked for Typst's default code theme:
+# mnemonic = keyword, register = entity.other, label = entity.name.label,
+# directive = support.function, number = constant.numeric.
+name: Assembly
+scope: source.asm.notez
+file_extensions:
+  - asm
+  - nasm
+  - yasm
+  - fasm
+  - masm
+  - s
+  - S
+  - gas
+  - att
+  - x86
+  - x64
+  - x86asm
+  - x86_64
+  - x86-64
+  - arm
+  - armasm
+  - arm64
+  - aarch64
+  - thumb
+  - riscv
+  - riscv32
+  - riscv64
+  - rv32
+  - rv64
+  - mips
+  - mips64
+  - avr
+  - assembly
+
+variables:
+  ident: '[A-Za-z_.$?@][\w.$?@]*'
+  x86_reg: '(?:[re]?(?:ax|bx|cx|dx|si|di|sp|bp|ip)|[abcd][lh]|(?:si|di|sp|bp)l|r(?:[89]|1[0-5])[dwb]?|[xyz]mm(?:[12]?\d|3[01])|k[0-7]|mm[0-7]|st(?:\([0-7]\))?|[c-gs]s|cr\d{1,2}|dr[0-7]|[re]flags|tmm[0-7])'
+  arm_reg: '(?:r(?:1[0-5]|\d)|[xw](?:[12]?\d|3[01])|[xw]zr|w?sp|lr|pc|fp|ip|sb|sl|[bhsdqvz](?:[12]?\d|3[01])(?:\.\d*[bhsdq])?|p(?:1[0-5]|\d)|[ac]psr|spsr(?:_\w+)?|fpscr|fpsr|fpcr|nzcv)'
+  rv_reg: '(?:zero|ra|gp|tp|t[0-6]|s(?:1[01]|\d)|a[0-7]|f[ast]?\d{1,2}|x(?:[12]?\d|3[01]))'
+  avr_reg: '(?:r(?:[12]?\d|3[01])|[XYZ])'
+
+contexts:
+  main:
+    - include: comments
+    - match: '(?=\S)'
+      push: statement
+
+  comments:
+    - match: ';.*$'
+      scope: comment.line.semicolon.asm
+    - match: '//.*$'
+      scope: comment.line.double-slash.asm
+    - match: '/\*'
+      scope: punctuation.definition.comment.asm
+      push:
+        - meta_scope: comment.block.asm
+        - match: '\*/'
+          pop: true
+    # `@ text` (ARM), `# text` (GAS x86, RISC-V, MIPS): a marker before a space
+    - match: '(?:(?<=\s)|^)[@#](?=\s|$).*$'
+      scope: comment.line.asm
+
+  # The start of a line: labels, then a directive or an instruction.
+  statement:
+    - match: '$'
+      pop: true
+    - include: comments
+    - match: '#\s*(?:define|undef|include|if|ifdef|ifndef|elif|else|endif|error|warning|pragma|line)\b'
+      scope: support.function.directive.preprocessor.asm
+      set: operands
+    - match: '#.*$'
+      scope: comment.line.number-sign.asm
+    - match: '(?:{{ident}}|\d+)(?=\s*:(?!:))'
+      scope: entity.name.label.asm
+      push:
+        - match: ':'
+          pop: true
+    # MASM/NASM `name PROC`, `name db 1, 2`, `name equ 4`
+    - match: '({{ident}})\s+((?i:proc|endp|segment|ends|macro|struc|struct|equ|label|record|typedef|textequ|d[bwdqtoyz]|res[bwdqtoyz]))\b'
+      captures:
+        1: entity.name.label.asm
+        2: support.function.directive.asm
+      set: operands
+    - match: '\.[A-Za-z_][\w.]*'
+      scope: support.function.directive.asm
+      set: operands
+    - match: '%[A-Za-z_]\w*'
+      scope: support.function.directive.preprocessor.asm
+      set: operands
+    - match: '(?i:(?:section|segment|global|globl|extern|extrn|bits|use16|use32|use64|default|align|alignb|org|cpu|struc|endstruc|istruc|iend|at|times|incbin|equ|public|end|include|includelib|assume|option|model|proc|endp|ends|invoke|d[bwdqtoyz]|res[bwdqtoyz]))\b'
+      scope: support.function.directive.asm
+      set: operands
+    - match: '(?i:lock|rep|repe|repz|repne|repnz|data16|data32|addr16|addr32|bnd|notrack|xacquire|xrelease)\b'
+      scope: keyword.other.prefix.asm
+    - match: '[A-Za-z_][\w.]*'
+      scope: keyword.other.mnemonic.asm
+      set: operands
+    - match: '\S'
+      set: operands
+
+  operands:
+    - match: '$'
+      pop: true
+    - include: comments
+    - match: '"'
+      scope: punctuation.definition.string.begin.asm
+      push: dq_string
+    - match: "'(?:[^'\\\\]|\\\\.)*'"
+      scope: string.quoted.single.asm
+    - match: '`(?:[^`\\]|\\.)*`'
+      scope: string.quoted.other.asm
+    - match: '(?i:%(?:hi|lo|pcrel_hi|pcrel_lo|got_pcrel_hi|tprel_hi|tprel_lo|tprel_add|tls_ie_pcrel_hi|tls_gd_pcrel_hi|gp_rel|got|call16|call_hi|call_lo|higher|highest))\b'
+      scope: support.function.relocation.asm
+    - match: '#?:[a-z_]\w*:'
+      scope: support.function.relocation.asm
+    - match: '@(?i:plt|gotpcrel|gotoff|got|gotntpoff|tpoff|ntpoff|dtpoff|tlsgd|tlsld|function|object|progbits|nobits|note|init_array|fini_array|ha|h|l|page|pageoff|gotpage|gotpageoff|tlvppage|tlvppageoff)\b'
+      scope: support.other.relocation.asm
+    - match: '\$(?:zero|at|v[01]|a[0-7]|t\d|s[0-8]|k[01]|gp|sp|fp|ra|f\d{1,2})\b'
+      scope: entity.other.register.asm
+    - match: '%(?i:{{x86_reg}}|{{arm_reg}}|{{rv_reg}})\b'
+      scope: entity.other.register.asm
+    - match: '\b(?i:{{x86_reg}}|{{arm_reg}}|{{rv_reg}})\b'
+      scope: entity.other.register.asm
+    - match: '\b{{avr_reg}}\b'
+      scope: entity.other.register.asm
+    - match: '\b(?i:byte|word|dword|qword|tword|oword|yword|zword|xmmword|ymmword|zmmword|tbyte|fword|real4|real8|real10|ptr|short|near|far|rel|abs|offset|seg|wrt|strict|dup|lsl|lsr|asr|ror|rrx|uxt[bhwx]|sxt[bhwx]|mul vl)\b'
+      scope: storage.modifier.asm
+    # `1b`, `2f`: GAS local label references (backwards / forwards)
+    - match: '\b\d[bf]\b'
+      scope: entity.name.label.asm
+    - match: '(?i:[#$]?-?(?:\b0x[0-9a-f_]+|\b0b[01_]+|\b0o[0-7_]+|\b0q[0-7_]+|\b[0-9][0-9a-f_]*h|\b[01][01_]*[by]|\b\d[\d_]*(?:\.\d+)?(?:e[+-]?\d+)?)\b)'
+      scope: constant.numeric.asm
+    - match: '(?:(?<=[\s,\[(])|^)[#$](?=[A-Za-z_.])'
+      scope: constant.numeric.prefix.asm
+
+  dq_string:
+    - meta_scope: string.quoted.double.asm
+    - match: '\\.'
+      scope: constant.character.escape.asm
+    - match: '"'
+      scope: punctuation.definition.string.end.asm
+      pop: true
+    - match: '$'
+      pop: true

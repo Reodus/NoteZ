@@ -1,10 +1,12 @@
 // Built-in features that can be switched off in Settings → Plugins:
 // outline and backlinks panels, PDF export, the diagram gallery.
-import { createEffect, createMemo, createSignal, For, on } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { render } from "solid-js/web";
 import type { BuiltinPlugin } from "../core/plugins";
-import { ipc, SearchHit, stem, dirname } from "../core/ipc";
-import { state, goToLine, openNote, setDialog, setPrefs, setRightTab } from "../core/store";
+import { ipc, Backlink, Mention, stem, dirname } from "../core/ipc";
+import { state, goToLine, openNote, setDialog, setPrefs, setRightTab, prefs, saveAll, reloadFromDisk, notesList } from "../core/store";
+import { app, notify } from "../core/app";
+import { linkName } from "../core/blocks";
 import { exportPdf, showGeneratedTypst } from "../core/render";
 
 const ICON = (paths: string) =>
@@ -52,43 +54,110 @@ export function OutlinePane() {
 // ------------------------------------------------------------------ links
 
 export function LinksPane() {
-  const [hits, setHits] = createSignal<SearchHit[]>([]);
-  createEffect(on(() => state.active, async (p) => {
+  const [hits, setHits] = createSignal<Backlink[]>([]);
+  const [mentions, setMentions] = createSignal<Mention[] | null>(null);
+  const [showMentions, setShowMentions] = createSignal(false);
+  const [rev, setRev] = createSignal(0);
+  let timer: number | undefined;
+  const bump = () => (clearTimeout(timer), (timer = window.setTimeout(() => setRev((n) => n + 1), 400)));
+  const offs = [app.events.on("note:saved", bump), app.events.on("vault:changed", bump), app.events.on("note:reloaded", bump)];
+  onCleanup(() => offs.forEach((f) => f()));
+  createEffect(on([() => state.active, rev], async ([p]) => {
     if (!p) return setHits([]);
     try {
-      setHits(await ipc.backlinks(p));
+      setHits(await ipc.backlinks(p, [...prefs.excludedFolders]));
     } catch {
       setHits([]);
     }
   }));
+  createEffect(on([() => state.active, rev, showMentions], async ([p, , show]) => {
+    if (!p || !show) return setMentions(null);
+    setMentions(await ipc.unlinkedMentions(p, [...prefs.excludedFolders]).catch(() => []));
+  }));
+  const groups = createMemo(() => {
+    const m = new Map<string, Backlink[]>();
+    for (const h of hits()) m.set(h.path, [...(m.get(h.path) ?? []), h]);
+    return [...m];
+  });
   const outgoing = createMemo(() => {
     const text = state.active ? state.buffers[state.active]?.content ?? "" : "";
     return [...new Set([...text.matchAll(/\[\[([^\]|#]+)/g)].map((m) => m[1].trim()))];
   });
+  const linkThem = async (items: Mention[]) => {
+    const target = state.active;
+    if (!target || !items.length) return;
+    await saveAll();
+    const changed = await ipc.linkMentions(linkName(target, null), items).catch((e) => (notify(String(e), "error"), [] as string[]));
+    for (const p of changed) if (state.buffers[p]) await reloadFromDisk(p);
+    if (changed.length) notify(`Linked ${items.length} mention${items.length > 1 ? "s" : ""} in ${changed.length} note${changed.length > 1 ? "s" : ""}.`);
+    setRev((n) => n + 1);
+  };
+  const subLabel = (h: Backlink) => (h.sub ? (h.sub.startsWith("^") ? `block ${h.sub}` : `# ${h.sub}`) : "");
   return (
     <div class="links-pane">
       <h4>Backlinks <span class="count">{hits().length}</span></h4>
-      <For each={hits()} fallback={<div class="pane-empty">No other notes link here.</div>}>
-        {(h) => (
-          <div class="link-hit" onClick={() => openNote(h.path, { line: h.line })}>
-            <div class="link-file" dir="auto">{stem(h.path)} <small>{dirname(h.path)}</small></div>
-            <div class="link-snippet" dir="auto">{h.snippet}</div>
+      <For each={groups()} fallback={<div class="pane-empty">No other notes link here.</div>}>
+        {([path, list]) => (
+          <div class="link-group">
+            <div class="link-file" dir="auto" onClick={() => openNote(path)}>{stem(path)} <small>{dirname(path)}</small></div>
+            <For each={list}>
+              {(h) => (
+                <div class="link-hit" onClick={() => openNote(h.path, { line: h.line })}>
+                  <Show when={h.sub || h.embed}>
+                    <div class="link-target">{h.embed ? "Embeds " : "Links to "}{subLabel(h) || "the note"}</div>
+                  </Show>
+                  <div class="link-snippet" dir="auto">{readable(h.snippet)}</div>
+                </div>
+              )}
+            </For>
           </div>
         )}
       </For>
+      <h4 class="clickable" onClick={() => setShowMentions((v) => !v)}>
+        <span class="chev">{showMentions() ? "▾" : "▸"}</span> Unlinked mentions
+        <Show when={mentions()}><span class="count">{mentions()!.length}</span></Show>
+        <Show when={showMentions() && (mentions()?.length ?? 0) > 1}>
+          <button class="btn small push" onClick={(e) => (e.stopPropagation(), void linkThem(mentions()!))}>Link all</button>
+        </Show>
+      </h4>
+      <Show when={showMentions()}>
+        <For each={mentions() ?? []} fallback={<div class="pane-empty">{mentions() ? "No other note names this one without a link." : "Looking…"}</div>}>
+          {(m) => (
+            <div class="link-hit mention" onClick={() => openNote(m.path, { line: m.line })}>
+              <div class="link-file" dir="auto">{stem(m.path)} <small>{dirname(m.path)}</small></div>
+              <div class="link-snippet" dir="auto">{highlight(m.snippet, m.text)}</div>
+              <button class="btn small" title={`Turn “${m.text}” into a link`} onClick={(e) => (e.stopPropagation(), void linkThem([m]))}>Link</button>
+            </div>
+          )}
+        </For>
+      </Show>
       <h4>Outgoing links <span class="count">{outgoing().length}</span></h4>
       <For each={outgoing()} fallback={<div class="pane-empty">Link notes with [[Note name]].</div>}>
         {(name) => (
-          <div class="link-hit" onClick={() => import("../core/store").then((s) => {
-            const p = s.notesList().find((x) => stem(x) === name);
+          <div class="link-hit" onClick={() => {
+            const p = notesList().find((x) => stem(x) === name || x.replace(/\.md$/, "") === name);
             if (p) openNote(p);
-          })}>
+          }}>
             <div class="link-file" dir="auto">{name}</div>
           </div>
         )}
       </For>
     </div>
   );
+}
+
+/** Links shown as their text, as in the editor. */
+const readable = (s: string) =>
+  s
+    .replace(/!?\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2")
+    .replace(/!?\[\[([^\]]+)\]\]/g, (_, t: string) => t.replace(/#\^.*$/, "").replace(/#/, " › ") || t)
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1");
+
+/** `text` with the first `word` in it marked. */
+function highlight(text: string, word: string) {
+  const i = text.toLowerCase().indexOf(word.toLowerCase());
+  if (i < 0) return text;
+  return [text.slice(0, i), <mark>{text.slice(i, i + word.length)}</mark>, text.slice(i + word.length)];
 }
 
 

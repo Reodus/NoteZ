@@ -27,9 +27,7 @@ pub enum Dir {
     Ltr,
 }
 
-fn is_rtl_char(c: char) -> bool {
-    matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF)
-}
+use super::script::{self, is_rtl_char};
 
 /// Direction of a word or text: that of its first strong character, if any.
 fn first_strong(text: &str) -> Option<Dir> {
@@ -45,8 +43,9 @@ fn first_strong(text: &str) -> Option<Dir> {
 }
 
 /// Paragraph direction: that of the first strong character, except that
-/// text starting with a Latin word is right-to-left when at least as many of
-/// its words are Persian (`Windows یک سیستم عامل است`, `hello سلام`). A word
+/// text starting with a left-to-right word is right-to-left when at least as
+/// many of its words are in a right-to-left script (`Windows یک سیستم عامل
+/// است`, `hello مرحبا`). A word
 /// ends at whitespace or where the script changes, so `helloسلام` is two.
 /// The editor uses the same rule (src/editor/bidi.ts).
 pub fn detect_dir(text: &str) -> Option<Dir> {
@@ -210,6 +209,19 @@ fn rewrite_obsidian(line: &str, in_comment: &mut bool) -> String {
     out
 }
 
+/// `text ^block-id` → `text<!--nz:bid block-id-->`; a line that is only
+/// `^id` (after a table or quote) becomes the marker alone.
+fn rewrite_block_id(line: &str) -> String {
+    match crate::blockidx::trailing_id(line) {
+        Some(id) => {
+            let t = line.trim_end();
+            let head = t[..t.len() - id.len() - 1].trim_end();
+            format!("{head}<!--nz:bid {id}-->")
+        }
+        None => line.to_string(),
+    }
+}
+
 /// `> [!type]± Title` (Obsidian/GitHub callout header) →
 /// `> Title<!--nz:callout type-->`. The marker sits after the title so the
 /// line stays a normal paragraph line inside the quote.
@@ -342,7 +354,8 @@ pub fn preprocess(src: &str) -> String {
             continue;
         }
         let was_comment = in_comment;
-        let body = rewrite_obsidian(body, &mut in_comment);
+        let body = rewrite_block_id(body);
+        let body = rewrite_obsidian(&body, &mut in_comment);
         let body = rewrite_callout(&body);
         let body = rewrite_spans(&body);
         if !was_comment && body.trim().is_empty() {
@@ -437,15 +450,30 @@ struct Converter<'a> {
     out_lines: usize,
     line_starts: Vec<usize>,
     resolve_image: &'a dyn Fn(&str) -> Option<String>,
+    resolve_note: &'a dyn Fn(&str) -> Option<String>,
+    depth: u8,
     block_ctx: BlockCtx,
     /// The note has right-to-left text: keep Latin runs' brackets with them.
     rtl: bool,
+    /// The document language (`Theme::lang`, resolved).
+    lang: String,
 }
 
-fn lang_of(d: Dir) -> &'static str {
-    match d {
-        Dir::Rtl => "\"fa\"",
-        Dir::Ltr => "\"en\"",
+/// Typst `lang:` (and `region:`) for text in direction `d`: the language its
+/// letters suggest, else the document language when that has direction `d`.
+fn lang_args(plain: &str, d: Dir, doc_lang: &str) -> String {
+    let rtl = d == Dir::Rtl;
+    let lang = script::guess_lang(plain)
+        .filter(|l| script::is_rtl_lang(l) == rtl)
+        .map(str::to_string)
+        .unwrap_or_else(|| script::lang_for_dir(rtl, doc_lang));
+    lang_kv(&lang)
+}
+
+fn lang_kv(lang: &str) -> String {
+    match script::split_lang(lang) {
+        (l, Some(r)) => format!("lang: {}, region: {}", q(&l), q(&r)),
+        (l, None) => format!("lang: {}", q(&l)),
     }
 }
 
@@ -481,7 +509,10 @@ impl<'a> Converter<'a> {
     /// (the block already sets it for its contents).
     fn directed(&self, plain: &str, content: String) -> String {
         let explicit = self.stack.iter().rev().find_map(|n| match &n.frame {
-            Frame::Div(attrs) => attrs.iter().rev().find(|(k, v)| k == "dir" && (v == "rtl" || v == "ltr")),
+            Frame::Div(attrs) => attrs
+                .iter()
+                .rev()
+                .find(|(k, v)| (k == "dir" && (v == "rtl" || v == "ltr")) || (k == "lang" && script::normalize_lang(v).is_some())),
             _ => None,
         });
         if explicit.is_some() {
@@ -489,7 +520,7 @@ impl<'a> Converter<'a> {
         }
         match detect_dir(plain) {
             Some(d) if d != self.base => {
-                format!("#[#set text(dir: {}, lang: {})\n{}]", dir_kw(d), lang_of(d), content)
+                format!("#[#set text(dir: {}, {})\n{}]", dir_kw(d), lang_args(plain, d, &self.lang), content)
             }
             _ => content,
         }
@@ -726,7 +757,20 @@ impl<'a> Converter<'a> {
             Frame::Underline => self.inline(format!("#underline[{buf}]"), plain),
             Frame::Mark => self.inline(format!("#highlight[{buf}]"), plain),
             Frame::Link { url, wiki } => {
-                let s = if let Some(slug) = url.strip_prefix('#').map(|h| heading_slug(&super::percent_decode(h))).filter(|s| !s.is_empty()) {
+                // `[[Note#Heading]]` / `[[Note#^id]]` with no alias: a readable name.
+                let (buf, plain) = if wiki && plain.trim() == url.trim() && url.contains('#') {
+                    let d = wiki_display(&url);
+                    (escape_markup(&d), d)
+                } else {
+                    (buf, plain)
+                };
+                let block = url.strip_prefix("#^").filter(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+                let s = if let Some(id) = block {
+                    format!(
+                        "#context {{ let t = query(label({})); if t.len() > 0 {{ link(t.first().location())[#text(fill: rgb(\"#2f5fc4\"))[{buf}]] }} else [#text(fill: rgb(\"#2f5fc4\"))[{buf}]] }}",
+                        q(&format!("b:{id}"))
+                    )
+                } else if let Some(slug) = url.strip_prefix('#').map(|h| heading_slug(&super::percent_decode(h))).filter(|s| !s.is_empty()) {
                     // A heading in this note: a real PDF link when it exists.
                     format!(
                         "#context {{ let t = query(label({})); if t.len() > 0 {{ link(t.first().location())[#text(fill: rgb(\"#2f5fc4\"))[{buf}]] }} else [#text(fill: rgb(\"#2f5fc4\"))[{buf}]] }}",
@@ -741,12 +785,12 @@ impl<'a> Converter<'a> {
                 self.inline(s, plain);
             }
             Frame::Image { url } => {
-                let s = self.image(&url, &plain);
+                let s = self.embed_note(&url).unwrap_or_else(|| self.image(&url, &plain));
                 self.inline(s, plain);
             }
             Frame::Footnote => {}
             Frame::Span(attrs) => {
-                let s = span_markup(&attrs, &buf);
+                let s = span_markup(&attrs, &buf, &plain, &self.lang);
                 self.inline(s, plain);
             }
             Frame::Div(_) | Frame::Root => {
@@ -760,6 +804,40 @@ impl<'a> Converter<'a> {
         let top = self.top();
         top.buf.push_str(&s);
         top.plain.push_str(&plain);
+    }
+
+    /// `![[Note]]`, `![[Note#Heading]]`, `![[Note#^id]]`: the note's text,
+    /// converted and set off with a rule at the start.
+    fn embed_note(&mut self, url: &str) -> Option<String> {
+        let file = url.split('#').next().unwrap_or("");
+        let ext = file.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+        if ext.as_deref() == Some("base") {
+            // A database view, run by the app (see bases::embed_key).
+            return Some(self.code_block("base", &format!("!embed {}", url.trim())).trim().to_string());
+        }
+        if ext.as_deref().is_some_and(|e| e != "md") || url.contains("://") {
+            return None;
+        }
+        if self.depth >= 4 {
+            return Some("#text(fill: luma(120))[…]".into());
+        }
+        let md = (self.resolve_note)(url)?;
+        let out = convert(
+            &md,
+            &Options2 {
+                base: self.base,
+                lang: &self.lang,
+                rendered: self.rendered,
+                resolve_image: self.resolve_image,
+                resolve_note: self.resolve_note,
+                depth: self.depth + 1,
+            },
+        );
+        self.packages.extend(out.packages);
+        Some(format!(
+            "#block(width: 100%, inset: (left: 10pt, y: 2pt), stroke: (left: 2pt + luma(205)))[{}]",
+            out.typst.trim()
+        ))
     }
 
     fn image(&mut self, url: &str, alt: &str) -> String {
@@ -844,6 +922,14 @@ impl<'a> Converter<'a> {
                     String::new(),
                     None,
                 );
+            } else if let Some(id) = inner.strip_prefix("nz:bid ") {
+                // `^block-id`: an invisible anchor for `[[#^id]]` links.
+                let m = format!("#metadata(none)<b:{}>", id.trim());
+                if block {
+                    self.deliver(format!("{m}\n\n"), String::new(), None);
+                } else {
+                    self.emit(&m);
+                }
             } else if inner.eq_ignore_ascii_case("pagebreak") {
                 self.deliver("#pagebreak()\n\n".into(), String::new(), None);
             } else if inner.eq_ignore_ascii_case("toc") {
@@ -890,7 +976,7 @@ impl<'a> Converter<'a> {
             return;
         }
         let Node { frame: Frame::Div(attrs), buf, plain } = self.pop() else { unreachable!() };
-        let s = div_markup(&attrs, &buf);
+        let s = div_markup(&attrs, &buf, &plain, &self.lang);
         self.deliver(s, plain, None);
     }
 
@@ -904,6 +990,20 @@ impl<'a> Converter<'a> {
             }
         }
         Output { typst: self.pop().buf, checkpoints: self.checkpoints, packages: self.packages }
+    }
+}
+
+/// Text shown for a wikilink without an alias: `Note › Heading`, `Note`
+/// for a block, `Heading` for one in the same note.
+fn wiki_display(url: &str) -> String {
+    let (name, sub) = url.split_once('#').unwrap_or((url, ""));
+    let name = name.rsplit('/').next().unwrap_or(name).trim_end_matches(".md");
+    let sub = sub.rsplit('#').next().unwrap_or(sub);
+    match (name.is_empty(), sub.starts_with('^')) {
+        (false, true) => name.to_string(),
+        (true, true) => "↗".into(),
+        (false, false) => format!("{name} › {sub}"),
+        (true, false) => sub.to_string(),
     }
 }
 
@@ -924,12 +1024,27 @@ fn sanitize_label(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ':')).collect()
 }
 
-/// Typst `text(...)` args from span/div attributes.
-fn text_args(attrs: &[(String, String)]) -> Vec<String> {
+/// Typst `text(...)` args from span/div attributes. `plain` is the text
+/// inside (to name the language of a `dir=` block), `doc_lang` the note's.
+fn text_args(attrs: &[(String, String)], plain: &str, doc_lang: &str) -> Vec<String> {
     let mut a = Vec::new();
+    let lang = attrs.iter().rev().find(|(k, _)| k == "lang").and_then(|(_, v)| script::normalize_lang(v));
+    let has_dir = attrs.iter().any(|(k, v)| k == "dir" && (v == "rtl" || v == "ltr"));
+    if let Some(l) = &lang {
+        a.push(lang_kv(l));
+        if !has_dir {
+            a.push(format!("dir: {}", if script::is_rtl_lang(l) { "rtl" } else { "ltr" }));
+        }
+    }
+    let regional = lang.as_deref().and_then(script::cjk_font_for);
+    let mut font_set = false;
     for (k, v) in attrs {
         match k.as_str() {
-            "font" if !v.is_empty() => a.push(format!("font: ({}, \"Vazirmatn\")", q(v))),
+            "font" if !v.is_empty() => {
+                let extra = regional.map(|f| format!(", {}", q(f))).unwrap_or_default();
+                a.push(format!("font: ({}{extra},) + notez-fonts", q(v)));
+                font_set = true;
+            }
             "size" if super::is_length(v) => a.push(format!("size: {v}")),
             "color" => {
                 if let Some(c) = super::styles::color(v) {
@@ -947,16 +1062,22 @@ fn text_args(attrs: &[(String, String)]) -> Vec<String> {
             "italic" => a.push("style: \"italic\"".into()),
             "dir" if v == "rtl" || v == "ltr" => {
                 a.push(format!("dir: {v}"));
-                a.push(format!("lang: {}", if v == "rtl" { "\"fa\"" } else { "\"en\"" }));
+                if lang.is_none() {
+                    a.push(lang_args(plain, if v == "rtl" { Dir::Rtl } else { Dir::Ltr }, doc_lang));
+                }
             }
             _ => {}
         }
     }
+    // `lang=ja` alone: the regional CJK font goes before the shared fallbacks.
+    if let (Some(f), false) = (regional, font_set) {
+        a.push(format!("font: ({},) + notez-fonts", q(f)));
+    }
     a
 }
 
-fn span_markup(attrs: &[(String, String)], body: &str) -> String {
-    let args = text_args(attrs);
+fn span_markup(attrs: &[(String, String)], body: &str, plain: &str, doc_lang: &str) -> String {
+    let args = text_args(attrs, plain, doc_lang);
     let mut s = if args.is_empty() { body.to_string() } else { format!("#text({})[{body}]", args.join(", ")) };
     for (k, v) in attrs {
         match k.as_str() {
@@ -977,7 +1098,7 @@ fn span_markup(attrs: &[(String, String)], body: &str) -> String {
     s
 }
 
-fn div_markup(attrs: &[(String, String)], body: &str) -> String {
+fn div_markup(attrs: &[(String, String)], body: &str, plain: &str, doc_lang: &str) -> String {
     let mut sets = Vec::new();
     let mut columns = None;
     let mut boxed = None;
@@ -992,7 +1113,7 @@ fn div_markup(attrs: &[(String, String)], body: &str) -> String {
             _ => {}
         }
     }
-    let args = text_args(attrs);
+    let args = text_args(attrs, plain, doc_lang);
     if !args.is_empty() {
         sets.push(format!("#set text({})", args.join(", ")));
     }
@@ -1011,8 +1132,21 @@ fn div_markup(attrs: &[(String, String)], body: &str) -> String {
 
 pub struct Options2<'a> {
     pub base: Dir,
+    /// The document language (e.g. `en`, `fa`, `ja`).
+    pub lang: &'a str,
     pub rendered: &'a Rendered,
     pub resolve_image: &'a dyn Fn(&str) -> Option<String>,
+    /// Markdown of an embedded note or part of one (`Note`, `Note#Heading`,
+    /// `Note#^id`) for `![[…]]`.
+    pub resolve_note: &'a dyn Fn(&str) -> Option<String>,
+    /// Embedding depth (embeds inside embeds stop after a few levels).
+    pub depth: u8,
+}
+
+/// No embedded notes (tests, snippets).
+#[cfg(test)]
+pub fn no_notes(_: &str) -> Option<String> {
+    None
 }
 
 pub fn convert(src: &str, opts: &Options2) -> Output {
@@ -1043,8 +1177,11 @@ pub fn convert(src: &str, opts: &Options2) -> Output {
         out_lines: 0,
         line_starts,
         resolve_image: opts.resolve_image,
+        resolve_note: opts.resolve_note,
+        depth: opts.depth,
         block_ctx: BlockCtx::default(),
-        rtl: src.chars().any(super::bidi::is_rtl_char),
+        rtl: src.chars().any(is_rtl_char),
+        lang: opts.lang.to_string(),
     };
 
     // Pass 1: footnote definitions → Typst, keyed by label.
@@ -1161,7 +1298,7 @@ mod tests {
     fn conv(src: &str) -> String {
         let rendered = Rendered::new();
         let resolve = |u: &str| Some(format!("/{u}"));
-        convert(src, &Options2 { base: Dir::Rtl, rendered: &rendered, resolve_image: &resolve }).typst
+        convert(src, &Options2 { base: Dir::Rtl, lang: "fa", rendered: &rendered, resolve_image: &resolve, resolve_note: &no_notes, depth: 0 }).typst
     }
 
     #[test]
@@ -1211,6 +1348,25 @@ mod tests {
         let out = conv("![[doc.pdf#page=2]]\n\n![](a/b.pdf)\n");
         assert!(out.contains("image(\"/doc.pdf\", page: 2, width: 100%)"), "{out}");
         assert!(out.contains("image(\"/a/b.pdf\", page: 1"), "{out}");
+    }
+
+    #[test]
+    fn block_ids_and_note_embeds() {
+        let out = conv("Para one ^p1\n\n| a |\n|---|\n| 1 |\n\n^t1\n\nGo [[#^p1|there]].\n");
+        assert!(out.contains("Para one#metadata(none)<b:p1>"), "{out}");
+        assert!(out.contains("#metadata(none)<b:t1>"), "{out}");
+        assert!(out.contains("label(\"b:p1\")"), "{out}");
+        assert!(!out.contains("^p1"), "{out}");
+        let out = conv("[[Other#^x]] [[Other#Part two]] [[#Intro]]\n");
+        assert!(out.contains("[Other]") && out.contains("[Other › Part two]") && out.contains("[Intro]"), "{out}");
+        let rendered = Rendered::default();
+        let resolve = |u: &str| Some(format!("/{u}"));
+        let note = |u: &str| (u == "Other#^x").then(|| "Embedded *text*".to_string());
+        let out = convert("Before\n\n![[Other#^x]]\n", &Options2 { base: Dir::Ltr, lang: "en", rendered: &rendered, resolve_image: &resolve, resolve_note: &note, depth: 0 }).typst;
+        assert!(out.contains("stroke: (left: 2pt + luma(205)))[Embedded #emph[text]"), "{out}");
+        // Images are still images.
+        let out = convert("![[pic.png]]\n", &Options2 { base: Dir::Ltr, lang: "en", rendered: &rendered, resolve_image: &resolve, resolve_note: &note, depth: 0 }).typst;
+        assert!(out.contains("nz-image(\"/pic.png\""), "{out}");
     }
 
     #[test]
@@ -1287,7 +1443,7 @@ mod tests {
     fn checkpoints_track_lines() {
         let rendered = Rendered::new();
         let resolve = |u: &str| Some(u.to_string());
-        let out = convert("a\n\nb\n\n# c\n", &Options2 { base: Dir::Rtl, rendered: &rendered, resolve_image: &resolve });
+        let out = convert("a\n\nb\n\n# c\n", &Options2 { base: Dir::Rtl, lang: "fa", rendered: &rendered, resolve_image: &resolve, resolve_note: &no_notes, depth: 0 });
         let src_lines: Vec<usize> = out.checkpoints.iter().map(|c| c.1).collect();
         assert_eq!(src_lines, vec![0, 2, 4]);
     }

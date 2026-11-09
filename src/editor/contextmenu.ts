@@ -1,6 +1,7 @@
 // Right-click menu in the editor (like Obsidian's): clipboard, formatting,
 // paragraph styles, callouts, inserts, link/image actions and — through the
 // Electron shell — spelling suggestions for a misspelled word.
+import { isBookmarked, toggleBookmark } from "../core/bookmarks";
 import { EditorView } from "@codemirror/view";
 import { openMenu, MenuItem } from "../ui/primitives";
 import { onSpellMenu, openPath, replaceMisspelling, addToDictionary } from "../core/native";
@@ -170,6 +171,13 @@ function buildMenu(view: EditorView, pos: number, openLink: (t: string) => boole
       { label: "Math block", run: () => insertMath(view, true) },
     ],
   });
+  // On a heading: bookmark it.
+  const lineText = view.state.doc.lineAt(view.state.selection.main.head).text;
+  const heading = /^#{1,6}\s+(.*?)\s*(\{[^}]*\})?\s*$/.exec(lineText);
+  if (heading && state.active && !typ) {
+    const b = { type: "file" as const, path: state.active, subpath: `#${heading[1].trim()}` };
+    items.push("-", { label: isBookmarked(b) ? "Remove heading bookmark" : "Bookmark this heading", run: () => toggleBookmark(b) });
+  }
   items.push(
     "-",
     { label: "Copy note path", run: () => void navigator.clipboard.writeText(state.active ?? "") },

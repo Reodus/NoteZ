@@ -148,7 +148,7 @@ function StylesPane() {
   const desc = (k: string) => {
     const s = theme()?.styles[k];
     if (!s) return "Inherits";
-    return [s.font ?? s["font-fa"], s.size, s.weight, s.color, s.numbering && `№ ${s.numbering}`].filter(Boolean).join(" · ");
+    return [s.font ?? Object.values(s.fonts ?? {})[0] ?? s["font-fa"], s.size, s.weight, s.color, s.numbering && `№ ${s.numbering}`].filter(Boolean).join(" · ");
   };
   return (
     <div class="styles-pane">

@@ -4,18 +4,20 @@
 // delete.
 import {
   FilePlus, FileCode2, FolderPlus, Pencil, Trash2, Copy, CopyPlus, FolderInput, FolderOpen, ExternalLink,
-  FileDown, Link2, PanelLeftOpen, ListTree, ChevronsDownUp, ChevronsUpDown, Eye, Files,
+  FileDown, Link2, PanelLeftOpen, ListTree, ChevronsDownUp, ChevronsUpDown, Eye, Files, Bookmark as BookmarkIcon, History, Table2,
 } from "lucide-solid";
 import { basename, dirname, Entry, fileKind, ipc, isNotePath, stem } from "../core/ipc";
 import {
   createFolder, createNote, deleteEntry, editorView, moveEntry, openNote, pick, prefs, refreshTree, renameEntry,
-  root, setPrefs, setSidebarOpen, setSidebarTab, state, tree, notesList,
+  root, setDialog, setPrefs, setSidebarOpen, setSidebarTab, state, tree, notesList,
 } from "../core/store";
 import { openPath, showInFolder } from "../core/native";
 import { app, notify } from "../core/app";
 import { exportPdf } from "../core/render";
 import { askText, MenuItem } from "./primitives";
+import { newBaseText } from "../core/bases";
 import { insertText } from "../editor/format";
+import { isBookmarked, toggleBookmark } from "../core/bookmarks";
 import { collapseAll, expandAll, revealInTree } from "./Sidebar";
 
 type Item = MenuItem | "-";
@@ -24,6 +26,23 @@ const abs = (p: string) => `${root()}/${p}`.replace(/\/$/, "");
 
 export function newNoteIn(dir: string, ext: "md" | "typ" = prefs.defaultNoteType) {
   askText(ext === "md" ? "New note" : "New Typst note", "Untitled").then((name) => void (name && createNote(dir, name.replace(/\.(md|typ)$/, ""), ext)));
+}
+
+/** A new database (.base) listing the notes of `dir`. */
+export function newBaseIn(dir: string) {
+  askText("New database", "Untitled").then(async (name) => {
+    if (!name) return;
+    const base = name.trim().replace(/\.base$/i, "").replace(/[\\/:*?"<>|]/g, "-");
+    let path = dir ? `${dir}/${base}.base` : `${base}.base`;
+    for (let n = 1; (await ipc.read(path).then(() => true).catch(() => false)); n++) path = dir ? `${dir}/${base} ${n}.base` : `${base} ${n}.base`;
+    try {
+      await ipc.write(path, newBaseText(dir));
+      await refreshTree();
+      await openNote(path);
+    } catch (e) {
+      notify(String(e), "error");
+    }
+  });
 }
 
 export function newFolderIn(dir: string) {
@@ -79,6 +98,7 @@ export function fileMenu(entry: Entry | null, from: "tree" | "tab" = "tree"): It
     return [
       { label: "New note", icon: <FilePlus size={15} />, run: () => newNoteIn("") },
       { label: "New Typst note", icon: <FileCode2 size={15} />, run: () => newNoteIn("", "typ") },
+      { label: "New database", icon: <Table2 size={15} />, run: () => newBaseIn("") },
       { label: "New folder", icon: <FolderPlus size={15} />, run: () => newFolderIn("") },
       "-",
       { label: "Collapse all folders", icon: <ChevronsDownUp size={15} />, run: collapseAll },
@@ -107,6 +127,7 @@ export function fileMenu(entry: Entry | null, from: "tree" | "tab" = "tree"): It
     items.push(
       { label: "New note", icon: <FilePlus size={15} />, run: () => newNoteIn(p) },
       { label: "New Typst note", icon: <FileCode2 size={15} />, run: () => newNoteIn(p, "typ") },
+      { label: "New database", icon: <Table2 size={15} />, run: () => newBaseIn(p) },
       { label: "New folder", icon: <FolderPlus size={15} />, run: () => newFolderIn(p) },
       "-",
     );
@@ -122,6 +143,14 @@ export function fileMenu(entry: Entry | null, from: "tree" | "tab" = "tree"): It
     items.push({ label: "Open in default app", icon: <ExternalLink size={15} />, run: () => void openPath(abs(p)).catch((e) => notify(String(e), "error")) });
   }
   items.push({ label: "Show in system file manager", icon: <FolderOpen size={15} />, run: () => void showInFolder(abs(p)) });
+  {
+    const b = { type: entry.is_dir ? "folder" : "file", path: p } as const;
+    items.push({
+      label: isBookmarked(b) ? "Remove bookmark" : "Bookmark",
+      icon: <BookmarkIcon size={15} />,
+      run: () => toggleBookmark(b),
+    });
+  }
   items.push("-");
 
   if (!entry.is_dir) {
@@ -151,6 +180,8 @@ export function fileMenu(entry: Entry | null, from: "tree" | "tab" = "tree"): It
   items.push({ label: "Make a copy", icon: <CopyPlus size={15} />, run: () => void duplicate(p) });
   items.push({ label: entry.is_dir ? "Move folder to…" : "Move file to…", icon: <FolderInput size={15} />, run: () => moveTo(p, entry.is_dir) });
   if (kind === "note") items.push({ label: "Export to PDF…", icon: <FileDown size={15} />, run: () => void exportPdf(p) });
+  if (!entry.is_dir && /\.(md|typ|base|canvas)$/i.test(p))
+    items.push({ label: "File history…", icon: <History size={15} />, run: () => setDialog({ kind: "history", tab: "note", path: p }) });
   items.push(
     "-",
     {

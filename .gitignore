@@ -6,3 +6,4 @@ core/bin
 .cargo/config.toml
 *.log
 .DS_Store
+core/fonts/noto

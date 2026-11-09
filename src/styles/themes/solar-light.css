@@ -1,0 +1,29 @@
+/* @name Solar Light
+   @mode light
+   @description Low-contrast cream and teal, inspired by the classic Solarized palette.
+   @accent #268bd2 */
+:root {
+  --bg: #f4efdc;
+  --surface: #fdf6e3;
+  --surface-2: #f8f1dc;
+  --sidebar: #eee8d5;
+  --border: #e3dcc6;
+  --border-strong: #d3cbb2;
+  --fg: #073642;
+  --fg-soft: #35505a;
+  --fg-muted: #657b83;
+  --fg-faint: #93a1a1;
+  --hover: rgba(7, 54, 66, 0.055);
+  --hover-strong: rgba(7, 54, 66, 0.09);
+  --canvas: #e8e1ca;
+  --code-bg: rgba(7, 54, 66, 0.06);
+  --danger: #dc322f;
+  --success: #859900;
+  --warning: #b58900;
+  --syn-keyword: #6c71c4;
+  --syn-func: #268bd2;
+  --syn-string: #2aa198;
+  --syn-number: #cb4b16;
+  --syn-atom: #d33682;
+  --syn-type: #859900;
+}

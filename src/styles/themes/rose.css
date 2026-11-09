@@ -1,0 +1,26 @@
+/* @name Rose
+   @mode light
+   @description Soft blush and plum — a gentle, warm light theme.
+   @accent #c2497a */
+:root {
+  --bg: #f7eef1;
+  --surface: #fffafb;
+  --surface-2: #fcf4f6;
+  --sidebar: #f3e7eb;
+  --border: #ecdde2;
+  --border-strong: #dfcbd2;
+  --fg: #3a2430;
+  --fg-soft: #53384a;
+  --fg-muted: #8a6a7b;
+  --fg-faint: #bba2af;
+  --hover: rgba(120, 40, 80, 0.05);
+  --hover-strong: rgba(120, 40, 80, 0.09);
+  --canvas: #efe2e7;
+  --code-bg: rgba(120, 40, 80, 0.06);
+  --syn-keyword: #9b3f9f;
+  --syn-func: #3a62b8;
+  --syn-string: #3f8a5a;
+  --syn-number: #c0602a;
+  --syn-atom: #c2497a;
+  --syn-type: #1f8585;
+}

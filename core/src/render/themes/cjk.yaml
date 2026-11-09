@@ -1,0 +1,20 @@
+name: CJK
+description: Chinese, Japanese and Korean documents — Noto Sans CJK with the regional glyph shapes of the note's language, first-line indent, roomy lines.
+sample: zh
+page:
+  paper: a4
+  margin: 2.5cm
+  numbering: "1"
+  digits: latin
+  footer: { center: "{page}" }
+styles:
+  body: { font: Noto Sans, size: 10.5pt, line-spacing: 1.75, align: justify, space-after: 0.8em, indent: 2em }
+  title: { size: 24pt, weight: bold, color: "#2b2b2b", align: center, space-after: 1.6em }
+  subtitle: { size: 13pt, color: "#666666", align: center }
+  h1: { size: 17pt, weight: bold, color: "#8c1c13", space-before: 1.4em, space-after: 0.7em }
+  h2: { size: 14pt, weight: bold, color: "#2b2b2b", space-before: 1.2em, space-after: 0.6em }
+  h3: { size: 12pt, weight: bold, space-before: 1em, space-after: 0.5em }
+  quote: { color: "#444444", background: "#f7f4f0", border: "#8c1c13" }
+  code: { size: 9pt, background: "#f5f5f5" }
+  link: { color: "#1c4f8c" }
+  caption: { size: 9pt, color: "#666666", align: center }

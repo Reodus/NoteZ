@@ -3,6 +3,7 @@ import { createSignal, createRoot, createEffect } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { EditorView } from "@codemirror/view";
 import { ask, onVaultFs, openPath, trashPath } from "./native";
+import { renameBookmarkPaths } from "./bookmarks";
 import { app, notify } from "./app";
 import { ipc, Entry, Theme, dirname, join, fileKind } from "./ipc";
 
@@ -13,6 +14,13 @@ export type Layout = "editor" | "split" | "preview";
 
 export interface Prefs {
   themeMode: ThemeMode;
+  /** UI theme used in light mode (src/core/uithemes.ts ids). */
+  uiThemeLight: string;
+  /** UI theme used in dark mode. */
+  uiThemeDark: string;
+  /** CSS snippets switched on (ids = file names without .css). */
+  enabledSnippets: string[];
+  /** Accent color; "" = the theme's own accent. */
   accent: string;
   editorFontSize: number;
   lineNumbers: boolean;
@@ -45,11 +53,32 @@ export interface Prefs {
   disabledBuiltins: string[];
   /** Folder with note templates ("" = find a top-level "Templates" folder). */
   templatesFolder: string;
+  /** Daily notes: folder ("" = vault root). */
+  dailyFolder: string;
+  /** Daily notes: file name as a date format (may contain "/" for subfolders). */
+  dailyFormat: string;
+  /** Daily notes: template note ("" = none). */
+  dailyTemplate: string;
+  /** First day of the week in the calendar: 0 = Sunday, 1 = Monday, 6 = Saturday. */
+  weekStart: number;
+  /** Quick capture: global shortcut ("" = off), Electron accelerator syntax. */
+  captureShortcut: string;
+  /** Quick capture: where captured text goes: "daily" or a note path. */
+  captureTarget: string;
+  /** Quick capture: line format; {{text}}, {{date:…}}, {{time:…}}. */
+  captureFormat: string;
   // editor
-  /** Editor font family ("" = Vazirmatn/Inter). Note themes may override it. */
+  /** Editor font family ("" = Inter, with a bundled font for every other script). Note themes may override it. */
   editorFont: string;
   lineHeight: number;
   spellcheck: boolean;
+  /** Spell-checker dictionaries, e.g. ["en-US", "de", "fa"] (empty = system language + English). */
+  spellcheckLanguages: string[];
+  /**
+   * Language of new notes ("" = detect from the text). Written to the new
+   * note's frontmatter as `lang:`; sets direction, fonts and digits.
+   */
+  defaultLanguage: string;
   tabSize: number;
   autoPair: boolean;
   vimMode: boolean;
@@ -61,6 +90,27 @@ export interface Prefs {
   confirmDelete: boolean;
   /** Folders left out of search and the graph. */
   excludedFolders: string[];
+  /** Graph view options (see GraphView.tsx; missing keys take the defaults). */
+  graph: Record<string, unknown>;
+  // flashcards (src/ui/ReviewView.tsx)
+  /** Wanted chance of remembering a card when it comes due. */
+  srsRetention: number;
+  srsNewPerDay: number;
+  /** Days. */
+  srsMaxInterval: number;
+  /** Minutes, space-separated ("1 10"). */
+  srsLearningSteps: string;
+  srsRelearningSteps: string;
+  // history
+  historyEnabled: boolean;
+  /** Minutes: saves within this window make one version. */
+  historyInterval: number;
+  historyKeepDays: number;
+  historyMaxVersions: number;
+  /** Take a vault snapshot once a day (when the vault is open). */
+  snapshotDaily: boolean;
+  /** Automatic snapshots kept. */
+  snapshotKeep: number;
   // PDF & preview
   /** Where Export PDF suggests saving: "" = vault root, "./" = next to the note, else an absolute folder. */
   pdfFolder: string;
@@ -79,7 +129,10 @@ export interface Prefs {
 
 const DEFAULT_PREFS: Prefs = {
   themeMode: "system",
-  accent: "#6d5efc",
+  uiThemeLight: "light",
+  uiThemeDark: "dark",
+  enabledSnippets: [],
+  accent: "",
   editorFontSize: 16,
   lineNumbers: false,
   readableWidth: true,
@@ -102,9 +155,18 @@ const DEFAULT_PREFS: Prefs = {
   showAllFiles: false,
   disabledBuiltins: [],
   templatesFolder: "",
+  dailyFolder: "Daily",
+  dailyFormat: "YYYY-MM-DD",
+  dailyTemplate: "",
+  weekStart: 1,
+  captureShortcut: "",
+  captureTarget: "daily",
+  captureFormat: "- {{time}} {{text}}",
   editorFont: "",
   lineHeight: 1.85,
   spellcheck: false,
+  spellcheckLanguages: [],
+  defaultLanguage: "",
   tabSize: 4,
   autoPair: true,
   vimMode: false,
@@ -114,6 +176,18 @@ const DEFAULT_PREFS: Prefs = {
   deleteToTrash: true,
   confirmDelete: true,
   excludedFolders: [],
+  graph: {},
+  srsRetention: 0.9,
+  srsNewPerDay: 20,
+  srsMaxInterval: 36500,
+  srsLearningSteps: "1 10",
+  srsRelearningSteps: "10",
+  historyEnabled: true,
+  historyInterval: 10,
+  historyKeepDays: 60,
+  historyMaxVersions: 300,
+  snapshotDaily: true,
+  snapshotKeep: 14,
   pdfFolder: "",
   openAfterExport: false,
   previewDelayMs: 350,
@@ -141,6 +215,8 @@ function loadPrefs(): Prefs {
           saved.attachmentFolder = sub || "attachments";
         } else saved.attachmentMode = "folder";
       }
+      // Before 0.6 the accent was always set; the old default now means "the theme's accent".
+      if (saved.accent === "#6d5efc" && !("uiThemeLight" in saved)) saved.accent = "";
       return { ...DEFAULT_PREFS, ...saved };
     }
   } catch {
@@ -174,6 +250,17 @@ export const isDark = () => (prefs.themeMode === "system" ? systemDark() : prefs
 export const [root, setRoot] = createSignal<string | null>(null);
 export const [tree, setTree] = createSignal<Entry[]>([]);
 export const [notesList, setNotesList] = createSignal<string[]>([]);
+
+/** Every file in the vault tree (notes, PDFs, images…). */
+export function allFiles(): string[] {
+  const out: string[] = [];
+  const walk = (es: Entry[]) => es.forEach((e) => (e.is_dir ? walk(e.children) : out.push(e.path)));
+  walk(tree());
+  return out;
+}
+
+/** A PDF link to follow: the PDF view scrolls to the page / annotation. `n` makes repeats distinct. */
+export const [pdfJump, setPdfJump] = createSignal<{ path: string; page?: number; annotation?: string; n: number } | null>(null);
 
 export interface Buffer {
   content: string;
@@ -249,6 +336,21 @@ export function closeVault() {
   setRoot(null);
   setState({ tabs: [], active: null, buffers: {} });
   setPrefs("lastVault", null);
+}
+
+/**
+ * Open a path handed over by the OS (macOS Finder / Dock). A folder becomes
+ * the vault; a file opens in the current vault when it lives there, otherwise
+ * its folder is opened as the vault first.
+ */
+export async function openOsPath(p: string) {
+  const path = p.replace(/\\/g, "/").replace(/\/+$/, "");
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  if (!base.includes(".")) return openVault(path);
+  const r = root();
+  if (!r || !path.startsWith(r + "/")) await openVault(dirname(path) || "/");
+  const now = root();
+  if (now && path.startsWith(now + "/")) await openNote(path.slice(now.length + 1));
 }
 
 /** Bumped when files change on disk, so image/PDF tabs reload. */
@@ -331,7 +433,7 @@ export async function closeTab(path: string) {
 }
 
 const TEMPLATE_MD = (title: string, theme: string) =>
-  `---\ntitle: ${title}\ntheme: ${theme}\n---\n\n`;
+  `---\ntitle: ${title}\ntheme: ${theme}\n${prefs.defaultLanguage ? `lang: ${prefs.defaultLanguage}\n` : ""}---\n\n`;
 
 export async function createNote(dir = "", name?: string, ext: "md" | "typ" = "md", content?: (title: string) => string) {
   let base = name ?? "Untitled";
@@ -390,6 +492,7 @@ async function relocate(path: string, to: string) {
     }
     const changed = await ipc.rename(path, to, update);
     moveOpen(path, to);
+    renameBookmarkPaths(path, to);
     // Rewritten notes that are open: take the new text (no unsaved edits — saveAll above).
     for (const p of changed.filter((c) => state.buffers[c])) {
       const content = await ipc.read(p);
@@ -437,6 +540,8 @@ export async function deleteEntry(path: string) {
       await closeTab(t);
     }
     let trashed = false;
+    // History keeps the notes (Recover deleted notes), also from the trash.
+    await ipc.historyKeep(path, "deleted").catch(() => {});
     if (prefs.deleteToTrash) {
       try {
         await trashPath(`${root()}/${path}`);
@@ -457,6 +562,15 @@ export async function deleteEntry(path: string) {
 }
 
 // ------------------------------------------------- changes made on disk
+
+/** Take an open note's text from disk (after the app rewrote it, e.g. replace). */
+export async function reloadFromDisk(path: string) {
+  if (!state.buffers[path]) return;
+  const content = await ipc.read(path);
+  clearTimeout(saveTimers.get(path));
+  setState("buffers", path, { content, saved: content });
+  app.events.emit("note:reloaded", { path, content });
+}
 
 let fsTreeTimer: number | undefined;
 
@@ -510,9 +624,13 @@ export type Dialog =
   | { kind: "settings"; tab?: string }
   | { kind: "style"; key: string; scope: "note" | "theme" }
   | { kind: "page" }
+  | { kind: "help"; doc?: string; anchor?: string }
   | { kind: "themes" }
   | { kind: "diagrams" }
-  | { kind: "typst"; source: string };
+  | { kind: "typst"; source: string }
+  | { kind: "history"; tab?: "note" | "deleted" | "snapshots"; path?: string }
+  /** deck: open a session for that deck (null = all); missing = the deck list. */
+  | { kind: "review"; deck?: string | null };
 
 export interface PickItem {
   label: string;

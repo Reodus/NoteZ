@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Quick capture</title>
+<style>
+  :root { color-scheme: light dark; --bg: #ffffff; --fg: #1d1f24; --muted: #7a7f8c; --border: #d9dce3; --accent: #6d5efc; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1d1f24; --fg: #e8e9ed; --muted: #8b90a0; --border: #343844; } }
+  html, body { margin: 0; height: 100%; background: transparent; font: 14px/1.5 system-ui, sans-serif; }
+  .box { box-sizing: border-box; height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px;
+         background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 12px; }
+  textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; font-size: 15px; }
+  .foot { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+  kbd { font: inherit; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="box">
+  <textarea id="t" dir="auto" placeholder="Capture a thought…" autofocus></textarea>
+  <div class="foot"><span id="to"></span><span><kbd>Enter</kbd> save · <kbd>Shift+Enter</kbd> new line · <kbd>Esc</kbd> cancel</span></div>
+</div>
+<script>
+  const t = document.getElementById("t");
+  window.notezCapture.target().then((s) => (document.getElementById("to").textContent = s ? "→ " + s : ""));
+  t.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") window.notezCapture.cancel();
+    else if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      const text = t.value.trim();
+      text ? window.notezCapture.submit(text) : window.notezCapture.cancel();
+    }
+  });
+  window.addEventListener("blur", () => window.notezCapture.cancel());
+</script>
+</body>
+</html>

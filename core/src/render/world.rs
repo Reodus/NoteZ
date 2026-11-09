@@ -5,7 +5,8 @@
 //!   unsaved editor buffers and generated sources.
 //! - Packages come from the bundled `typst-packages/` folder first, then the
 //!   user's Typst cache, then Typst Universe (downloaded on demand).
-//! - Fonts: Typst's embedded fonts + bundled Vazirmatn + system fonts.
+//! - Fonts: Typst's embedded fonts + bundled Vazirmatn + the bundled Noto
+//!   fonts for other scripts (`$NOTEZ_FONTS`, see scripts/fonts.mjs) + system fonts.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -41,13 +42,32 @@ static FONTS: LazyLock<Arc<FontStore>> = LazyLock::new(|| {
             (f, info)
         }));
     }
+    if let Some(dir) = bundled_fonts_dir() {
+        store.extend(typst_kit::fonts::scan(&dir));
+    }
     store.extend(typst_kit::fonts::system());
     Arc::new(store)
 });
 
+/// Folder with the bundled Noto fonts: `$NOTEZ_FONTS` (set by the shell to
+/// the packaged copy), else `core/fonts/noto` when running from source.
+fn bundled_fonts_dir() -> Option<PathBuf> {
+    std::env::var_os("NOTEZ_FONTS")
+        .map(PathBuf::from)
+        .or_else(|| Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fonts/noto")))
+        .filter(|d| d.is_dir())
+}
+
 /// Kick off font scanning in the background so the first compile is fast.
 pub fn warm_up() {
     std::thread::spawn(|| LazyLock::force(&FONTS));
+}
+
+/// Whether any available font has a glyph for `c`.
+pub fn covers(c: char) -> bool {
+    use typst::text::{FontStretch, FontStyle, FontVariant, FontWeight};
+    let variant = FontVariant::new(FontStyle::Normal, FontWeight::REGULAR, FontStretch::NORMAL);
+    FONTS.book().select_fallback(None, variant, c.encode_utf8(&mut [0; 4])).is_some()
 }
 
 /// Sorted, de-duplicated font family names (for the font pickers).
@@ -93,6 +113,10 @@ pub struct NoteWorld {
     time: Time,
 }
 
+/// Assembly grammar for ```asm/```nasm/```arm/… blocks in the PDF.
+pub const ASM_SYNTAX_PATH: &str = "/__notez/asm.sublime-syntax";
+const ASM_SYNTAX: &str = include_str!("asm.sublime-syntax");
+
 pub fn project_file(path: &str) -> Result<FileId, String> {
     let vpath = VirtualPath::new(path).map_err(|e| format!("bad path {path}: {e:?}"))?;
     Ok(RootedPath::new(VirtualRoot::Project, vpath).intern())
@@ -135,6 +159,8 @@ impl NoteWorld {
         let loader = self.store.loader_mut();
         loader.overlay.clear();
         loader.overlay.insert(main, Bytes::from_string(text));
+        // Grammars for code blocks that Typst doesn't know (see styles.rs).
+        loader.overlay.insert(project_file(ASM_SYNTAX_PATH)?, Bytes::new(ASM_SYNTAX.as_bytes()));
         for (path, bytes) in extra {
             loader.overlay.insert(project_file(&path)?, bytes);
         }

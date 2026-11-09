@@ -1,5 +1,6 @@
+import { noteIcon } from "../core/meta";
 import { For, Show } from "solid-js";
-import { X, FileText, FileCode2, FileImage, FileType2, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2 } from "lucide-solid";
+import { X, FileText, FileCode2, FileImage, FileType2, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2, Table2 } from "lucide-solid";
 import { state, setState, isDirty, closeTab, prefs, setPrefs, setFocusMode } from "../core/store";
 import { stem, basename, fileKind, isNotePath } from "../core/ipc";
 import { fileMenu, entryFor } from "./fileMenu";
@@ -46,9 +47,11 @@ export default function TabBar() {
                 ])
               }
             >
-              {path.endsWith(".typ") ? <FileCode2 size={14} class="tab-icon-file typ" />
+              {noteIcon(path) ? <span class="note-icon">{noteIcon(path)}</span>
+                : path.endsWith(".typ") ? <FileCode2 size={14} class="tab-icon-file typ" />
                 : fileKind(path) === "image" ? <FileImage size={14} class="tab-icon-file image" />
                 : fileKind(path) === "pdf" ? <FileType2 size={14} class="tab-icon-file pdf" />
+                : fileKind(path) === "base" ? <Table2 size={14} class="tab-icon-file base" />
                 : <FileText size={14} class="tab-icon-file" />}
               <span class="tab-title" dir="auto">{fileKind(path) === "note" ? stem(path) : basename(path)}</span>
               <button

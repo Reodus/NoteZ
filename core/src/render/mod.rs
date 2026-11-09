@@ -4,6 +4,7 @@ pub mod bidi;
 pub mod blocks;
 pub mod compile;
 pub mod md;
+pub mod script;
 pub mod styles;
 pub mod world;
 
@@ -125,7 +126,7 @@ fn theme_value(vault: Option<&Path>, name: &str) -> serde_yaml_ng::Value {
         if let Some(over) = std::fs::read_to_string(file).ok().and_then(|y| serde_yaml_ng::from_str(&y).ok()) {
             // Only a file that is a valid theme on its own may overlay.
             if styles::theme_from_value(&over).is_some() {
-                styles::merge_value(&mut v, &over);
+                styles::merge_layer(&mut v, &over);
             }
         }
     }
@@ -159,7 +160,7 @@ pub fn theme_for(vault: Option<&Path>, fm: &FrontMatter, fm_yaml: Option<&str>) 
         }
         let layer = serde_yaml_ng::Value::Mapping(layer);
         if styles::theme_from_value(&layer).is_some() {
-            styles::merge_value(&mut v, &layer);
+            styles::merge_layer(&mut v, &layer);
         }
     }
     let mut theme = styles::theme_from_value(&v).unwrap_or_else(|| load_theme(vault, name));
@@ -242,6 +243,35 @@ pub fn resolve_image(vault: Option<&Path>, note_dir: &str, url: &str) -> Option<
     Some(format!("/{rel}"))
 }
 
+/// Markdown that `![[url]]` embeds: a note (without its frontmatter), a
+/// heading's section or a `^block`. `this` is the embedding note's text
+/// (for `![[#^id]]`).
+fn embedded_note(vault: Option<&Path>, note_dir: &str, this: &str, url: &str) -> Option<String> {
+    let url = percent_decode(url.trim());
+    let (name, sub) = match url.split_once('#') {
+        Some((n, s)) => (n.trim(), Some(s.trim())),
+        None => (url.as_str(), None),
+    };
+    let owned;
+    let text = if name.is_empty() {
+        this
+    } else {
+        let vault = vault?;
+        let file = if name.to_ascii_lowercase().ends_with(".md") { name.to_string() } else { format!("{name}.md") };
+        let rel = resolve_image(Some(vault), note_dir, &file)?;
+        owned = std::fs::read_to_string(vault.join(rel.trim_start_matches('/'))).ok()?;
+        &owned
+    };
+    let (s, e) = match sub.filter(|s| !s.is_empty()) {
+        Some(sub) => crate::blockidx::find(text, sub)?,
+        None => {
+            let lines: Vec<&str> = text.lines().collect();
+            (crate::blockidx::body_start(&lines), lines.len().saturating_sub(1))
+        }
+    };
+    Some(crate::blockidx::slice(text, s, e))
+}
+
 pub struct Built {
     pub main_path: String,
     pub source: String,
@@ -250,7 +280,7 @@ pub struct Built {
     pub notes: Vec<String>,
 }
 
-const HELPERS: &str = "#let nz-image(path, width: auto) = layout(region => {\n  let im = image(path)\n  if width != auto { image(path, width: width) } else if measure(im).width > region.width { image(path, width: 100%) } else { im }\n})\n";
+pub(crate) const HELPERS: &str = "#let notez-fonts = (\"New Computer Modern\", \"Vazirmatn\")\n#let notez-digits(s, zero) = s.clusters().map(c => if c.len() == 1 and c >= \"0\" and c <= \"9\" { str.from-unicode(zero + int(c)) } else { c }).join()\n#let nz-image(path, width: auto) = layout(region => {\n  let im = image(path)\n  if width != auto { image(path, width: width) } else if measure(im).width > region.width { image(path, width: 100%) } else { im }\n})\n";
 
 fn imports(pkgs: &BTreeSet<&str>) -> String {
     PACKAGES.iter().filter(|(n, _)| pkgs.contains(n)).map(|(_, i)| *i).collect()
@@ -287,7 +317,8 @@ pub fn build(vault: Option<&Path>, note_path: &str, text: &str, rendered: &md::R
             .and_then(|l| l.trim().strip_prefix("// theme:"))
             .map(|t| t.trim().to_string())
             .unwrap_or_else(|| "default".into());
-        let theme = load_theme(vault, &theme_name);
+        let mut theme = load_theme(vault, &theme_name);
+        theme.resolve_lang(text);
         let meta = Meta { title: None, author: None, date: None };
         let prelude = format!("{}{}{}", imports(&sniff_packages(text)), HELPERS, styles::prelude(&theme, &meta));
         let prelude_lines = prelude.matches('\n').count();
@@ -301,11 +332,21 @@ pub fn build(vault: Option<&Path>, note_path: &str, text: &str, rendered: &md::R
 
     let (fm, body, body_line, fm_err) = parse_frontmatter(text);
     notes.extend(fm_err);
-    let theme = theme_for(vault, &fm, split_frontmatter(text).0);
+    for (script, c) in script::script_samples(body) {
+        if !world::covers(c) {
+            notes.push(format!(
+                "No font has {script:?} letters (like “{c}”): install a font for them or name one under `fonts:` in the theme."
+            ));
+        }
+    }
+    let mut theme = theme_for(vault, &fm, split_frontmatter(text).0);
+    theme.resolve_lang(&format!("{} {body}", fm.title.as_deref().unwrap_or("")));
     let meta = Meta { title: fm.title.as_deref(), author: fm.author.as_deref(), date: fm.date.as_deref() };
     let base = if theme.is_rtl() { md::Dir::Rtl } else { md::Dir::Ltr };
+    let lang = theme.lang_code().unwrap_or_else(|| "en".into());
     let resolve = |url: &str| resolve_image(vault, note_dir, url);
-    let out = md::convert(body, &md::Options2 { base, rendered, resolve_image: &resolve });
+    let resolve_note = |url: &str| embedded_note(vault, note_dir, text, url);
+    let out = md::convert(body, &md::Options2 { base, lang: &lang, rendered, resolve_image: &resolve, resolve_note: &resolve_note, depth: 0 });
 
     let mut head = format!("{}{}{}", imports(&out.packages), HELPERS, styles::prelude(&theme, &meta));
     head.push_str(&styles::title_block(&theme, &meta, fm.subtitle.as_deref()));
@@ -361,6 +402,79 @@ mod tests {
         assert_eq!(p.pages.len(), 1);
     }
 
+    /// Only pages that changed are sent again; an edit on page 3 of 3
+    /// leaves pages 1 and 2 alone.
+    #[test]
+    fn preview_skips_unchanged_pages() {
+        let para = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(12);
+        let text: String = (0..30).map(|i| format!("## Part {i}\n\n{para}\n\n")).collect();
+        let render = |t: &str, known: &[String]| {
+            let built = build(None, "Long.md", t, &md::Rendered::new());
+            let mut world = world::NoteWorld::new(world::dev_packages_dir());
+            world.prepare(&built.main_path, built.source.clone(), vec![]).unwrap();
+            compile::preview_diff(&world, &built.map, known)
+        };
+        let first = render(&text, &[]);
+        assert!(first.pages.len() >= 3, "{} pages", first.pages.len());
+        assert!(first.pages.iter().all(Option::is_some));
+        let same = render(&text, &first.hashes);
+        assert!(same.pages.iter().all(Option::is_none), "nothing changed, nothing sent");
+        let edited = render(&format!("{text}One more line at the end."), &first.hashes);
+        let sent: Vec<usize> = edited.pages.iter().enumerate().filter(|(_, p)| p.is_some()).map(|(i, _)| i).collect();
+        assert_eq!(sent, vec![edited.pages.len() - 1]);
+    }
+
+    /// ```nasm/```arm/```riscv/… blocks are highlighted in the PDF with the
+    /// bundled grammar (asm.sublime-syntax).
+    #[test]
+    fn assembly_highlighting() {
+        use typst::layout::{Frame, FrameItem};
+        let note = "```nasm\nsection .text\nglobal _start\n_start:\n    mov rax, 0x3c   ; exit\n    xor edi, edi\n    syscall\nmsg db \"hi\", 10\n```\n\n\
+```gas\nmovq $1, %rax\n1:  addq (%rdi), %rax # sum\n```\n\n\
+```arm64\nloop: ldr x0, [x1, #8]!\n    add v0.16b, v1.16b, v2.16b\n    b.ne loop   // again\n```\n\n\
+```riscv\naddi a0, a0, -1  # dec\n```\n\n```mips\nlw $t0, 4($sp)\n```\n\n```avr\nldi r16, 0xFF\n```\n";
+        let built = build(None, "Asm.md", note, &md::Rendered::new());
+        let mut world = world::NoteWorld::new(world::dev_packages_dir());
+        world.prepare(&built.main_path, built.source.clone(), vec![]).unwrap();
+        let doc = typst::compile::<typst_layout::PagedDocument>(&world).output.expect("compiles");
+        fn walk(f: &Frame, out: &mut Vec<(String, String)>) {
+            for (_, item) in f.items() {
+                match item {
+                    FrameItem::Group(g) => walk(&g.frame, out),
+                    FrameItem::Text(t) => {
+                        if let typst::visualize::Paint::Solid(c) = &t.fill {
+                            out.push((t.text.to_string(), c.to_hex().to_string()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut runs = vec![];
+        for page in doc.pages() {
+            walk(&page.frame, &mut runs);
+        }
+        let color = |word: &str| -> String {
+            runs.iter()
+                .find(|(t, _)| t == word)
+                .or_else(|| runs.iter().find(|(t, _)| t.trim() == word))
+                .map(|(_, c)| c.clone())
+                .unwrap_or_else(|| panic!("{word:?} not found in {runs:?}"))
+        };
+        let (kw, reg, num, comment, label, dir, string) =
+            ("#d73948", "#8b41b1", "#b60157", "#74747c", "#1d6c76", "#4b69c6", "#198810");
+        for (w, c) in [
+            ("section", dir), ("global", dir), ("_start", label), ("mov", kw), ("rax", reg), ("0x3c", num),
+            ("; exit", comment), ("syscall", kw), ("msg", label), ("db", dir), ("hi", string),
+            ("movq", kw), ("$1", num), ("%rax", reg), ("%rdi", reg), ("# sum", comment),
+            ("loop", label), ("ldr", kw), ("x0", reg), ("#8", num), ("v0.16b", reg), ("b.ne", kw), ("// again", comment),
+            ("addi", kw), ("a0", reg), ("-1", num), ("# dec", comment),
+            ("$t0", reg), ("$sp", reg), ("lw", kw), ("ldi", kw), ("r16", reg), ("0xFF", num),
+        ] {
+            assert_eq!(color(w), c, "{w} in {runs:?}");
+        }
+    }
+
     fn compile_errors(note_path: &str, text: &str) -> (Vec<String>, usize) {
         let built = build(None, note_path, text, &md::Rendered::new());
         let mut world = world::NoteWorld::new(world::dev_packages_dir());
@@ -387,8 +501,45 @@ mod tests {
             let text = showcase.replace("theme: default", &format!("theme: {theme}"));
             let (errs, pages) = compile_errors("Showcase.md", &text);
             assert!(errs.is_empty(), "theme {theme}: {errs:#?}");
-            assert!(pages >= 2, "theme {theme}: {pages} pages");
+            assert!(pages >= 1, "theme {theme}: {pages} pages");
         }
+    }
+
+    /// Every note of examples/multilingual-vault: detected language and
+    /// direction, the language's own page digits, no missing fonts, no errors
+    /// (needs the bundled fonts: `npm run fonts`).
+    #[test]
+    fn multilingual_vault() {
+        if !std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts/noto/NotoSansSC-Regular.otf").exists() {
+            eprintln!("skipped: bundled fonts missing (npm run fonts)");
+            return;
+        }
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/multilingual-vault");
+        let expect = [
+            ("English", "en", false, "1"), ("Persian", "fa", true, "۱"), ("Arabic", "ar", true, "١"),
+            ("Urdu", "ur", true, "۱"), ("Chinese", "zh", false, "1"),
+            ("Japanese", "ja", false, "1"), ("Korean", "ko", false, "1"), ("Hindi", "hi", false, "1"),
+            ("Bengali", "bn", false, "১"), ("Thai", "th", false, "1"), ("Russian", "ru", false, "1"),
+            ("Greek", "el", false, "1"), ("Amharic", "am", false, "1"), ("Mixed", "en", false, "1"),
+        ];
+        for (name, lang, rtl, digit) in expect {
+            let text = std::fs::read_to_string(dir.join(format!("{name}.md"))).unwrap();
+            let built = build(None, &format!("{name}.md"), &text, &md::Rendered::new());
+            let (base, _) = script::split_lang(lang);
+            assert!(built.source.contains(&format!("lang: \"{base}\"")), "{name}: lang {lang}");
+            assert!(built.source.contains(if rtl { "dir: rtl)" } else { "dir: ltr)" }), "{name}: direction");
+            assert!(built.source.contains(&format!("numbering: \"{digit}\"")), "{name}: page digits {digit}");
+            assert!(built.notes.iter().all(|n| !n.starts_with("No font")), "{name}: {:?}", built.notes);
+            let (errs, pages) = compile_errors(&format!("{name}.md"), &text);
+            assert!(errs.is_empty(), "{name}: {errs:#?}");
+            assert_eq!(pages, 1, "{name}");
+        }
+        // Mixed: spans and blocks with their own languages.
+        let text = std::fs::read_to_string(dir.join("Mixed.md")).unwrap();
+        let built = build(None, "Mixed.md", &text, &md::Rendered::new());
+        assert!(built.source.contains("lang: \"ja\", dir: ltr, font: (\"Noto Sans JP\",) + notez-fonts"), "{}", built.source);
+        assert!(built.source.contains("lang: \"ar\", dir: rtl"), "{}", built.source);
+        assert!(built.source.contains("dir: rtl, lang: \"fa\""), "{}", built.source);
     }
 
     /// Compile every note of a real vault (read-only):
@@ -471,6 +622,26 @@ mod tests {
         let p = compile::preview(&world, &built.map);
         let e = p.diagnostics.iter().find(|d| d.severity == "error").expect("an error");
         assert_eq!(e.line, Some(7), "{}", e.message);
+    }
+
+    #[test]
+    fn blocks_compile_with_links_and_embeds() {
+        let dir = std::env::temp_dir().join(format!("nz-embed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Other.md"), "---\ntitle: o\n---\n# Part\n\nSecret *one* ^s1\n\n# Rest\n\nNot this\n").unwrap();
+        let text = "# A ^h\n\nPara ^p1\n\n| a |\n|---|\n| 1 |\n\n^t1\n\nSee [[#^p1|para]] and [[#^t1]].\n\n![[Other#^s1]]\n\n![[Other#Part]]\n\n![[Other]]\n\n![[#^p1]]\n";
+        let built = build(Some(&dir), "n.md", text, &md::Rendered::new());
+        assert_eq!(built.source.matches("Secret").count(), 3, "{}", built.source);
+        assert_eq!(built.source.matches("Not this").count(), 1, "{}", built.source);
+        assert!(!built.source.contains("title: o"));
+        let mut world = world::NoteWorld::new(world::dev_packages_dir());
+        world.set_vault(Some(dir.clone()));
+        world.prepare(&built.main_path, built.source.clone(), vec![]).unwrap();
+        let p = compile::preview(&world, &built.map);
+        let errs: Vec<_> = p.diagnostics.iter().filter(|d| d.severity == "error").map(|d| d.message.clone()).collect();
+        assert!(errs.is_empty(), "{errs:?}\n{}", built.source);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

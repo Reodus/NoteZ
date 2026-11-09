@@ -1,0 +1,20 @@
+name: Night
+description: Light text on a dark page — for reading PDFs on screen at night.
+page:
+  paper: a4
+  margin: 2.2cm
+  background: "#1b1d23"
+  numbering: "1"
+  digits: auto
+  footer: { center: "{page}" }
+styles:
+  body: { font: Noto Sans, fonts: { arabic: Vazirmatn }, size: 10.5pt, color: "#d9dce3", line-spacing: 1.6, align: start, space-after: 1em }
+  title: { size: 26pt, weight: bold, color: "#a9b8ff", align: start, space-after: 1.4em }
+  subtitle: { size: 13pt, color: "#8f96a8" }
+  h1: { size: 18pt, weight: bold, color: "#a9b8ff", space-before: 1.5em, space-after: 0.7em }
+  h2: { size: 14.5pt, weight: semibold, color: "#7fd1c4", space-before: 1.3em, space-after: 0.6em }
+  h3: { size: 12pt, weight: semibold, color: "#f0b47a", space-before: 1em, space-after: 0.5em }
+  quote: { color: "#c4c8d2", background: "#262932", border: "#a9b8ff" }
+  code: { size: 9.5pt, color: "#e6e8ee", background: "#262932", border: "#353945" }
+  link: { color: "#8fb2ff" }
+  caption: { size: 9pt, color: "#8f96a8" }

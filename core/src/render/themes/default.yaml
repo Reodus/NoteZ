@@ -1,14 +1,14 @@
 name: Default
-description: Clean bilingual layout — New Computer Modern for Latin, Vazirmatn for Persian.
-lang: fa
+description: Clean, versatile layout — New Computer Modern, with matching fonts for every script.
 page:
   paper: a4
   margin: 2.5cm
-  numbering: "۱"
+  numbering: "1"
+  digits: auto
   footer:
     center: "{page}"
 styles:
-  body: { font: New Computer Modern, font-fa: Vazirmatn, size: 11pt, line-spacing: 1.45, align: justify, space-after: 0.9em }
+  body: { font: New Computer Modern, fonts: { arabic: Vazirmatn }, size: 11pt, line-spacing: 1.45, align: justify, space-after: 0.9em }
   title: { size: 24pt, weight: bold, color: "#1d2b4f", align: center, space-after: 1.6em }
   subtitle: { size: 13pt, color: "#5b6478" }
   h1: { size: 18pt, weight: bold, color: "#1d2b4f", space-before: 1.4em, space-after: 0.8em }

@@ -68,7 +68,7 @@ export function setFrontmatter(view: EditorView, keyPath: string[], value: unkno
   } else {
     doc.setIn(keyPath, doc.createNode(cleaned, { flow: keyPath[0] === "styles" }));
   }
-  let yaml = doc.toString({ lineWidth: 0 });
+  let yaml = doc.toString({ lineWidth: 0, flowCollectionPadding: false });
   if (yaml.trim() === "{}") yaml = "";
   if (r) {
     if (!yaml.trim()) {
@@ -87,7 +87,7 @@ export function editFrontmatter(view: EditorView, edit: (doc: Document) => void)
   const r = frontmatterRange(text);
   const doc: Document = r ? parseDocument(text.slice(r.from, r.to)) : new Document({});
   edit(doc);
-  let yaml = doc.toString({ lineWidth: 0 });
+  let yaml = doc.toString({ lineWidth: 0, flowCollectionPadding: false });
   if (yaml.trim() === "{}" || yaml.trim() === "null") yaml = "";
   if (r) view.dispatch({ changes: { from: r.from, to: r.to, insert: yaml } });
   else view.dispatch({ changes: { from: 0, to: 0, insert: `---\n${yaml}---\n\n` } });
@@ -102,4 +102,21 @@ export function renameFrontmatterKey(view: EditorView, from: string, to: string)
     const pair = map.items.find((p: any) => (p.key?.value ?? p.key) === from);
     if (pair) pair.key = doc.createNode(to);
   });
+}
+
+/**
+ * `text` with frontmatter key `key` set to `value` (null/undefined/"" removes
+ * it; the frontmatter is created or dropped as needed). Other keys keep their
+ * formatting.
+ */
+export function setFrontmatterText(text: string, key: string, value: unknown): string {
+  const r = frontmatterRange(text);
+  const doc: Document = r ? parseDocument(text.slice(r.from, r.to)) : new Document({});
+  const empty = value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
+  if (empty) doc.delete(key);
+  else doc.set(key, doc.createNode(value, { flow: Array.isArray(value) && value.every((x) => typeof x !== "object") && value.length <= 6 }));
+  let yaml = doc.toString({ lineWidth: 0, flowCollectionPadding: false });
+  if (yaml.trim() === "{}" || yaml.trim() === "null") yaml = "";
+  if (r) return yaml.trim() ? text.slice(0, r.from) + yaml + text.slice(r.to) : text.slice(r.bodyStart).replace(/^\n/, "");
+  return yaml.trim() ? `---\n${yaml}---\n\n${text}` : text;
 }

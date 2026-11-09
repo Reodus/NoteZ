@@ -45,11 +45,10 @@ pub struct Diagnostic {
     pub file: Option<String>,
 }
 
-#[derive(Serialize)]
+#[cfg(test)]
 pub struct Preview {
     pub pages: Vec<String>,
     pub diagnostics: Vec<Diagnostic>,
-    pub millis: u128,
 }
 
 fn convert(world: &NoteWorld, map: &SourceMap, diags: &[SourceDiagnostic]) -> Vec<Diagnostic> {
@@ -104,14 +103,53 @@ fn compile_doc(world: &NoteWorld, map: &SourceMap) -> (Option<PagedDocument>, Ve
     }
 }
 
+/// Every page as SVG (tests).
+#[cfg(test)]
 pub fn preview(world: &NoteWorld, map: &SourceMap) -> Preview {
+    let d = preview_diff(world, map, &[]);
+    Preview { pages: d.pages.into_iter().flatten().collect(), diagnostics: d.diagnostics }
+}
+
+/// A preview that only carries pages the UI doesn't have yet.
+#[derive(Serialize)]
+pub struct PreviewDiff {
+    /// SVG of each page, or `None` when its hash is in `known`.
+    pub pages: Vec<Option<String>>,
+    /// Content hash of every page, to send back as `known` next time.
+    pub hashes: Vec<String>,
+    pub diagnostics: Vec<Diagnostic>,
+    pub millis: u128,
+}
+
+/// Like [`preview`], but pages whose content hash the caller already has are
+/// not sent: a long note's SVG runs to megabytes, and
+/// typing usually changes one or two pages.
+pub fn preview_diff(world: &NoteWorld, map: &SourceMap, known: &[String]) -> PreviewDiff {
     let start = Instant::now();
     let (doc, diagnostics) = compile_doc(world, map);
     let opts = SvgOptions::default();
-    let pages = doc
-        .map(|d| d.pages().iter().map(|p| typst_svg::svg(p, &opts)).collect())
-        .unwrap_or_default();
-    Preview { pages, diagnostics, millis: start.elapsed().as_millis() }
+    let mut pages = vec![];
+    let mut hashes = vec![];
+    if let Some(d) = doc {
+        for p in d.pages() {
+            // Hash the SVG, not the page: a page's frames carry source spans,
+            // which change with any edit before them.
+            let svg = typst_svg::svg(p, &opts);
+            let h = format!("{:032x}", typst::utils::hash128(&svg));
+            pages.push(if known.contains(&h) { None } else { Some(svg) });
+            hashes.push(h);
+        }
+    }
+    PreviewDiff { pages, hashes, diagnostics, millis: start.elapsed().as_millis() }
+}
+
+/// The first page as SVG (theme thumbnails).
+pub fn first_page_svg(world: &NoteWorld) -> Result<String, String> {
+    let (doc, diags) = compile_doc(world, &SourceMap::default());
+    match doc.as_ref().and_then(|d| d.pages().first()) {
+        Some(p) => Ok(typst_svg::svg(p, &SvgOptions::default())),
+        None => Err(diags.iter().map(|d| d.message.clone()).collect::<Vec<_>>().join("\n")),
+    }
 }
 
 /// Render the whole document as one SVG (used for small snippets, e.g. the

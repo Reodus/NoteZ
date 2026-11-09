@@ -19,7 +19,7 @@ export const markdownHighlight = HighlightStyle.define([
   { tag: t.quote, color: "var(--fg-soft)", fontStyle: "italic" },
   { tag: [t.processingInstruction, t.meta, t.contentSeparator], color: "var(--fg-faint)" },
   { tag: t.comment, color: "var(--fg-faint)", fontStyle: "italic" },
-  { tag: t.keyword, color: "var(--syn-keyword)" },
+  { tag: [t.keyword, t.modifier], color: "var(--syn-keyword)" },
   { tag: [t.function(t.variableName), t.function(t.name)], color: "var(--syn-func)" },
   { tag: t.string, color: "var(--syn-string)" },
   { tag: t.number, color: "var(--syn-number)" },
@@ -36,8 +36,14 @@ const PT_TO_EM = (pt: string | null | undefined, body: number) => {
   return m ? `${(Number(m[1]) / body).toFixed(3)}em` : null;
 };
 
+/** A style's fonts (main font, per-script fonts, old `font-fa`), then the editor's stack. */
 const fontStack = (st: TextStyle) =>
-  [st.font, st["font-fa"]].filter(Boolean).map((f) => `"${f}"`).concat(["var(--font-editor)"]).join(", ");
+  [st.font, ...Object.values(st.fonts ?? {}), st["font-fa"]]
+    .filter(Boolean)
+    .map((f) => `"${String(f).replace(/"/g, "")}"`)
+    .concat(["var(--font-editor)"])
+    .join(", ");
+const hasFont = (st: TextStyle) => !!(st.font || st["font-fa"] || Object.keys(st.fonts ?? {}).length);
 
 const WEIGHTS: Record<string, string> = {
   thin: "100", extralight: "200", light: "300", regular: "400", medium: "500",
@@ -58,7 +64,7 @@ export function themeCss(theme: Theme | null): Record<string, string> {
     const size = PT_TO_EM(st.size, bodyPt);
     if (size) vars[`--${key}-size`] = size;
     if (st.color) vars[`--${key}-color`] = st.color;
-    if (st.font || st["font-fa"]) vars[`--${key}-font`] = fontStack(st);
+    if (hasFont(st)) vars[`--${key}-font`] = fontStack(st);
     if (st.weight) vars[`--${key}-weight`] = WEIGHTS[st.weight] ?? st.weight;
     if (st.italic) vars[`--${key}-style`] = "italic";
     if (st.align) vars[`--${key}-align`] = st.align === "start" ? "start" : st.align;

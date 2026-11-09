@@ -1,0 +1,29 @@
+/* @name Arctic
+   @mode light
+   @description Cool frosted blues and greys, crisp and calm.
+   @accent #5e81ac */
+:root {
+  --bg: #e9eef4;
+  --surface: #f8fafc;
+  --surface-2: #f1f5f9;
+  --sidebar: #e3e9f0;
+  --border: #d6dee8;
+  --border-strong: #c3cedb;
+  --fg: #2e3440;
+  --fg-soft: #3f4859;
+  --fg-muted: #66728a;
+  --fg-faint: #9aa5b8;
+  --hover: rgba(46, 52, 64, 0.055);
+  --hover-strong: rgba(46, 52, 64, 0.09);
+  --canvas: #dce3ec;
+  --code-bg: rgba(46, 52, 64, 0.055);
+  --danger: #bf616a;
+  --success: #6a9a4f;
+  --warning: #c08b2e;
+  --syn-keyword: #81519b;
+  --syn-func: #3b6ea8;
+  --syn-string: #5a8a3a;
+  --syn-number: #b5653d;
+  --syn-atom: #a6466b;
+  --syn-type: #2f8a8a;
+}

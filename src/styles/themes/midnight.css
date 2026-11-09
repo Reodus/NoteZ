@@ -1,0 +1,23 @@
+/* @name Midnight
+   @mode dark
+   @description True black for OLED screens, with soft violet accents.
+   @accent #8b7cff */
+:root {
+  --bg: #000000;
+  --surface: #0a0a0c;
+  --surface-2: #101013;
+  --sidebar: #050506;
+  --border: #1c1c22;
+  --border-strong: #2a2a33;
+  --fg: #ececf1;
+  --fg-soft: #c8c8d2;
+  --fg-muted: #8a8a99;
+  --fg-faint: #55555f;
+  --hover: rgba(255, 255, 255, 0.05);
+  --hover-strong: rgba(255, 255, 255, 0.09);
+  --canvas: #000000;
+  --code-bg: rgba(255, 255, 255, 0.06);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.8);
+}

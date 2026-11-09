@@ -1,0 +1,33 @@
+/* @name High Contrast Dark
+   @mode dark
+   @description Black background, white text and bright outlines for maximum legibility.
+   @accent #ffd60a */
+:root {
+  --bg: #000000;
+  --surface: #000000;
+  --surface-2: #0a0a0a;
+  --sidebar: #000000;
+  --border: #a0a0a0;
+  --border-strong: #ffffff;
+  --fg: #ffffff;
+  --fg-soft: #ffffff;
+  --fg-muted: #e0e0e0;
+  --fg-faint: #b0b0b0;
+  --hover: rgba(255, 255, 255, 0.12);
+  --hover-strong: rgba(255, 255, 255, 0.2);
+  --canvas: #000000;
+  --code-bg: rgba(255, 255, 255, 0.12);
+  --accent-fg: #000000;
+  --danger: #ff6b81;
+  --success: #5dff8f;
+  --warning: #ffd60a;
+  --syn-keyword: #ff9ef5;
+  --syn-func: #7cd4ff;
+  --syn-string: #b6ff8a;
+  --syn-number: #ffbe6b;
+  --syn-atom: #ff8fb8;
+  --syn-type: #7fffe0;
+  --shadow-sm: none;
+  --shadow-md: 0 0 0 1px #fff;
+  --shadow-lg: 0 0 0 2px #fff;
+}

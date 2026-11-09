@@ -1,12 +1,76 @@
 import { createEffect, createResource, createSignal, For, JSX, Show } from "solid-js";
-import { Paintbrush, Type, Puzzle, Keyboard, Info, RefreshCw, FolderOpen, Files, FileDown, Search, RotateCcw, X } from "lucide-solid";
-import { openDialog, openPath } from "../core/native";
+import { Paintbrush, Type, Puzzle, Keyboard, Info, RefreshCw, FolderOpen, Files, FileDown, Search, RotateCcw, X, Languages, CalendarDays, History, GraduationCap } from "lucide-solid";
+import { openDialog, openPath, spellcheckLanguages } from "../core/native";
+import { languageLabel, languageOptions } from "../core/languages";
+import { cssFolder } from "../core/native";
+import { HistorySettings, SyncSettingsView } from "./SyncSettings";
+import { loadUserCss, snippets, themesFor, UiTheme } from "../core/uithemes";
+
+async function openCssFolder(kind: "themes" | "snippets", vault: string | null) {
+  try {
+    await openPath(await cssFolder(kind, vault));
+  } catch (e) {
+    notify(String(e), "error");
+  }
+}
+
+/** Colors of a theme for its preview card (base light/dark use the defaults). */
+function swatch(t: UiTheme) {
+  const v = (name: string, fallback: string) => new RegExp(`--${name}:\\s*([^;]+);`).exec(t.css)?.[1].trim() ?? fallback;
+  const dark = t.mode === "dark";
+  return {
+    bg: v("bg", dark ? "#121216" : "#f4f4f6"),
+    surface: v("surface", dark ? "#18181d" : "#ffffff"),
+    sidebar: v("sidebar", dark ? "#141419" : "#f0f0f3"),
+    fg: v("fg", dark ? "#e9e9ef" : "#1b1c21"),
+    muted: v("fg-muted", dark ? "#8d91a1" : "#6b6f7e"),
+    border: v("border", dark ? "#26262e" : "#e4e4ea"),
+    accent: t.accent ?? "#6d5efc",
+  };
+}
+
+/** A row of theme cards for one mode. */
+function ThemePicker(props: { mode: "light" | "dark" }) {
+  const key = props.mode === "light" ? "uiThemeLight" : "uiThemeDark";
+  return (
+    <Field label={props.mode === "light" ? "Light theme" : "Dark theme"}>
+      <div class="ui-theme-grid">
+        <For each={themesFor(props.mode)}>
+          {(t) => {
+            const c = swatch(t);
+            return (
+              <button
+                type="button"
+                class="ui-theme-card"
+                classList={{ active: prefs[key] === t.id }}
+                title={t.description}
+                onClick={() => setPrefs(key, t.id)}
+              >
+                <div class="ui-theme-mock" style={{ background: c.bg, "border-color": c.border }}>
+                  <i class="side" style={{ background: c.sidebar }} />
+                  <div class="page" style={{ background: c.surface }}>
+                    <b style={{ background: c.fg }} />
+                    <i style={{ background: c.muted }} />
+                    <i style={{ background: c.muted, width: "60%" }} />
+                    <u style={{ background: c.accent }} />
+                  </div>
+                </div>
+                <span class="ui-theme-name">{t.name}<Show when={t.source !== "builtin"}> <span class="badge">{t.source}</span></Show></span>
+              </button>
+            );
+          }}
+        </For>
+      </div>
+    </Field>
+  );
+}
 import { app, notify } from "../core/app";
 import { ipc } from "../core/ipc";
-import { prefs, setPrefs, root, state } from "../core/store";
+import { prefs, setPrefs, root, state, notesList, setDialog } from "../core/store";
 import { attachmentDir, pastedName } from "../editor/attachments";
 import { builtinPlugins, setPluginEnabled, setBuiltinEnabled, loadedPlugins } from "../core/plugins";
 import { templatesDir } from "../plugins/templates";
+import { dailyPath } from "../plugins/daily";
 import { ComboBox, Field, Modal, Segmented } from "./primitives";
 
 const ACCENTS = ["#6d5efc", "#2f6fde", "#0e9f8e", "#1f9d55", "#e8590c", "#d6336c", "#7c3aed", "#475569"];
@@ -49,6 +113,28 @@ function FolderInput(props: { value: string; placeholder: string; onChange: (v: 
       <input class="input" value={props.value} placeholder={props.placeholder} onChange={(e) => props.onChange(e.currentTarget.value.trim())} />
       <button class="btn" type="button" onClick={browse}><FolderOpen size={15} /> Browse</button>
     </div>
+  );
+}
+
+/** Records a global shortcut in Electron accelerator syntax ("CommandOrControl+Shift+Space"). */
+function ShortcutInput(props: { value: string; onChange: (v: string) => void }) {
+  const show = (v: string) => v.replace("CommandOrControl", navigator.platform.startsWith("Mac") ? "Cmd" : "Ctrl").replace(/\+/g, " + ");
+  return (
+    <input
+      class="input"
+      readOnly
+      value={props.value ? show(props.value) : ""}
+      placeholder="Off — click and press keys"
+      onKeyDown={(e) => {
+        e.preventDefault();
+        if (e.key === "Escape" || e.key === "Backspace") return props.onChange("");
+        if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+        const mods = [e.ctrlKey || e.metaKey ? "CommandOrControl" : "", e.altKey ? "Alt" : "", e.shiftKey ? "Shift" : ""].filter(Boolean);
+        if (!mods.length) return;
+        const key = e.code === "Space" ? "Space" : e.key.length === 1 ? e.key.toUpperCase() : e.key;
+        props.onChange([...mods, key].join("+"));
+      }}
+    />
   );
 }
 
@@ -110,10 +196,18 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
   const [q, setQ] = createSignal("");
   const [plugins, { refetch }] = createResource(() => ipc.plugins().catch(() => []));
   const [fonts] = createResource(() => ipc.fonts().catch(() => [] as string[]));
+  const [docThemes] = createResource(() => ipc.themes().catch(() => []));
+  const [spellList] = createResource(() => spellcheckLanguages().catch(() => [] as string[]));
+  const spellLangs = () => [...(spellList() ?? [])].sort((a, b) => languageLabel(a).localeCompare(languageLabel(b)));
   const tabs = [
     { id: "appearance", label: "Appearance", icon: <Paintbrush size={16} /> },
     { id: "editor", label: "Editor", icon: <Type size={16} /> },
+    { id: "language", label: "Languages", icon: <Languages size={16} /> },
     { id: "files", label: "Files & links", icon: <Files size={16} /> },
+    { id: "daily", label: "Daily notes & capture", icon: <CalendarDays size={16} /> },
+    { id: "history", label: "History & snapshots", icon: <History size={16} /> },
+    { id: "sync", label: "Sync", icon: <RefreshCw size={16} /> },
+    { id: "flashcards", label: "Flashcards", icon: <GraduationCap size={16} /> },
     { id: "pdf", label: "PDF & preview", icon: <FileDown size={16} /> },
     { id: "plugins", label: "Plugins", icon: <Puzzle size={16} /> },
     { id: "keys", label: "Shortcuts", icon: <Keyboard size={16} /> },
@@ -166,20 +260,51 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
         </nav>
         <div class="settings-body" ref={body}>
           <Section id="appearance">
-            <Field label="Theme">
+            <Field label="Mode">
               <Segmented value={prefs.themeMode} onChange={(v) => setPrefs("themeMode", v)}
                 options={[{ value: "light", label: "Light" }, { value: "system", label: "System" }, { value: "dark", label: "Dark" }]} />
             </Field>
-            <Field label="Accent color">
+            <ThemePicker mode="light" />
+            <ThemePicker mode="dark" />
+            <Field label="Accent color" hint="Theme = the accent the selected theme comes with.">
               <div class="accent-row">
+                <button class="btn small" classList={{ active: !prefs.accent }} onClick={() => setPrefs("accent", "")}>Theme</button>
                 <For each={ACCENTS}>
                   {(c) => (
                     <button class="accent-dot" classList={{ active: prefs.accent === c }} style={{ background: c }} onClick={() => setPrefs("accent", c)} />
                   )}
                 </For>
-                <input type="color" value={prefs.accent} onInput={(e) => setPrefs("accent", e.currentTarget.value)} title="Custom" />
+                <input type="color" value={prefs.accent || "#6d5efc"} onInput={(e) => setPrefs("accent", e.currentTarget.value)} title="Custom" />
               </div>
             </Field>
+            <Field label="Custom themes & CSS snippets" hint="Put .css files in a themes or snippets folder (see Help → UI themes). Vault folders apply to this vault only.">
+              <div class="row gap wrap">
+                <Show when={root()}>
+                  <button class="btn" onClick={() => openCssFolder("themes", root())}><FolderOpen size={14} /> Vault themes</button>
+                  <button class="btn" onClick={() => openCssFolder("snippets", root())}><FolderOpen size={14} /> Vault snippets</button>
+                </Show>
+                <button class="btn" onClick={() => openCssFolder("themes", null)}><FolderOpen size={14} /> Global themes</button>
+                <button class="btn" onClick={() => openCssFolder("snippets", null)}><FolderOpen size={14} /> Global snippets</button>
+                <button class="btn" onClick={() => void loadUserCss(root())}><RefreshCw size={14} /> Reload</button>
+              </div>
+            </Field>
+            <Show when={snippets().length}>
+              <Field label="CSS snippets">
+                <div class="snippet-list">
+                  <For each={snippets()}>
+                    {(sn) => (
+                      <Check
+                        checked={prefs.enabledSnippets.includes(sn.id)}
+                        onChange={(on) => setPrefs("enabledSnippets", (cur) => (on ? [...cur, sn.id] : cur.filter((x) => x !== sn.id)))}
+                        hint={sn.path}
+                      >
+                        {sn.id} <span class="badge">{sn.source}</span>
+                      </Check>
+                    )}
+                  </For>
+                </div>
+              </Field>
+            </Show>
             <Field label={`Interface zoom — ${Math.round(prefs.uiZoom * 100)}%`} hint="Scales the whole window (Ctrl+= / Ctrl+- also work).">
               <input type="range" min="0.75" max="1.5" step="0.05" value={prefs.uiZoom} onInput={(e) => setPrefs("uiZoom", Number(e.currentTarget.value))} />
             </Field>
@@ -193,7 +318,7 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
               <Segmented value={prefs.editorMode} onChange={(v) => setPrefs("editorMode", v as "live" | "source")}
                 options={[{ value: "live", label: "Live preview" }, { value: "source", label: "Source" }]} />
             </Field>
-            <Field label="Editor font" hint="Empty = Vazirmatn / Inter. A note's theme can still set its own body font.">
+            <Field label="Editor font" hint="Empty = Inter, with a bundled font for every other script. A note's theme can still set its own body font.">
               <div class="row gap">
                 <ComboBox value={prefs.editorFont} placeholder="Default" options={fonts() ?? []} onChange={(v) => setPrefs("editorFont", v)}
                   renderOption={(o) => <span style={{ "font-family": `"${o}"` }}>{o}</span>} />
@@ -214,7 +339,7 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
                 options={[{ value: "2", label: "2" }, { value: "4", label: "4" }, { value: "8", label: "8" }]} />
             </Field>
             <Check checked={prefs.autoPair} onChange={(v) => setPrefs("autoPair", v)}>Auto-close brackets and quotes</Check>
-            <Check checked={prefs.spellcheck} onChange={(v) => setPrefs("spellcheck", v)} hint="English and Persian; right-click a marked word for suggestions.">
+            <Check checked={prefs.spellcheck} onChange={(v) => setPrefs("spellcheck", v)} hint="In the languages chosen under Languages; right-click a marked word for suggestions.">
               Check spelling
             </Check>
             <Check checked={prefs.vimMode} onChange={(v) => setPrefs("vimMode", v)}>Vim key bindings</Check>
@@ -222,6 +347,36 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
             <Check checked={prefs.lineNumbers} onChange={(v) => setPrefs("lineNumbers", v)}>Show line numbers</Check>
             <Field label={`Autosave delay — ${prefs.autosaveMs} ms`}>
               <input type="range" min="200" max="3000" step="100" value={prefs.autosaveMs} onInput={(e) => setPrefs("autosaveMs", Number(e.currentTarget.value))} />
+            </Field>
+          </Section>
+
+          <Section id="language">
+            <Field
+              label="Language of new notes"
+              hint="Automatic: each note's language is detected from its text. A note's own `lang:` property always wins. The language sets the text direction, hyphenation, quotation marks, fonts and digits in the PDF."
+            >
+              <select class="input" value={prefs.defaultLanguage} onChange={(e) => setPrefs("defaultLanguage", e.currentTarget.value)}>
+                <For each={languageOptions()}>{(o) => <option value={o.value}>{o.label}</option>}</For>
+              </select>
+            </Field>
+            <Field
+              label="Spell-checking languages"
+              hint={spellLangs().length ? "None selected = the system language and English." : "On this system the spell checker follows the system's languages."}
+            >
+              <Show when={spellLangs().length}>
+                <div class="lang-grid">
+                  <For each={spellLangs()}>
+                    {(l) => (
+                      <Check
+                        checked={prefs.spellcheckLanguages.includes(l)}
+                        onChange={(on) => setPrefs("spellcheckLanguages", (cur) => (on ? [...cur, l] : cur.filter((x) => x !== l)))}
+                      >
+                        {languageLabel(l)}
+                      </Check>
+                    )}
+                  </For>
+                </div>
+              </Show>
             </Field>
           </Section>
 
@@ -276,7 +431,49 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
             </Field>
           </Section>
 
+          <Section id="daily">
+            <Field label="Daily notes folder" hint="Empty = the vault's top level.">
+              <FolderInput value={prefs.dailyFolder} placeholder="Daily" onChange={(v) => setPrefs("dailyFolder", v)} />
+            </Field>
+            <Field label="File name format" hint="YYYY year, MM month, DD day, ddd weekday, MMMM month name, ww week; [text] is kept as is; / makes subfolders.">
+              <input class="input" value={prefs.dailyFormat} placeholder="YYYY-MM-DD" onChange={(e) => setPrefs("dailyFormat", e.currentTarget.value.trim() || "YYYY-MM-DD")} />
+            </Field>
+            <div class="field-hint attach-preview">→ {dailyPath(new Date())}</div>
+            <Field label="Template" hint="A note whose text new daily notes start with ({{date}}, {{title}}, {{time}} are filled in).">
+              <input class="input" list="settings-notes" value={prefs.dailyTemplate} placeholder="none" onChange={(e) => setPrefs("dailyTemplate", e.currentTarget.value.trim())} />
+              <datalist id="settings-notes"><For each={notesList()}>{(n) => <option value={n} />}</For></datalist>
+            </Field>
+            <Field label="Weeks start on">
+              <select class="input" value={String(prefs.weekStart)} onChange={(e) => setPrefs("weekStart", Number(e.currentTarget.value))}>
+                <option value="1">Monday</option>
+                <option value="0">Sunday</option>
+                <option value="6">Saturday</option>
+              </select>
+            </Field>
+            <Field label="Quick capture shortcut" hint="Works from any app, even when NoteZ is in the background: a small window takes a thought and adds it to a note. Click and press the keys; Esc clears.">
+              <ShortcutInput value={prefs.captureShortcut} onChange={(v) => setPrefs("captureShortcut", v)} />
+            </Field>
+            <Field label="Capture to">
+              <select class="input" value={prefs.captureTarget === "daily" ? "daily" : "note"} onChange={(e) => setPrefs("captureTarget", e.currentTarget.value === "daily" ? "daily" : "Inbox.md")}>
+                <option value="daily">Today's daily note</option>
+                <option value="note">A note…</option>
+              </select>
+            </Field>
+            <Show when={prefs.captureTarget !== "daily"}>
+              <Field label="Capture note">
+                <input class="input" list="settings-notes" value={prefs.captureTarget} placeholder="Inbox.md" onChange={(e) => setPrefs("captureTarget", e.currentTarget.value.trim() || "Inbox.md")} />
+              </Field>
+            </Show>
+            <Field label="Captured line" hint="{{text}} = what you typed; {{date}}, {{time}}, {{date:FORMAT}} as in templates.">
+              <input class="input" value={prefs.captureFormat} placeholder="- {{time}} {{text}}" onChange={(e) => setPrefs("captureFormat", e.currentTarget.value || "- {{time}} {{text}}")} />
+            </Field>
+          </Section>
           <Section id="pdf">
+            <Field label="Theme for new notes" hint="The document theme written into new notes (see Help → PDF themes).">
+              <select class="input" value={prefs.newNoteTheme} onChange={(e) => setPrefs("newNoteTheme", e.currentTarget.value)}>
+                <For each={docThemes() ?? [{ id: prefs.newNoteTheme, name: prefs.newNoteTheme }]}>{(t) => <option value={t.id}>{t.name}</option>}</For>
+              </select>
+            </Field>
             <Field label="Export PDF to">
               <Segmented value={!prefs.pdfFolder ? "root" : prefs.pdfFolder === "./" ? "note" : "folder"}
                 onChange={(v) => setPrefs("pdfFolder", v === "root" ? "" : v === "note" ? "./" : prefs.pdfFolder && prefs.pdfFolder !== "./" ? prefs.pdfFolder : (root() ?? ""))}
@@ -293,6 +490,41 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
               <Segmented value={String(prefs.previewZoom)} onChange={(v) => setPrefs("previewZoom", Number(v))}
                 options={[{ value: "0", label: "Fit width" }, { value: "0.75", label: "75%" }, { value: "1", label: "100%" }, { value: "1.25", label: "125%" }]} />
             </Field>
+          </Section>
+
+          <Section id="history">
+            <HistorySettings />
+          </Section>
+
+          <Section id="sync">
+            <SyncSettingsView />
+          </Section>
+
+          <Section id="flashcards">
+            <p class="field-hint">
+              Cards come from notes tagged <code>#flashcards</code> and are scheduled with FSRS. Review progress is kept in
+              <code>.notez/srs.json</code>; your notes are not changed.
+            </p>
+            <Field label={`Desired retention — ${Math.round(prefs.srsRetention * 100)}%`}
+              hint="How likely you should be to remember a card when it comes up. Higher means more reviews; 90% suits most people.">
+              <input type="range" min="0.7" max="0.99" step="0.01" value={prefs.srsRetention} onInput={(e) => setPrefs("srsRetention", Number(e.currentTarget.value))} />
+            </Field>
+            <Field label="New cards per day">
+              <input class="input narrow" type="number" min="0" value={prefs.srsNewPerDay} onChange={(e) => setPrefs("srsNewPerDay", Math.max(0, Math.round(Number(e.currentTarget.value) || 0)))} />
+            </Field>
+            <Field label="Maximum interval (days)">
+              <input class="input narrow" type="number" min="1" value={prefs.srsMaxInterval} onChange={(e) => setPrefs("srsMaxInterval", Math.max(1, Math.round(Number(e.currentTarget.value) || 36500)))} />
+            </Field>
+            <Field label="Learning steps (minutes)" hint="Short steps a new card goes through before its first interval in days, e.g. 1 10. Empty: none.">
+              <input class="input narrow" value={prefs.srsLearningSteps} onChange={(e) => setPrefs("srsLearningSteps", e.currentTarget.value.trim())} />
+            </Field>
+            <Field label="Relearning steps (minutes)" hint="Steps after you forget a card (Again), e.g. 10.">
+              <input class="input narrow" value={prefs.srsRelearningSteps} onChange={(e) => setPrefs("srsRelearningSteps", e.currentTarget.value.trim())} />
+            </Field>
+            <div class="row gap">
+              <button class="btn" onClick={() => setDialog({ kind: "review" })}>Open flashcards…</button>
+              <button class="btn" onClick={() => setDialog({ kind: "help", doc: "FLASHCARDS" })}>How to write cards</button>
+            </div>
           </Section>
 
           <Section id="plugins">
@@ -378,7 +610,7 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
                 <li>Typesetting: Typst 0.15 (embedded)</li>
                 <li>Charts & diagrams: Lilaq, CeTZ, Fletcher, Mermaid</li>
                 <li>Math: MiTeX (LaTeX syntax)</li>
-                <li>Fonts: Vazirmatn, New Computer Modern, Libertinus</li>
+                <li>Fonts: Noto (every major script), Vazirmatn, New Computer Modern, Libertinus</li>
               </ul>
             </div>
           </Show>

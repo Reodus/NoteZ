@@ -1,0 +1,30 @@
+/* @name Arctic Night
+   @mode dark
+   @description Polar-night slate blues with frost-colored accents.
+   @accent #88c0d0 */
+:root {
+  --bg: #242933;
+  --surface: #2e3440;
+  --surface-2: #323946;
+  --sidebar: #292e39;
+  --border: #3b4252;
+  --border-strong: #4c566a;
+  --fg: #eceff4;
+  --fg-soft: #d8dee9;
+  --fg-muted: #a3adbf;
+  --fg-faint: #6b7589;
+  --hover: rgba(216, 222, 233, 0.06);
+  --hover-strong: rgba(216, 222, 233, 0.1);
+  --canvas: #1f232b;
+  --code-bg: rgba(216, 222, 233, 0.07);
+  --accent-fg: #1f232b;
+  --danger: #bf616a;
+  --success: #a3be8c;
+  --warning: #ebcb8b;
+  --syn-keyword: #b48ead;
+  --syn-func: #88c0d0;
+  --syn-string: #a3be8c;
+  --syn-number: #d08770;
+  --syn-atom: #e48fa6;
+  --syn-type: #8fbcbb;
+}

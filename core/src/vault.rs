@@ -199,29 +199,32 @@ mod tests {
 
 // ------------------------------------------------------------------ search
 
-/// Normalise for matching: lowercase, unify Arabic/Persian letter variants,
-/// drop diacritics and zero-width joiners.
+/// Normalise for matching, in any language: Unicode compatibility forms
+/// unified (NFKC: Arabic presentation forms, full-width letters, ligatures),
+/// lowercase, accents on Latin/Greek/Cyrillic letters dropped (`café` finds
+/// `cafe`), Arabic-script letter variants unified (Arabic and Persian yeh,
+/// kaf, hamza forms) and Arabic diacritics, tatweel and zero-width joiners
+/// dropped. Marks that change the letter in Indic or other scripts are kept.
 pub fn normalize_text(s: &str) -> String {
-    s.chars()
+    use unicode_normalization::UnicodeNormalization;
+    let folded: String = s
+        .nfkd()
+        .filter(|c| !matches!(*c as u32, 0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF))
+        .collect();
+    folded
+        .nfc()
         .filter_map(|c| match c {
             'ي' | 'ى' => Some('ی'),
             'ك' => Some('ک'),
             'ة' => Some('ه'),
-            'أ' | 'إ' | 'آ' => Some('ا'),
+            'أ' | 'إ' | 'آ' | 'ٱ' => Some('ا'),
             'ۀ' => Some('ه'),
-            '\u{064B}'..='\u{065F}' | '\u{0670}' | '\u{200C}' | '\u{200D}' => None,
+            'ؤ' => Some('و'),
+            '\u{064B}'..='\u{065F}' | '\u{0670}' | '\u{0640}' | '\u{200C}' | '\u{200D}' => None,
             c => Some(c),
         })
         .flat_map(char::to_lowercase)
         .collect()
-}
-
-#[derive(Serialize)]
-pub struct SearchHit {
-    pub path: String,
-    /// 1-based; 0 means the file name matched.
-    pub line: usize,
-    pub snippet: String,
 }
 
 fn walk_notes(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
@@ -265,6 +268,29 @@ pub fn all_files(root: &Path) -> Vec<String> {
     v
 }
 
+/// Every file under `dir` (hidden ones too), vault-relative, sorted.
+/// Symbolic links to folders are not followed.
+pub fn every_file(root: &Path, dir: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        let Ok(rd) = fs::read_dir(dir) else { return };
+        for item in rd.flatten() {
+            let Ok(ft) = item.file_type() else { continue };
+            let p = item.path();
+            if ft.is_dir() {
+                walk(root, &p, out);
+            } else if ft.is_file() || (ft.is_symlink() && p.is_file()) {
+                if let Ok(rel) = p.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    let mut v = Vec::new();
+    walk(root, dir, &mut v);
+    v.sort();
+    v
+}
+
 pub fn all_notes(root: &Path) -> Vec<String> {
     let mut v = Vec::new();
     walk_notes(root, root, &mut v);
@@ -285,15 +311,18 @@ pub struct Index {
     docs: std::collections::BTreeMap<String, Doc>,
 }
 
-struct Doc {
-    text: String,
-    norm: Vec<String>,
+pub struct Doc {
+    pub text: String,
+    /// `normalize_text` of every line.
+    pub norm: Vec<String>,
+    pub meta: crate::query::Meta,
 }
 
 impl Doc {
     fn new(text: String) -> Self {
         let norm = text.lines().map(normalize_text).collect();
-        Doc { text, norm }
+        let meta = crate::query::meta(&text);
+        Doc { text, norm, meta }
     }
 }
 
@@ -348,7 +377,7 @@ impl Index {
         self.docs.get(rel).map(|d| d.text.as_str())
     }
 
-    fn iter(&self, exclude: &[String]) -> impl Iterator<Item = (&String, &Doc)> {
+    pub fn iter(&self, exclude: &[String]) -> impl Iterator<Item = (&String, &Doc)> {
         self.docs.iter().filter(move |(k, _)| !excluded(k, exclude))
     }
 }
@@ -356,56 +385,6 @@ impl Index {
 /// `rel` lies inside one of the `exclude` folders.
 pub fn excluded(rel: &str, exclude: &[String]) -> bool {
     exclude.iter().map(|e| e.trim_matches('/')).filter(|e| !e.is_empty()).any(|e| rel == e || rel.starts_with(&format!("{e}/")))
-}
-
-pub fn search(idx: &Index, query: &str, limit: usize, exclude: &[String]) -> Vec<SearchHit> {
-    let q = normalize_text(query.trim());
-    if q.is_empty() {
-        return vec![];
-    }
-    let mut hits = Vec::new();
-    for (rel, doc) in idx.iter(exclude) {
-        if normalize_text(rel).contains(&q) {
-            hits.push(SearchHit { path: rel.clone(), line: 0, snippet: rel.clone() });
-        }
-        for (i, (line, norm)) in doc.text.lines().zip(&doc.norm).enumerate() {
-            if norm.contains(&q) {
-                let snippet: String = line.trim().chars().take(160).collect();
-                hits.push(SearchHit { path: rel.clone(), line: i + 1, snippet });
-                if hits.len() >= limit {
-                    return hits;
-                }
-            }
-        }
-    }
-    hits
-}
-
-/// Notes that link to `target` via [[wikilink]] or a Markdown link.
-pub fn backlinks(idx: &Index, target: &str) -> Vec<SearchHit> {
-    let stem = Path::new(target).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    let file = Path::new(target).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    let needles = [
-        format!("[[{stem}]]"),
-        format!("[[{stem}|"),
-        format!("[[{stem}#"),
-        format!("[[{file}]]"),
-        format!("({target})"),
-        format!("({file})"),
-        format!("({})", target.replace(' ', "%20")),
-    ];
-    let mut hits = Vec::new();
-    for (rel, doc) in idx.iter(&[]) {
-        if rel == target {
-            continue;
-        }
-        for (i, line) in doc.text.lines().enumerate() {
-            if needles.iter().any(|n| line.contains(n.as_str())) {
-                hits.push(SearchHit { path: rel.clone(), line: i + 1, snippet: line.trim().chars().take(160).collect() });
-            }
-        }
-    }
-    hits
 }
 
 /// A free file name for `name` inside vault folder `dir` (created if missing).
@@ -489,12 +468,11 @@ mod search_tests {
         fs::write(dir.join("a.md"), "سلام دنیا\nlink [[b]]").unwrap();
         fs::write(dir.join("sub/b.md"), "hello").unwrap();
         let mut idx = Index::build(&dir);
-        assert_eq!(search(&idx, "دنيا", 10, &[]).len(), 1, "Persian variants match");
-        assert_eq!(backlinks(&idx, "sub/b.md").len(), 1);
-        assert!(search(&idx, "hello", 10, &["sub".into()]).is_empty(), "excluded folder");
+        assert_eq!(crate::query::search(&idx, "دنيا", 10, &[]).unwrap().len(), 1, "Persian variants match");
+        assert!(crate::query::search(&idx, "hello", 10, &["sub".into()]).unwrap().is_empty(), "excluded folder");
 
         idx.put("a.md", "changed");
-        assert!(search(&idx, "سلام", 10, &[]).is_empty());
+        assert!(crate::query::search(&idx, "سلام", 10, &[]).unwrap().is_empty());
         fs::write(dir.join("sub/c.md"), "fresh text").unwrap();
         fs::rename(dir.join("sub"), dir.join("moved")).unwrap();
         idx.refresh(&dir, "sub");
@@ -511,6 +489,20 @@ mod search_tests {
     fn base64_roundtrip() {
         assert_eq!(base64_decode("aGVsbG8gd29ybGQ=").unwrap(), b"hello world");
         assert_eq!(base64_decode("AP8=").unwrap(), [0u8, 255]);
+    }
+
+    #[test]
+    fn multilingual_normalisation() {
+        assert_eq!(normalize_text("Café Ñandú"), "cafe nandu");
+        assert_eq!(normalize_text("Ἀθῆναι"), "αθηναι");
+        assert_eq!(normalize_text("ＡＢＣ"), "abc");
+        assert_eq!(normalize_text("ﻻ"), "لا");
+        assert_eq!(normalize_text("مُحَمَّد"), "محمد");
+        assert_eq!(normalize_text("كتـــاب"), "کتاب");
+        // Indic vowel signs change the word: kept.
+        assert_ne!(normalize_text("कि"), normalize_text("क"));
+        assert_eq!(normalize_text("한국어"), "한국어");
+        assert_eq!(normalize_text("東京"), "東京");
     }
 
     #[test]

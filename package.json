@@ -1,17 +1,19 @@
 {
   "name": "notez",
-  "version": "0.5.8",
+  "version": "0.12.0",
   "description": "Bilingual notes with beautiful PDF export",
   "type": "module",
   "scripts": {
-    "dev": "npm run core && node electron/dev.mjs",
+    "dev": "npm run fonts && npm run core && node electron/dev.mjs",
     "web": "vite",
     "core": "node scripts/core.mjs",
     "clean": "node scripts/clean.mjs",
-    "build": "vite build && npm run core",
+    "build": "vite build && npm run fonts && npm run core",
     "start": "electron .",
     "dist": "npm run build && electron-builder --linux",
-    "dist:win": "npm run build && electron-builder --win"
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "fonts": "node scripts/fonts.mjs"
   },
   "license": "Apache-2.0",
   "devDependencies": {
@@ -68,13 +70,13 @@
       {
         "from": "core/typst-packages",
         "to": "typst-packages"
+      },
+      {
+        "from": "core/fonts/noto",
+        "to": "fonts"
       }
     ],
     "asar": true,
-    "electronLanguages": [
-      "en-US",
-      "fa"
-    ],
     "linux": {
       "target": [
         "deb",
@@ -110,11 +112,44 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null,
+      "extraResources": [
+        {
+          "from": "core/bin/notez-core",
+          "to": "notez-core"
+        }
+      ],
+      "fileAssociations": [
+        {
+          "ext": [
+            "md",
+            "typ"
+          ],
+          "name": "Note",
+          "role": "Editor"
+        }
+      ]
+    },
+    "dmg": {
+      "writeUpdateInfo": false
     }
   },
   "homepage": "https://github.com/Reodus/NoteZ",
   "repository": {
     "type": "git",
     "url": "https://github.com/Reodus/NoteZ.git"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^4.10.38"
   }
 }

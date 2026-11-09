@@ -18,7 +18,7 @@ export interface Template {
 export const TEMPLATES: Template[] = [
   {
     id: "bar", name: "Bar chart", category: "Charts", lang: "chart", description: "Compare categories",
-    code: "type: bar\ntitle: فروش ماهانه\nylabel: تعداد\ndata:\n  فروردین: 12\n  اردیبهشت: 19\n  خرداد: 15\n  تیر: 23",
+    code: "type: bar\ntitle: Monthly sales\nylabel: Units\ndata:\n  Jan: 12\n  Feb: 19\n  Mar: 15\n  Apr: 23",
   },
   {
     id: "grouped", name: "Grouped bars", category: "Charts", lang: "chart", description: "Several series side by side",
@@ -26,7 +26,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: "hbar", name: "Horizontal bars", category: "Charts", lang: "chart", description: "Rankings and long labels",
-    code: "type: hbar\ntitle: محبوب‌ترین زبان‌ها\ndata:\n  Python: 31\n  JavaScript: 27\n  Rust: 14\n  Go: 11",
+    code: "type: hbar\ntitle: Most popular languages\ndata:\n  Python: 31\n  JavaScript: 27\n  Rust: 14\n  Go: 11",
   },
   {
     id: "line", name: "Line chart", category: "Charts", lang: "chart", description: "Trends over time",
@@ -34,7 +34,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: "area", name: "Area chart", category: "Charts", lang: "chart", description: "Volume over time",
-    code: "type: area\ntitle: ترافیک سایت\nlabels: [شنبه, یکشنبه, دوشنبه, سه‌شنبه, چهارشنبه]\nvalues: [120, 180, 150, 210, 260]",
+    code: "type: area\ntitle: Site traffic\nlabels: [Mon, Tue, Wed, Thu, Fri]\nvalues: [120, 180, 150, 210, 260]",
   },
   {
     id: "scatter", name: "Scatter plot", category: "Charts", lang: "chart", description: "Correlation between values",
@@ -42,7 +42,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: "pie", name: "Pie chart", category: "Charts", lang: "chart", description: "Parts of a whole",
-    code: "type: pie\ntitle: بودجه\ndata:\n  اجاره: 40\n  غذا: 25\n  حمل‌ونقل: 15\n  سایر: 20",
+    code: "type: pie\ntitle: Budget\ndata:\n  Rent: 40\n  Food: 25\n  Transport: 15\n  Other: 20",
   },
   {
     id: "donut", name: "Donut chart", category: "Charts", lang: "chart", description: "Pie with a hole",
@@ -50,7 +50,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: "flow", name: "Flowchart", category: "Diagrams", lang: "flow", description: "Steps & decisions — simple arrow syntax",
-    code: "A([شروع]) -> B[دریافت ورودی] -> C{معتبر است؟}\nC -> D[پردازش] : بله\nC --> B : خیر\nD -> E((پایان))",
+    code: "A([Start]) -> B[Read input] -> C{Valid?}\nC -> D[Process] : yes\nC --> B : no\nD -> E((End))",
   },
   {
     id: "flow-lr", name: "Process (left → right)", category: "Diagrams", lang: "flow", description: "Horizontal pipeline",
@@ -58,11 +58,11 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: "mindmap", name: "Mind map", category: "Diagrams", lang: "mindmap", description: "Indented list → tree",
-    code: "پروژه\n  اهداف\n    کوتاه‌مدت\n    بلندمدت\n  منابع\n    بودجه\n    تیم\n  ریسک‌ها",
+    code: "Project\n  Goals\n    Short term\n    Long term\n  Resources\n    Budget\n    Team\n  Risks",
   },
   {
     id: "timeline", name: "Timeline", category: "Diagrams", lang: "timeline", description: "Events in order",
-    code: "۱۴۰۰: شروع ایده\n۱۴۰۱: نمونهٔ اولیه\n۱۴۰۲: نسخهٔ بتا\n۱۴۰۳: انتشار عمومی",
+    code: "2021: The idea\n2022: Prototype\n2023: Beta\n2024: Public release",
   },
   {
     id: "graph", name: "Graph (Fletcher)", category: "Diagrams", lang: "diagram", description: "Full control: nodes & edges",
@@ -78,7 +78,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: "shapes", name: "Shapes", category: "Shapes & Math", lang: "draw", description: "Circles, boxes, arrows (CeTZ)",
-    code: 'circle((0, 0), radius: 1, fill: rgb("#4e79d6").lighten(60%), stroke: rgb("#4e79d6"))\nrect((1.6, -1), (3.6, 1), radius: 0.2, fill: rgb("#f28e2b").lighten(60%), stroke: rgb("#f28e2b"))\nline((1, 0), (1.6, 0), mark: (end: ">"))\ncontent((0, 0), [دایره])\ncontent((2.6, 0), [Box])',
+    code: 'circle((0, 0), radius: 1, fill: rgb("#4e79d6").lighten(60%), stroke: rgb("#4e79d6"))\nrect((1.6, -1), (3.6, 1), radius: 0.2, fill: rgb("#f28e2b").lighten(60%), stroke: rgb("#f28e2b"))\nline((1, 0), (1.6, 0), mark: (end: ">"))\ncontent((0, 0), [Circle])\ncontent((2.6, 0), [Box])',
   },
   {
     id: "axes", name: "Function plot", category: "Shapes & Math", lang: "draw", description: "Draw a curve on axes",

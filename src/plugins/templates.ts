@@ -27,9 +27,52 @@ const pad = (n: number, w = 2) => String(n).padStart(w, "0");
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+const ordinal = (n: number) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th");
+
+/** ISO 8601 week number. */
+export function isoWeek(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const start = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d.getTime() - start.getTime()) / 86400000 + 1) / 7);
+}
+
+/**
+ * Read a date back from text written with `fmt` (null if it doesn't match).
+ * Only the numeric and month-name tokens carry the date; others are matched loosely.
+ */
+export function parseDate(text: string, fmt: string): Date | null {
+  const groups: string[] = [];
+  const re = fmt.replace(/\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd|dd|ww|w|WW|W|Q|HH|H|hh|h|mm|ss|A|a|[.*+?^${}()|\\]/g, (t, lit) => {
+    if (lit !== undefined) return lit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (/^[.*+?^${}()|\\]$/.test(t)) return "\\" + t;
+    groups.push(t);
+    if (t === "YYYY") return "(\\d{4})";
+    if (t === "MMMM" || t === "dddd") return "([A-Za-z]+)";
+    if (t === "MMM" || t === "ddd" || t === "dd") return "([A-Za-z]{2,3})";
+    if (t === "Do") return "(\\d{1,2})(?:st|nd|rd|th)";
+    if (t === "A" || t === "a") return "([AaPp][Mm])";
+    return "(\\d{1,2})";
+  });
+  const m = new RegExp(`^${re}$`).exec(text);
+  if (!m) return null;
+  let y = NaN, mo = 0, day = 1;
+  groups.forEach((g, i) => {
+    const v = m[i + 1];
+    if (g === "YYYY") y = Number(v);
+    else if (g === "YY") y = 2000 + Number(v);
+    else if (g === "MM" || g === "M") mo = Number(v) - 1;
+    else if (g === "MMMM" || g === "MMM") mo = MONTHS.findIndex((n) => n.toLowerCase().startsWith(v.toLowerCase().slice(0, 3)));
+    else if (g === "DD" || g === "D" || g === "Do") day = Number(v);
+  });
+  if (Number.isNaN(y) || mo < 0) return null;
+  const d = new Date(y, mo, day);
+  return d.getMonth() === mo && d.getDate() === day ? d : null;
+}
+
 /** Moment.js-style date format (the subset Obsidian templates use). */
 export function formatDate(d: Date, fmt: string): string {
-  return fmt.replace(/\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|DD|D|dddd|ddd|HH|H|hh|h|mm|ss|A|a/g, (t, lit) => {
+  return fmt.replace(/\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd|dd|ww|w|WW|W|Q|HH|H|hh|h|mm|ss|A|a/g, (t, lit) => {
     if (lit !== undefined) return lit;
     const h12 = d.getHours() % 12 || 12;
     switch (t) {
@@ -41,6 +84,11 @@ export function formatDate(d: Date, fmt: string): string {
       case "M": return String(d.getMonth() + 1);
       case "DD": return pad(d.getDate());
       case "D": return String(d.getDate());
+      case "Do": return ordinal(d.getDate());
+      case "dd": return DAYS[d.getDay()].slice(0, 2);
+      case "WW": case "ww": return pad(isoWeek(d));
+      case "W": case "w": return String(isoWeek(d));
+      case "Q": return String(Math.floor(d.getMonth() / 3) + 1);
       case "dddd": return DAYS[d.getDay()];
       case "ddd": return DAYS[d.getDay()].slice(0, 3);
       case "HH": return pad(d.getHours());

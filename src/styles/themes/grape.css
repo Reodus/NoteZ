@@ -1,0 +1,30 @@
+/* @name Grape
+   @mode dark
+   @description Purple-tinted dark theme with vivid, high-energy syntax colors.
+   @accent #bd93f9 */
+:root {
+  --bg: #1d1b26;
+  --surface: #262433;
+  --surface-2: #2b2939;
+  --sidebar: #211f2c;
+  --border: #353247;
+  --border-strong: #454160;
+  --fg: #f4f2fb;
+  --fg-soft: #d7d3e8;
+  --fg-muted: #9d97b8;
+  --fg-faint: #67627e;
+  --hover: rgba(230, 220, 255, 0.06);
+  --hover-strong: rgba(230, 220, 255, 0.1);
+  --canvas: #17151f;
+  --code-bg: rgba(230, 220, 255, 0.07);
+  --accent-fg: #17151f;
+  --danger: #ff5c8a;
+  --success: #50fa7b;
+  --warning: #f1fa8c;
+  --syn-keyword: #ff79c6;
+  --syn-func: #8be9fd;
+  --syn-string: #f1fa8c;
+  --syn-number: #bd93f9;
+  --syn-atom: #ffb86c;
+  --syn-type: #50fa7b;
+}

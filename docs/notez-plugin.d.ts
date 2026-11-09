@@ -1,4 +1,4 @@
-// NoteZ plugin API — type definitions (API version 1.0.0).
+// NoteZ plugin API — type definitions (API version 1.1.0).
 // Use with JSDoc in main.js:  /** @param {import("./notez-plugin").NoteZApi} api */
 
 import type { Extension } from "@codemirror/state";
@@ -29,12 +29,36 @@ export interface BlockRenderer {
   preview?: (code: string, ctx: { dark: boolean }) => string | Promise<string>;
 }
 
+/** A "/" menu command. Typed as `/id arg1 arg2…`; the last argument takes the rest of the line. */
+export interface SlashCommand {
+  /** Letters, digits and "-": what follows the "/". */
+  id: string;
+  title: string;
+  icon?: string;
+  /** Menu group (default "Plugins"). */
+  section?: string;
+  /** More search words, in any language. */
+  keys?: string;
+  /** Shown at the right of the menu entry. */
+  hint?: string;
+  /** Arguments; `options` completes one (e.g. a list of names). */
+  args?: { name: string; options?: () => string[] | Promise<string[]> }[];
+  mdOnly?: boolean;
+  typOnly?: boolean;
+  /** The typed "/command args" is already removed when this runs. */
+  run: (view: EditorView, args: string[]) => void;
+}
+
+export interface SearchHit { path: string; line: number; snippet: string; marks?: string[] }
+export interface NoteMeta { tags: string[]; icon?: string; cover?: string; title?: string; aliases?: string[] }
+
 export interface Events {
   "vault:opened": { root: string };
   "vault:changed": void;
   "note:opened": { path: string };
   "note:changed": { path: string; content: string };
   "note:saved": { path: string };
+  "note:reloaded": { path: string; content: string };
   "preview:rendered": { path: string; pages: number; millis: number; errors: number };
 }
 
@@ -47,8 +71,11 @@ export interface NoteZApi {
   statusBar: { addItem(s: StatusItem): Disposer };
   panels: { add(p: Panel): Disposer };
   blocks: { register(r: BlockRenderer): Disposer };
+  slash: { register(c: SlashCommand): Disposer };
   editor: {
     registerExtension(e: Extension): Disposer;
+    /** A CodeMirror completion source, asked after the built-in ones. */
+    registerCompletion(source: import("@codemirror/autocomplete").CompletionSource): Disposer;
     view(): EditorView | null;
     insert(text: string): void;
     insertBlock(text: string): void;
@@ -64,7 +91,12 @@ export interface NoteZApi {
     root(): string | null;
     read(path: string): Promise<string>;
     write(path: string, content: string): Promise<void>;
-    search(q: string): Promise<unknown[]>;
+    /** Search with the full query syntax (docs/SEARCH.md). */
+    search(q: string): Promise<SearchHit[]>;
+    /** Every tag with its note count. */
+    tags(): Promise<{ tag: string; count: number }[]>;
+    /** Tags, icon, cover, title and aliases of notes that have them, by path. */
+    meta(): Promise<Record<string, NoteMeta>>;
   };
   ui: {
     notify(msg: string, kind?: "info" | "success" | "error"): void;

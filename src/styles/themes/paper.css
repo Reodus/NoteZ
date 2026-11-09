@@ -1,0 +1,26 @@
+/* @name Paper
+   @mode light
+   @description Warm sepia paper with brown ink — easy on the eyes for long writing sessions.
+   @accent #a0612b */
+:root {
+  --bg: #f3ecdf;
+  --surface: #fbf7ef;
+  --surface-2: #f7f1e5;
+  --sidebar: #efe6d6;
+  --border: #e2d6c2;
+  --border-strong: #d2c3aa;
+  --fg: #3b2f22;
+  --fg-soft: #54463a;
+  --fg-muted: #85735f;
+  --fg-faint: #b3a28b;
+  --hover: rgba(90, 60, 20, 0.06);
+  --hover-strong: rgba(90, 60, 20, 0.1);
+  --canvas: #e6dccb;
+  --code-bg: rgba(90, 60, 20, 0.07);
+  --syn-keyword: #8a3f8f;
+  --syn-func: #2d5f9a;
+  --syn-string: #4f7a2a;
+  --syn-number: #b0571c;
+  --syn-atom: #a33a5a;
+  --syn-type: #1f7a7a;
+}

@@ -1,11 +1,13 @@
 // Built-in plugin: the app's standard commands and status items.
 import type { BuiltinPlugin } from "../core/plugins";
+import { activeWords } from "../core/words";
 import {
   state, setState, setDialog, closeTab, saveAll, prefs, setPrefs, setSidebarOpen, sidebarOpen, createNote,
   setRightTab, focusMode, setFocusMode, newNoteDir,
 } from "../core/store";
 import { chooseVault } from "../ui/Welcome";
 import { graphOpen, setGraphOpen } from "../ui/GraphView";
+import { runSync, syncConfigured, takeSnapshot } from "../core/safety";
 
 export const corePlugin: BuiltinPlugin = {
   id: "core.commands",
@@ -14,6 +16,7 @@ export const corePlugin: BuiltinPlugin = {
   onload(api) {
     const c = api.commands.register;
     c({ id: "note.new", title: "New note", key: "Mod-n", run: () => void createNote(newNoteDir(), undefined, prefs.defaultNoteType) });
+    c({ id: "base.new", title: "New database (.base)", run: () => void import("../ui/fileMenu").then((m) => m.newBaseIn(newNoteDir())) });
     c({ id: "note.newTypst", title: "New Typst note", run: () => void createNote(newNoteDir(), "Untitled", "typ") });
     c({ id: "note.save", title: "Save all", key: "Mod-s", run: saveAll });
     c({ id: "note.close", title: "Close tab", key: "Mod-w", run: () => state.active && closeTab(state.active) });
@@ -52,6 +55,22 @@ export const corePlugin: BuiltinPlugin = {
     c({ id: "layout.focus", title: "Toggle focus mode (text only)", key: "Mod-Shift-Enter", run: () => setFocusMode(!focusMode()) });
     c({ id: "graph.toggle", title: "Toggle graph view", key: "Mod-g", run: () => setGraphOpen(!graphOpen()) });
     c({ id: "settings.open", title: "Settings", key: "Mod-,", run: () => setDialog({ kind: "settings" }) });
+    c({ id: "help.open", title: "Help: user guide", key: "F1", run: () => setDialog({ kind: "help" }) });
+    c({ id: "help.markdown", title: "Help: Markdown syntax", run: () => setDialog({ kind: "help", doc: "MARKDOWN" }) });
+    c({ id: "help.themes", title: "Help: UI themes", run: () => setDialog({ kind: "help", doc: "UI-THEMES" }) });
+    c({ id: "help.pdf-themes", title: "Help: PDF themes", run: () => setDialog({ kind: "help", doc: "PDF-THEMES" }) });
+    c({ id: "help.languages", title: "Help: languages", run: () => setDialog({ kind: "help", doc: "LANGUAGES" }) });
+    c({ id: "srs.review", title: "Review flashcards", key: "Mod-Shift-r", run: () => setDialog({ kind: "review", deck: null }) });
+    c({ id: "srs.decks", title: "Flashcards: decks and statistics", run: () => setDialog({ kind: "review" }) });
+    c({ id: "help.flashcards", title: "Help: flashcards", run: () => setDialog({ kind: "help", doc: "FLASHCARDS" }) });
+    c({ id: "help.pdf", title: "Help: PDF annotations", run: () => setDialog({ kind: "help", doc: "PDF-ANNOTATIONS" }) });
+    c({ id: "help.databases", title: "Help: databases & queries", run: () => setDialog({ kind: "help", doc: "DATABASES" }) });
+    c({ id: "history.note", title: "File history…", run: () => setDialog({ kind: "history", tab: "note" }) });
+    c({ id: "history.deleted", title: "Recover deleted notes…", run: () => setDialog({ kind: "history", tab: "deleted" }) });
+    c({ id: "history.snapshots", title: "Vault snapshots…", run: () => setDialog({ kind: "history", tab: "snapshots" }) });
+    c({ id: "history.snapshotNow", title: "Take a vault snapshot now", run: () => void takeSnapshot() });
+    c({ id: "sync.now", title: "Sync now", run: () => void (syncConfigured() ? runSync(true) : setDialog({ kind: "settings", tab: "sync" })) });
+    c({ id: "help.history", title: "Help: history, snapshots & sync", run: () => setDialog({ kind: "help", doc: "HISTORY" }) });
     c({ id: "doc.themes", title: "Choose document theme…", run: () => setDialog({ kind: "themes" }) });
     c({ id: "doc.page", title: "Page setup…", run: () => setDialog({ kind: "page" }) });
     c({ id: "doc.styles", title: "Show styles panel", run: () => (setPrefs("layout", "split"), setRightTab("styles")) });
@@ -83,7 +102,7 @@ export const readingTimePlugin: BuiltinPlugin = {
       render: () => {
         const note = api.notes.active();
         if (!note) return "";
-        const words = (note.content.match(/[\p{L}\p{N}‌]+/gu) ?? []).length;
+        const words = activeWords();
         const min = Math.max(1, Math.round(words / 200));
         return `${min} min read`;
       },

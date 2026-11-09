@@ -1,0 +1,20 @@
+name: Devanagari
+description: Hindi, Marathi, Nepali and Sanskrit documents — Noto Serif Devanagari with roomy line spacing for vowel signs.
+sample: hi
+page:
+  paper: a4
+  margin: 2.5cm
+  numbering: "1"
+  digits: auto
+  footer: { center: "{page}" }
+styles:
+  body: { font: Noto Serif Devanagari, fonts: { latin: Noto Serif }, size: 11.5pt, line-spacing: 1.7, align: justify, space-after: 0.8em }
+  title: { font: Noto Sans Devanagari, size: 25pt, weight: bold, color: "#7a2e0e", align: center, space-after: 1.6em }
+  subtitle: { size: 14pt, color: "#7a6a5e", align: center }
+  h1: { font: Noto Sans Devanagari, size: 18pt, weight: bold, color: "#7a2e0e", space-before: 1.4em, space-after: 0.7em }
+  h2: { font: Noto Sans Devanagari, size: 14.5pt, weight: bold, color: "#a3461d", space-before: 1.2em, space-after: 0.6em }
+  h3: { font: Noto Sans Devanagari, size: 12.5pt, weight: bold, space-before: 1em, space-after: 0.5em }
+  quote: { color: "#4a3d33", background: "#fbf4ee", border: "#d0753f" }
+  code: { size: 9.5pt, background: "#f7f5f3" }
+  link: { color: "#a3461d" }
+  caption: { size: 9.5pt, color: "#7a6a5e" }

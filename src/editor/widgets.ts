@@ -20,8 +20,73 @@ const cache = new Map<string, { html?: string; error?: string }>();
 const lastByStart = new Map<number, string>();
 const inflight = new Map<string, Promise<void>>();
 
+/** Database blocks: live, interactive views (src/ui/BaseView.tsx). */
+export const DATA_BLOCKS = new Set(["base", "query"]);
+
 export function canRender(lang: string) {
-  return NATIVE_BLOCKS.has(lang) || !!app.blocks.get(lang)?.preview;
+  return NATIVE_BLOCKS.has(lang) || DATA_BLOCKS.has(lang) || !!app.blocks.get(lang)?.preview;
+}
+
+/** A ```base / ```query block: the view, a label, and "Edit" to show the source. */
+class DataBlock extends WidgetType {
+  private dispose?: () => void;
+  private gone = false;
+  constructor(
+    readonly lang: "base" | "query",
+    readonly code: string,
+    readonly codeFrom: number,
+  ) {
+    super();
+  }
+  eq(o: DataBlock) {
+    return o.lang === this.lang && o.code === this.code;
+  }
+  toDOM(view: EditorView) {
+    const outer = document.createElement("div");
+    outer.className = "cm-nz-block-outer";
+    const wrap = document.createElement("div");
+    wrap.className = "cm-nz-block-preview cm-nz-data-block";
+    const label = document.createElement("button");
+    label.className = "cm-nz-block-tag";
+    label.textContent = `${this.lang} · edit`;
+    label.title = "Show the source";
+    label.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      view.dispatch({ selection: { anchor: this.codeFrom }, scrollIntoView: false });
+      view.focus();
+    });
+    const body = document.createElement("div");
+    body.className = "cm-nz-block-body";
+    wrap.append(label, body);
+    outer.append(wrap);
+    const lang = this.lang;
+    const code = this.code;
+    // Toolbar edits (sort, columns…) rewrite the block's code.
+    const onSrc = (next: string) => {
+      const b = findBlocks(view.state).find((x) => x.lang === lang && x.code === code);
+      if (!b) return;
+      const first = view.state.doc.lineAt(b.codeFrom);
+      const last = view.state.doc.lineAt(b.to).number - 1;
+      const to = view.state.doc.line(last).to;
+      view.dispatch({ changes: { from: first.from, to, insert: next.replace(/\n+$/, "") } });
+    };
+    void Promise.all([import("../ui/BaseView"), import("../core/store")]).then(([m, st]) => {
+      if (this.gone) return;
+      this.dispose = m.mountBase(body, { kind: lang, src: code, thisPath: st.state.active, onSrc: lang === "base" ? onSrc : undefined, embedded: true });
+    });
+    return outer;
+  }
+  destroy() {
+    this.gone = true;
+    this.dispose?.();
+  }
+  get estimatedHeight() {
+    return 260;
+  }
+  ignoreEvent() {
+    return true;
+  }
 }
 
 async function render(lang: string, code: string, dark: boolean): Promise<void> {
@@ -161,7 +226,9 @@ function decorations(state: EditorState): DecorationSet {
   const sel = state.selection.main;
   const decos: Range<Decoration>[] = [];
   for (const b of findBlocks(state)) {
-    const widget = new BlockPreview(b.lang, b.code, b.codeFrom, b.from, dark);
+    const widget = DATA_BLOCKS.has(b.lang)
+      ? new DataBlock(b.lang as "base" | "query", b.code, b.codeFrom)
+      : new BlockPreview(b.lang, b.code, b.codeFrom, b.from, dark);
     const cursorInside = sel.to >= b.from && sel.from <= b.to;
     if (cursorInside) {
       decos.push(Decoration.widget({ widget, block: true, side: 1 }).range(b.to));

@@ -9,6 +9,8 @@ export type Disposer = () => void;
 export interface Events {
   "vault:opened": { root: string };
   "vault:changed": void;
+  /** A flashcard was graded (or a grade undone). */
+  "srs:changed": void;
   "note:opened": { path: string };
   "note:changed": { path: string; content: string };
   "note:saved": { path: string };
@@ -175,6 +177,31 @@ export interface Panel {
   label?: boolean;
 }
 
+/** A command of the "/" menu. */
+export interface SlashCommand {
+  /** The word typed after "/", e.g. "table" for /table. Letters, digits, "-". */
+  id: string;
+  title: string;
+  /** One or two characters (or an emoji) shown in front of the title. */
+  icon?: string;
+  /** Group in the menu (default "Plugins"). */
+  section?: string;
+  /** More words that find the command, in any language. */
+  keys?: string;
+  /** Shown at the right, e.g. the Markdown it inserts. */
+  hint?: string;
+  /**
+   * Arguments typed after the command, separated by spaces (the last one
+   * takes the rest of the line). `options` lists completions for one.
+   */
+  args?: { name: string; options?: () => string[] | Promise<string[]> }[];
+  /** Only in Markdown notes / only in Typst notes. */
+  mdOnly?: boolean;
+  typOnly?: boolean;
+  /** Run with the arguments typed (missing ones are ""). The "/command" text is already removed. */
+  run: (view: import("@codemirror/view").EditorView, args: string[]) => void;
+}
+
 export interface BlockContext {
   dark: boolean;
 }
@@ -209,6 +236,7 @@ export function dismissToast(id: number) {
 }
 
 const blockRegistry = registry<BlockRenderer & { id: string }>();
+const completionRegistry = registry<{ id: string; source: import("@codemirror/autocomplete").CompletionSource }>();
 const [extensions, setExtensions] = createSignal<Extension[]>([]);
 
 export const app = {
@@ -217,6 +245,10 @@ export const app = {
   toolbar: registry<ToolbarButton>(),
   statusBar: registry<StatusItem>(),
   panels: registry<Panel>(),
+  /** Extra "/" commands (plugins). */
+  slash: registry<SlashCommand>(),
+  /** Extra completion sources for the editor (plugins). */
+  completions: completionRegistry,
   blocks: {
     items: blockRegistry.items,
     register(r: BlockRenderer): Disposer {
