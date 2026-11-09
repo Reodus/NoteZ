@@ -1,0 +1,19 @@
+[
+  ["nasm", "section .text\nglobal _start\n_start:\n    mov rax, 0x3c   ; exit\n    mov byte [rdi], 0FFh\n    lock xadd [rbx], eax\n    syscall\nmsg db \"hi\", 10\nmain PROC",
+    [["section", "directive"], ["global", "directive"], ["_start", "plain"], ["_start", "label"], ["mov", "mnemonic"], ["rax", "register"],
+     ["0x3c", "number"], ["; exit", "comment"], ["byte", "modifier"], ["rdi", "register"], ["0FFh", "number"],
+     ["lock", "mnemonic"], ["xadd", "mnemonic"], ["syscall", "mnemonic"], ["msg", "label"], ["db", "directive"],
+     ["hi", "string"], ["10", "number"], ["main", "label"], ["PROC", "directive"]]],
+  ["gas", "movq $1, %rax\n1:  addq (%rdi), %rax # sum\n    jne 1b\n/* block\n   comment */",
+    [["movq", "mnemonic"], ["$1", "number"], ["%rax", "register"], ["1", "label"], ["addq", "mnemonic"],
+     ["%rdi", "register"], ["# sum", "comment"], ["jne", "mnemonic"], ["1b", "label"], ["block", "comment"], ["comment", "comment"]]],
+  ["arm64", "loop: ldr x0, [x1, #8]!\n    add v0.16b, v1.16b, v2.16b\n    adrp x2, sym@PAGE\n    b.ne loop   // again\n    mov r0, #CONST   @ arm32",
+    [["loop", "label"], ["ldr", "mnemonic"], ["x0", "register"], ["#8", "number"], ["v0.16b", "register"],
+     ["adrp", "mnemonic"], ["@PAGE", "directive"], ["b.ne", "mnemonic"], ["loop", "plain"], ["// again", "comment"], ["r0", "register"], ["@ arm32", "comment"]]],
+  ["riscv", "addi a0, a0, -1  # dec\nlui t0, %hi(msg)",
+    [["addi", "mnemonic"], ["a0", "register"], ["-1", "number"], ["# dec", "comment"], ["t0", "register"], ["%hi", "directive"]]],
+  ["mips", "lw $t0, 4($sp)\naddu $2, $3, $4",
+    [["lw", "mnemonic"], ["$t0", "register"], ["4", "number"], ["$sp", "register"], ["addu", "mnemonic"], ["$2", "register"], ["$4", "register"]]],
+  ["avr", "ldi r16, 0xFF\nst X+, r16",
+    [["ldi", "mnemonic"], ["r16", "register"], ["0xFF", "number"], ["st", "mnemonic"], ["X", "register"]]]
+]

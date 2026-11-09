@@ -643,7 +643,11 @@ pub fn prelude(theme: &Theme, meta: &Meta) -> String {
     }
     ct.push("dir: ltr".into());
     o.push_str(&format!("#show raw: set text({})\n", ct.join(", ")));
-    o.push_str(&format!("#set raw(syntaxes: {})\n", q(super::world::ASM_SYNTAX_PATH)));
+    o.push_str(&format!(
+        "#set raw(syntaxes: ({}, {}))\n",
+        q(super::world::ASM_SYNTAX_PATH),
+        q(super::world::MIPS_SYNTAX_PATH)
+    ));
     let cfill = cs.background.as_deref().and_then(color).unwrap_or_else(|| "luma(245)".into());
     let cstroke = cs.border.as_deref().and_then(color).map(|c| format!("0.5pt + {c}")).unwrap_or_else(|| "none".into());
     let calign = cs.align.as_deref().and_then(align).unwrap_or("left");

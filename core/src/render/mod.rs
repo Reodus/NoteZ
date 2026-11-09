@@ -425,18 +425,12 @@ mod tests {
     }
 
     /// ```nasm/```arm/```riscv/… blocks are highlighted in the PDF with the
-    /// bundled grammar (asm.sublime-syntax).
+    /// bundled grammars (asm.sublime-syntax and its MIPS variant). The cases
+    /// in asm_cases.json are shared with the editor's test
+    /// (scripts/test-asm.ts), so both color the same tokens.
     #[test]
     fn assembly_highlighting() {
         use typst::layout::{Frame, FrameItem};
-        let note = "```nasm\nsection .text\nglobal _start\n_start:\n    mov rax, 0x3c   ; exit\n    xor edi, edi\n    syscall\nmsg db \"hi\", 10\n```\n\n\
-```gas\nmovq $1, %rax\n1:  addq (%rdi), %rax # sum\n```\n\n\
-```arm64\nloop: ldr x0, [x1, #8]!\n    add v0.16b, v1.16b, v2.16b\n    b.ne loop   // again\n```\n\n\
-```riscv\naddi a0, a0, -1  # dec\n```\n\n```mips\nlw $t0, 4($sp)\n```\n\n```avr\nldi r16, 0xFF\n```\n";
-        let built = build(None, "Asm.md", note, &md::Rendered::new());
-        let mut world = world::NoteWorld::new(world::dev_packages_dir());
-        world.prepare(&built.main_path, built.source.clone(), vec![]).unwrap();
-        let doc = typst::compile::<typst_layout::PagedDocument>(&world).output.expect("compiles");
         fn walk(f: &Frame, out: &mut Vec<(String, String)>) {
             for (_, item) in f.items() {
                 match item {
@@ -450,28 +444,40 @@ mod tests {
                 }
             }
         }
-        let mut runs = vec![];
-        for page in doc.pages() {
-            walk(&page.frame, &mut runs);
-        }
-        let color = |word: &str| -> String {
-            runs.iter()
-                .find(|(t, _)| t == word)
-                .or_else(|| runs.iter().find(|(t, _)| t.trim() == word))
-                .map(|(_, c)| c.clone())
-                .unwrap_or_else(|| panic!("{word:?} not found in {runs:?}"))
-        };
-        let (kw, reg, num, comment, label, dir, string) =
-            ("#d73948", "#8b41b1", "#b60157", "#74747c", "#1d6c76", "#4b69c6", "#198810");
-        for (w, c) in [
-            ("section", dir), ("global", dir), ("_start", label), ("mov", kw), ("rax", reg), ("0x3c", num),
-            ("; exit", comment), ("syscall", kw), ("msg", label), ("db", dir), ("hi", string),
-            ("movq", kw), ("$1", num), ("%rax", reg), ("%rdi", reg), ("# sum", comment),
-            ("loop", label), ("ldr", kw), ("x0", reg), ("#8", num), ("v0.16b", reg), ("b.ne", kw), ("// again", comment),
-            ("addi", kw), ("a0", reg), ("-1", num), ("# dec", comment),
-            ("$t0", reg), ("$sp", reg), ("lw", kw), ("ldi", kw), ("r16", reg), ("0xFF", num),
-        ] {
-            assert_eq!(color(w), c, "{w} in {runs:?}");
+        let cases: Vec<(String, String, Vec<(String, String)>)> =
+            serde_json::from_str(include_str!("asm_cases.json")).unwrap();
+        for (lang, code, expect) in cases {
+            let note = format!("```{lang}\n{code}\n```\n");
+            let built = build(None, "Asm.md", &note, &md::Rendered::new());
+            let mut world = world::NoteWorld::new(world::dev_packages_dir());
+            world.prepare(&built.main_path, built.source.clone(), vec![]).unwrap();
+            let doc = typst::compile::<typst_layout::PagedDocument>(&world).output.expect("compiles");
+            let mut runs = vec![];
+            for page in doc.pages() {
+                walk(&page.frame, &mut runs);
+            }
+            let mut pos = 0;
+            for (word, kind) in expect {
+                let want = match kind.as_str() {
+                    "mnemonic" | "modifier" => "#d73948",
+                    "register" => "#8b41b1",
+                    "number" => "#b60157",
+                    "comment" => "#74747c",
+                    "label" => "#1d6c76",
+                    "directive" => "#4b69c6",
+                    "string" => "#198810",
+                    "plain" => "#000000",
+                    k => panic!("unknown kind {k}"),
+                };
+                // in order: each word is looked for after the previous one
+                let at = runs[pos..]
+                    .iter()
+                    .position(|(t, _)| *t == word || t.trim() == word || t.split_whitespace().any(|w| w == word))
+                    .unwrap_or_else(|| panic!("{lang}: {word:?} not found after run {pos} in {runs:?}"));
+                pos += at + 1;
+                let got = runs[pos - 1].1.as_str();
+                assert_eq!(got, want, "{lang}: {word} should be a {kind}");
+            }
         }
     }
 
@@ -534,6 +540,13 @@ mod tests {
             assert!(errs.is_empty(), "{name}: {errs:#?}");
             assert_eq!(pages, 1, "{name}");
             // No glyph fell back to .notdef (a box): every script found a font.
+            let missing = tofu_of(&built);
+            assert!(missing.is_empty(), "{name}: no font for {missing:?}");
+        }
+        // The check itself works: Linear B has no bundled font.
+        let built = build(None, "LinearB.md", "\u{10000}\u{10001}", &md::Rendered::new());
+        assert!(!tofu_of(&built).is_empty(), "the .notdef check must catch a script without a font");
+        fn tofu_of(built: &Built) -> Vec<String> {
             let mut world = world::NoteWorld::new(world::dev_packages_dir());
             world.prepare(&built.main_path, built.source.clone(), vec![]).unwrap();
             let doc = typst::compile::<typst_layout::PagedDocument>(&world).output.expect("compiles");
@@ -552,7 +565,7 @@ mod tests {
             }
             let mut missing = vec![];
             doc.pages().iter().for_each(|p| tofu(&p.frame, &mut missing));
-            assert!(missing.is_empty(), "{name}: no font for {missing:?}");
+            missing
         }
         // Mixed: spans and blocks with their own languages.
         let text = std::fs::read_to_string(dir.join("Mixed.md")).unwrap();

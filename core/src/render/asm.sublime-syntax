@@ -6,8 +6,10 @@
 # rules (src/editor/asm.ts). Scopes are picked for Typst's default code theme:
 # mnemonic = keyword, register = entity.other, label = entity.name.label,
 # directive = support.function, number = constant.numeric.
-name: Assembly
-scope: source.asm.notez
+# world.rs derives the MIPS variant (`$1` is a register there, an AT&T
+# immediate here) by rewriting the lines marked `variant:`.
+name: Assembly # variant: name
+scope: source.asm.notez # variant: scope
 file_extensions:
   - asm
   - nasm
@@ -33,10 +35,8 @@ file_extensions:
   - riscv64
   - rv32
   - rv64
-  - mips
-  - mips64
   - avr
-  - assembly
+  - assembly # variant: extensions
 
 variables:
   ident: '[A-Za-z_.$?@][\w.$?@]*'
@@ -121,7 +121,7 @@ contexts:
       scope: support.function.relocation.asm
     - match: '@(?i:plt|gotpcrel|gotoff|got|gotntpoff|tpoff|ntpoff|dtpoff|tlsgd|tlsld|function|object|progbits|nobits|note|init_array|fini_array|ha|h|l|page|pageoff|gotpage|gotpageoff|tlvppage|tlvppageoff)\b'
       scope: support.other.relocation.asm
-    - match: '\$(?:zero|at|v[01]|a[0-7]|t\d|s[0-8]|k[01]|gp|sp|fp|ra|f\d{1,2})\b'
+    - match: '\$(?:zero|at|v[01]|a[0-7]|t\d|s[0-8]|k[01]|gp|sp|fp|ra|f\d{1,2})\b' # variant: mips registers
       scope: entity.other.register.asm
     - match: '%(?i:{{x86_reg}}|{{arm_reg}}|{{rv_reg}})\b'
       scope: entity.other.register.asm

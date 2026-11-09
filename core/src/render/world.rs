@@ -116,6 +116,37 @@ pub struct NoteWorld {
 /// Assembly grammar for ```asm/```nasm/```arm/… blocks in the PDF.
 pub const ASM_SYNTAX_PATH: &str = "/__notez/asm.sublime-syntax";
 const ASM_SYNTAX: &str = include_str!("asm.sublime-syntax");
+/// The MIPS flavour (```mips): `$1` is register 1, not an AT&T immediate.
+pub const MIPS_SYNTAX_PATH: &str = "/__notez/mips.sublime-syntax";
+static MIPS_SYNTAX: LazyLock<String> = LazyLock::new(|| mips_syntax(ASM_SYNTAX));
+
+/// Rewrite the lines of asm.sublime-syntax marked `# variant: …`.
+fn mips_syntax(asm: &str) -> String {
+    let mut out = String::new();
+    let mut in_ext = false;
+    for line in asm.lines() {
+        let l = if line.ends_with("# variant: name") {
+            "name: Assembly (MIPS)".to_string()
+        } else if line.ends_with("# variant: scope") {
+            "scope: source.asm.mips.notez".to_string()
+        } else if line == "file_extensions:" {
+            in_ext = true;
+            "file_extensions: [mips, mips64, mipsasm]".to_string()
+        } else if in_ext {
+            if line.ends_with("# variant: extensions") {
+                in_ext = false;
+            }
+            continue;
+        } else if line.ends_with("# variant: mips registers") {
+            line.replace(r"f\d{1,2})", r"f?\d{1,2})")
+        } else {
+            line.to_string()
+        };
+        out.push_str(&l);
+        out.push('\n');
+    }
+    out
+}
 
 pub fn project_file(path: &str) -> Result<FileId, String> {
     let vpath = VirtualPath::new(path).map_err(|e| format!("bad path {path}: {e:?}"))?;
@@ -161,6 +192,7 @@ impl NoteWorld {
         loader.overlay.insert(main, Bytes::from_string(text));
         // Grammars for code blocks that Typst doesn't know (see styles.rs).
         loader.overlay.insert(project_file(ASM_SYNTAX_PATH)?, Bytes::new(ASM_SYNTAX.as_bytes()));
+        loader.overlay.insert(project_file(MIPS_SYNTAX_PATH)?, Bytes::from_string(MIPS_SYNTAX.clone()));
         for (path, bytes) in extra {
             loader.overlay.insert(project_file(&path)?, bytes);
         }

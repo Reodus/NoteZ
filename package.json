@@ -13,7 +13,8 @@
     "dist": "npm run build && electron-builder --linux",
     "dist:win": "npm run build && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
-    "fonts": "node scripts/fonts.mjs"
+    "fonts": "node scripts/fonts.mjs",
+    "test:asm": "node --experimental-strip-types scripts/test-asm.ts"
   },
   "license": "Apache-2.0",
   "devDependencies": {

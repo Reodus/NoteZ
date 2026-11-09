@@ -458,7 +458,7 @@ fence:
 | x86 AT&T syntax (GNU as) | `gas`, `att`, `s` |
 | ARM, Thumb, AArch64 | `arm`, `armasm`, `thumb`, `arm64`, `aarch64` |
 | RISC-V | `riscv`, `riscv32`, `riscv64`, `rv32`, `rv64` |
-| MIPS | `mips`, `mips64` |
+| MIPS | `mips`, `mips64`, `mipsasm` |
 | AVR | `avr` |
 
 What is recognized:
@@ -472,8 +472,8 @@ What is recognized:
 - Numbers: `0x1f`, `0FFh`, `0b101`, `$1` (AT&T), `#8` (ARM).
 - Relocations: `%hi(sym)`, `:lo12:sym`, `sym@PLT`.
 
-`$1` is read as an AT&T immediate, not as MIPS register 1. Write MIPS
-registers by name (`$t0`, `$sp`).
+`$1` means different things in different dialects. In a `mips` block it is
+register 1. Everywhere else it is an AT&T immediate, a number.
 
 Raw Typst, for anything Markdown can't express:
 

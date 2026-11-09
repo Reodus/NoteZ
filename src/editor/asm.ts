@@ -5,10 +5,12 @@
 import { LanguageDescription, LanguageSupport, StreamLanguage, type StringStream } from "@codemirror/language";
 
 /** Fence names (lower case) that select this language. */
+/** MIPS fences: `$1` is register 1 there, an AT&T immediate elsewhere. */
+export const MIPS_NAMES = ["mips", "mips64", "mipsasm"];
 export const ASM_NAMES = [
   "asm", "nasm", "yasm", "fasm", "masm", "s", "gas", "att", "x86", "x64", "x86asm", "x86_64", "x86-64",
   "arm", "armasm", "arm64", "aarch64", "thumb", "riscv", "riscv32", "riscv64", "rv32", "rv64",
-  "mips", "mips64", "avr", "assembly",
+  "avr", "assembly",
 ];
 
 const X86 = String.raw`(?:[re]?(?:ax|bx|cx|dx|si|di|sp|bp|ip)|[abcd][lh]|(?:si|di|sp|bp)l|r(?:[89]|1[0-5])[dwb]?|[xyz]mm(?:[12]?\d|3[01])|k[0-7]|mm[0-7]|st(?:\([0-7]\))?|[c-gs]s|cr\d{1,2}|dr[0-7]|[re]flags|tmm[0-7])`;
@@ -31,6 +33,7 @@ const R = {
   reloc: re(String.raw`%(?:hi|lo|pcrel_hi|pcrel_lo|got_pcrel_hi|tprel_hi|tprel_lo|tprel_add|tls_ie_pcrel_hi|tls_gd_pcrel_hi|gp_rel|got|call16|call_hi|call_lo|higher|highest)\b|#?:[a-z_]\w*:`, "i"),
   at: re(String.raw`@(?:plt|gotpcrel|gotoff|got|gotntpoff|tpoff|ntpoff|dtpoff|tlsgd|tlsld|function|object|progbits|nobits|note|init_array|fini_array|ha|h|l|page|pageoff|gotpage|gotpageoff|tlvppage|tlvppageoff)\b`, "i"),
   mipsReg: re(String.raw`\$(?:zero|at|v[01]|a[0-7]|t\d|s[0-8]|k[01]|gp|sp|fp|ra|f\d{1,2})\b`),
+  mipsNumReg: re(String.raw`\$f?\d{1,2}\b`),
   reg: re(String.raw`%?(?:${X86}|${ARM}|${RV})\b`, "i"),
   avrReg: re(String.raw`(?:r(?:[12]?\d|3[01])|[XYZ])\b`),
   size: re(String.raw`(?:byte|word|dword|qword|tword|oword|yword|zword|xmmword|ymmword|zmmword|tbyte|fword|real4|real8|real10|ptr|short|near|far|rel|abs|offset|seg|wrt|strict|dup|lsl|lsr|asr|ror|rrx|uxt[bhwx]|sxt[bhwx]|mul vl)\b`, "i"),
@@ -65,8 +68,9 @@ function comment(s: StringStream, state: State): string | null {
   return null;
 }
 
-const asmParser = {
-  name: "assembly",
+/** The tokenizer; `mips` makes `$1` a register (see MIPS_NAMES). */
+export const asmParser = (mips: boolean) => ({
+  name: mips ? "mips" : "assembly",
   startState: (): State => ({ at: "start", block: false }),
   copyState: (s: State): State => ({ ...s }),
   token(s: StringStream, state: State): string | null {
@@ -103,7 +107,7 @@ const asmParser = {
     }
     if (s.match(R.sq) || s.match(R.bq)) return "string";
     if (s.match(R.reloc) || s.match(R.at)) return "variableName.function";
-    if (s.match(R.mipsReg)) return "typeName";
+    if (s.match(R.mipsReg) || (mips && s.match(R.mipsNumReg))) return "typeName";
     if (!afterWord(s)) {
       if (s.match(R.reg) || s.match(R.avrReg)) return "typeName";
       if (s.match(R.size)) return "modifier";
@@ -118,15 +122,17 @@ const asmParser = {
     s.next();
     return null;
   },
-  languageData: { commentTokens: { line: ";", block: { open: "/*", close: "*/" } } },
-};
+  languageData: { commentTokens: { line: mips ? "#" : ";", block: { open: "/*", close: "*/" } } },
+});
 
-export const asmLanguage = StreamLanguage.define(asmParser);
-
-const asmDescription = LanguageDescription.of({ name: "Assembly", alias: ASM_NAMES, support: new LanguageSupport(asmLanguage) });
+const asmDescription = LanguageDescription.of({ name: "Assembly", alias: ASM_NAMES, support: new LanguageSupport(StreamLanguage.define(asmParser(false))) });
+const mipsDescription = LanguageDescription.of({ name: "Assembly (MIPS)", alias: MIPS_NAMES, support: new LanguageSupport(StreamLanguage.define(asmParser(true))) });
 
 /** Code-block language lookup: assembly first, then the bundled languages. */
 export function codeLanguage(languages: readonly LanguageDescription[]) {
-  return (info: string) =>
-    ASM_NAMES.includes(info.trim().split(/\s/)[0].toLowerCase()) ? asmDescription : LanguageDescription.matchLanguageName(languages, info, true);
+  return (info: string) => {
+    const name = info.trim().split(/\s/)[0].toLowerCase();
+    if (MIPS_NAMES.includes(name)) return mipsDescription;
+    return ASM_NAMES.includes(name) ? asmDescription : LanguageDescription.matchLanguageName(languages, info, true);
+  };
 }
