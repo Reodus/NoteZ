@@ -11,17 +11,13 @@ export const isTypst = () => !!store.active?.endsWith(".typ");
 
 // ------------------------------------------------------------ attributes
 
-export type Attrs = Record<string, string>;
+export type { Attrs } from "./dirrules";
+import type { Attrs } from "./dirrules";
 
-export function parseAttrs(s: string): Attrs {
-  const out: Attrs = {};
-  const re = /([^\s=]+)(?:=(?:"([^"]*)"|(\S+)))?/g;
-  let m: RegExpExecArray | null;
-  const body = s.trim().replace(/^\{/, "").replace(/\}$/, "");
-  while ((m = re.exec(body))) out[m[1]] = m[2] ?? m[3] ?? "";
-  return out;
-}
+export { parseAttrs } from "./dirrules";
+import { parseAttrs } from "./dirrules";
 
+import { t } from "../core/i18n";
 export function formatAttrs(a: Attrs): string {
   return Object.entries(a)
     .map(([k, v]) => (v === "" ? k : /[\s"{}]/.test(v) ? `${k}="${v.replace(/"/g, "")}"` : `${k}=${v}`))
@@ -515,7 +511,7 @@ export function insertTable(view: EditorView, rows: number, cols: number) {
     insertBlock(view, `#table(\n  columns: ${cols},\n  ${cells.join(", ")}\n)`);
     return;
   }
-  const head = "| " + Array.from({ length: cols }, (_, i) => `Header ${i + 1}`).join(" | ") + " |";
+  const head = "| " + Array.from({ length: cols }, (_, i) => t("Header {x}", { x: i + 1 })).join(" | ") + " |";
   const sep = "|" + Array.from({ length: cols }, () => " --- |").join("");
   const row = "| " + Array.from({ length: cols }, () => "   ").join(" | ") + " |";
   insertBlock(view, [head, sep, ...Array.from({ length: Math.max(1, rows - 1) }, () => row)].join("\n"), 2);

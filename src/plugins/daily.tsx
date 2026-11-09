@@ -9,6 +9,7 @@ import { prefs, notesList, openNote, refreshTree, state, setPrefs, setRightTab, 
 import { notify } from "../core/app";
 import { fillTemplate, formatDate, parseDate, isoWeek } from "./templates";
 
+import { t } from "../core/i18n";
 const ICON = (paths: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 
@@ -56,7 +57,7 @@ export async function openDaily(d = new Date()) {
           at.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
           text = fillTemplate(await ipc.read(prefs.dailyTemplate.trim()), stem(path), at);
         } catch {
-          notify(`Daily note template "${prefs.dailyTemplate}" not found`, "error");
+          notify(t("Daily note template \"{dailyTemplate}\" not found", { dailyTemplate: prefs.dailyTemplate }), "error");
         }
       }
       await ipc.createNote(path);
@@ -78,7 +79,7 @@ function step(dir: -1 | 1) {
     .filter(([d]) => (dir < 0 ? d < from : d > from) && dayKey(d) !== dayKey(from))
     .sort((a, b) => (a[0].getTime() - b[0].getTime()) * dir);
   if (days.length) return openNote(days[0][1]);
-  notify(dir < 0 ? "No earlier daily note" : "No later daily note");
+  notify(dir < 0 ? t("No earlier daily note") : t("No later daily note"));
 }
 
 // ---------------------------------------------------------- quick capture
@@ -115,9 +116,9 @@ export async function captureText(text: string) {
       if (state.buffers[path]) updateContent(path, next);
       else await ipc.write(path, next);
     }
-    notify(`Captured to ${stem(path)}`, "success", { label: "Open", run: () => void openNote(path) });
+    notify(t("Captured to {x}", { x: stem(path) }), "success", { label: t("Open"), run: () => void openNote(path) });
   } catch (e) {
-    notify(`Quick capture failed: ${e}`, "error");
+    notify(t("Quick capture failed: {error}", { error: e }), "error");
   }
 }
 
@@ -147,16 +148,16 @@ export function Calendar() {
   return (
     <div class="calendar-pane">
       <div class="cal-head">
-        <button class="icon-btn small" title="Previous month" onClick={() => move(-1)}>‹</button>
+        <button class="icon-btn small" title={t("Previous month")} onClick={() => move(-1)}>‹</button>
         <div class="cal-title" title={`${count()} daily notes this month`}>
           {month().toLocaleDateString(locale, { month: "long", year: "numeric" })}
         </div>
-        <button class="icon-btn small" title="Next month" onClick={() => move(1)}>›</button>
+        <button class="icon-btn small" title={t("Next month")} onClick={() => move(1)}>›</button>
       </div>
       <table class="cal-grid">
         <thead>
           <tr>
-            <th class="cal-week" title="Week">#</th>
+            <th class="cal-week" title={t("Week")}>#</th>
             <For each={dayNames()}>{(n) => <th>{n}</th>}</For>
           </tr>
         </thead>
@@ -178,7 +179,7 @@ export function Calendar() {
                             active: !!activeDay() && dayKey(d) === dayKey(activeDay()!),
                             has: !!path(),
                           }}
-                          title={path() ?? `Create ${dailyPath(d)}`}
+                          title={path() ?? t("Create {x}", { x: dailyPath(d) })}
                           onClick={() => openDaily(d)}
                         >
                           {d.toLocaleDateString(locale, { day: "numeric" })}
@@ -194,10 +195,10 @@ export function Calendar() {
       </table>
       <div class="cal-foot">
         <button class="btn small" onClick={() => (setMonth(new Date(today.getFullYear(), today.getMonth(), 1)), openDaily(today))}>
-          Today
+          {t("Today")}
         </button>
         <Show when={!notesList().some((p) => dailyDate(p))}>
-          <span class="muted">Notes go to <code>{folder() || "/"}</code></span>
+          <span class="muted">{t("Notes go to")} <code>{folder() || "/"}</code></span>
         </Show>
       </div>
     </div>
@@ -208,29 +209,29 @@ export const CALENDAR_PANEL = "core.daily-notes.calendar";
 
 export const dailyNotesPlugin: BuiltinPlugin = {
   id: "core.daily-notes",
-  name: "Daily notes",
-  description: "One note per day (Ctrl+Alt+D) and a calendar in the right panel.",
+  name: t("Daily notes"),
+  description: t("One note per day (Ctrl+Alt+D) and a calendar in the right panel."),
   optional: true,
   onload(api) {
     api.panels.add({
       id: "calendar",
-      title: "Calendar",
+      title: t("Calendar"),
       icon: ICON('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/>'),
       mount: (el) => render(() => <Calendar />, el),
     });
-    api.commands.register({ id: "daily.today", title: "Open today's daily note", key: "Mod-Alt-d", run: () => openDaily() });
+    api.commands.register({ id: "daily.today", title: t("Open today's daily note"), key: "Mod-Alt-d", run: () => openDaily() });
     api.commands.register({
       id: "daily.yesterday",
-      title: "Open yesterday's daily note",
+      title: t("Open yesterday's daily note"),
       run: () => openDaily(new Date(Date.now() - 86400000)),
     });
     api.commands.register({
       id: "daily.tomorrow",
-      title: "Open tomorrow's daily note",
+      title: t("Open tomorrow's daily note"),
       run: () => openDaily(new Date(Date.now() + 86400000)),
     });
-    api.commands.register({ id: "daily.prev", title: "Previous daily note", key: "Mod-Alt-ArrowLeft", run: () => step(-1) });
-    api.commands.register({ id: "daily.next", title: "Next daily note", key: "Mod-Alt-ArrowRight", run: () => step(1) });
-    api.commands.register({ id: "daily.calendar", title: "Show calendar", run: () => (setPrefs("layout", "split"), setRightTab(CALENDAR_PANEL)) });
+    api.commands.register({ id: "daily.prev", title: t("Previous daily note"), key: "Mod-Alt-ArrowLeft", run: () => step(-1) });
+    api.commands.register({ id: "daily.next", title: t("Next daily note"), key: "Mod-Alt-ArrowRight", run: () => step(1) });
+    api.commands.register({ id: "daily.calendar", title: t("Show calendar"), run: () => (setPrefs("layout", "split"), setRightTab(CALENDAR_PANEL)) });
   },
 };

@@ -93,7 +93,7 @@ pub struct Output {
 
 // ---------------------------------------------------------------- preprocess
 
-fn parse_attrs(s: &str) -> Vec<(String, String)> {
+pub(crate) fn parse_attrs(s: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut chars = s.trim().trim_start_matches('{').trim_end_matches('}').chars().peekable();
     loop {
@@ -786,7 +786,10 @@ impl<'a> Converter<'a> {
             }
             Frame::Image { url } => {
                 let s = self.embed_note(&url).unwrap_or_else(|| self.image(&url, &plain));
-                self.inline(s, plain);
+                // Alt text and file names are not text: they don't vote on
+                // the direction of the paragraph or table around them (the
+                // editor skips images too, tables.ts `tableDir`).
+                self.inline(s, String::new());
             }
             Frame::Footnote => {}
             Frame::Span(attrs) => {
@@ -995,7 +998,7 @@ impl<'a> Converter<'a> {
 
 /// Text shown for a wikilink without an alias: `Note › Heading`, `Note`
 /// for a block, `Heading` for one in the same note.
-fn wiki_display(url: &str) -> String {
+pub(crate) fn wiki_display(url: &str) -> String {
     let (name, sub) = url.split_once('#').unwrap_or((url, ""));
     let name = name.rsplit('/').next().unwrap_or(name).trim_end_matches(".md");
     let sub = sub.rsplit('#').next().unwrap_or(sub);
@@ -1008,7 +1011,7 @@ fn wiki_display(url: &str) -> String {
 }
 
 /// Label-safe slug of a heading's text (`[[#Heading]]` targets).
-fn heading_slug(s: &str) -> String {
+pub(crate) fn heading_slug(s: &str) -> String {
     let mut out = String::new();
     for c in s.trim().chars().flat_map(char::to_lowercase) {
         if c.is_alphanumeric() || matches!(c, '_' | '.') {

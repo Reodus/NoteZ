@@ -7,13 +7,14 @@ import { openMenu, MenuItem } from "../ui/primitives";
 import { onSpellMenu, openPath, replaceMisspelling, addToDictionary } from "../core/native";
 import { ipc } from "../core/ipc";
 import { root, state } from "../core/store";
-import { exportPdf } from "../core/render";
+import { exportNote, exportFormats, exportLabel } from "../core/render";
 import {
   toggleInline, setBlockStyle, toggleList, insertLink, insertTable, insertMath, insertFootnote,
   insertFenced, insertBlock, insertCallout, isTypst, BlockStyle,
 } from "./format";
 import { CALLOUTS } from "./livepreview";
 
+import { t } from "../core/i18n";
 type Item = MenuItem | "-";
 
 interface Hit {
@@ -88,22 +89,22 @@ function linkItems(view: EditorView, hit: Hit, openLink: (t: string) => boolean)
   if (isImage) {
     return [
       {
-        label: "Open image",
+        label: t("Open image"),
         run: async () => {
           const abs = await absOf();
           if (abs) void openPath(abs);
         },
       },
-      { label: "Copy image path", run: () => void navigator.clipboard.writeText(hit.target) },
-      { label: "Remove image", danger: true, run: () => view.dispatch({ changes: { from: hit.from, to: hit.to } }) },
+      { label: t("Copy image path"), run: () => void navigator.clipboard.writeText(hit.target) },
+      { label: t("Remove image"), danger: true, run: () => view.dispatch({ changes: { from: hit.from, to: hit.to } }) },
       "-",
     ];
   }
   const external = hit.kind === "url" || /^[a-z]+:/i.test(hit.target);
   return [
-    { label: external ? "Open link in browser" : "Open link", run: () => (external ? window.open(hit.target) : void openLink(hit.target)) },
-    { label: "Copy link", run: () => void navigator.clipboard.writeText(hit.target) },
-    { label: "Edit link", run: () => view.dispatch({ selection: { anchor: hit.from, head: hit.to } }) },
+    { label: external ? t("Open link in browser") : t("Open link"), run: () => (external ? window.open(hit.target) : void openLink(hit.target)) },
+    { label: t("Copy link"), run: () => void navigator.clipboard.writeText(hit.target) },
+    { label: t("Edit link"), run: () => view.dispatch({ selection: { anchor: hit.from, head: hit.to } }) },
     "-",
   ];
 }
@@ -114,61 +115,61 @@ function buildMenu(view: EditorView, pos: number, openLink: (t: string) => boole
   const items: Item[] = [];
   if (spell?.word) {
     for (const s of spell.suggestions.slice(0, 6)) items.push({ label: s, run: () => replaceMisspelling(s) });
-    if (!spell.suggestions.length) items.push({ label: "No spelling suggestions", run: () => {} });
-    items.push({ label: `Add “${spell.word}” to dictionary`, run: () => addToDictionary(spell.word) }, "-");
+    if (!spell.suggestions.length) items.push({ label: t("No spelling suggestions"), run: () => {} });
+    items.push({ label: t("Add “{word}” to dictionary", { word: spell.word }), run: () => addToDictionary(spell.word) }, "-");
   }
   const hit = hitAt(view, pos);
   if (hit) items.push(...linkItems(view, hit, openLink));
 
   items.push(
-    { label: "Cut", hint: "Ctrl+X", run: () => void clipboard(view, "cut") },
-    { label: "Copy", hint: "Ctrl+C", run: () => void clipboard(view, "copy") },
-    { label: "Paste", hint: "Ctrl+V", run: () => void clipboard(view, "paste") },
-    { label: "Paste as plain text", hint: "Ctrl+Shift+V", run: () => void clipboard(view, "plain") },
-    { label: "Select all", hint: "Ctrl+A", run: () => (view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }), view.focus()) },
+    { label: t("Cut"), hint: "Ctrl+X", run: () => void clipboard(view, "cut") },
+    { label: t("Copy"), hint: "Ctrl+C", run: () => void clipboard(view, "copy") },
+    { label: t("Paste"), hint: "Ctrl+V", run: () => void clipboard(view, "paste") },
+    { label: t("Paste as plain text"), hint: "Ctrl+Shift+V", run: () => void clipboard(view, "plain") },
+    { label: t("Select all"), hint: "Ctrl+A", run: () => (view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }), view.focus()) },
     "-",
   );
 
   const fmt: Item[] = [
-    { label: "Bold", hint: "Ctrl+B", run: () => toggleInline(view, "bold") },
-    { label: "Italic", hint: "Ctrl+I", run: () => toggleInline(view, "italic") },
-    { label: "Underline", hint: "Ctrl+U", run: () => toggleInline(view, "underline") },
-    { label: "Strikethrough", run: () => toggleInline(view, "strike") },
-    { label: "Inline code", hint: "Ctrl+E", run: () => toggleInline(view, "code") },
+    { label: t("Bold"), hint: "Ctrl+B", run: () => toggleInline(view, "bold") },
+    { label: t("Italic"), hint: "Ctrl+I", run: () => toggleInline(view, "italic") },
+    { label: t("Underline"), hint: "Ctrl+U", run: () => toggleInline(view, "underline") },
+    { label: t("Strikethrough"), run: () => toggleInline(view, "strike") },
+    { label: t("Inline code"), hint: "Ctrl+E", run: () => toggleInline(view, "code") },
   ];
-  if (!typ) fmt.push({ label: "Highlight", run: () => wrapSel(view, "==") }, { label: "Inline math", run: () => insertMath(view, false) });
-  if (!typ && !sel.empty) fmt.push({ label: "Clear formatting", run: () => clearFormatting(view) });
-  items.push({ label: "Format", run: () => {}, items: fmt });
+  if (!typ) fmt.push({ label: t("Highlight"), run: () => wrapSel(view, "==") }, { label: t("Inline math"), run: () => insertMath(view, false) });
+  if (!typ && !sel.empty) fmt.push({ label: t("Clear formatting"), run: () => clearFormatting(view) });
+  items.push({ label: t("Format"), run: () => {}, items: fmt });
 
   const style = (s: BlockStyle) => () => setBlockStyle(view, s);
   items.push({
-    label: "Paragraph",
+    label: t("Paragraph"),
     run: () => {},
     items: [
-      { label: "Normal text", hint: "Ctrl+0", run: style("p") },
-      ...([1, 2, 3, 4, 5, 6] as const).map((n): MenuItem => ({ label: `Heading ${n}`, hint: n <= 4 ? `Ctrl+${n}` : "", run: style(`h${n}` as BlockStyle) })),
+      { label: t("Normal text"), hint: "Ctrl+0", run: style("p") },
+      ...([1, 2, 3, 4, 5, 6] as const).map((n): MenuItem => ({ label: t("Heading {n}", { n }), hint: n <= 4 ? `Ctrl+${n}` : "", run: style(`h${n}` as BlockStyle) })),
       "-",
-      { label: "Bulleted list", run: () => toggleList(view, "bullet") },
-      { label: "Numbered list", run: () => toggleList(view, "number") },
-      ...(typ ? [] : [{ label: "Task list", run: () => toggleList(view, "task") }]),
-      { label: "Quote", run: style("quote") },
+      { label: t("Bulleted list"), run: () => toggleList(view, "bullet") },
+      { label: t("Numbered list"), run: () => toggleList(view, "number") },
+      ...(typ ? [] : [{ label: t("Task list"), run: () => toggleList(view, "task") }]),
+      { label: t("Quote"), run: style("quote") },
     ],
   });
   items.push({
-    label: "Callout",
+    label: t("Callout"),
     run: () => {},
-    items: Object.entries(CALLOUTS).map(([type, c]): MenuItem => ({ label: `${c.icon}  ${c.label}`, run: () => insertCallout(view, type) })),
+    items: Object.entries(CALLOUTS).map(([type, c]): MenuItem => ({ label: `${c.icon}  ${t(c.label)}`, run: () => insertCallout(view, type) })),
   });
   items.push({
-    label: "Insert",
+    label: t("Insert"),
     run: () => {},
     items: [
-      { label: "Link", hint: "Ctrl+K", run: () => insertLink(view) },
-      { label: "Table", run: () => insertTable(view, 3, 3) },
-      { label: "Footnote", run: () => insertFootnote(view) },
-      { label: "Horizontal rule", run: () => insertBlock(view, typ ? "#line(length: 100%)" : "---") },
-      ...(typ ? [] : [{ label: "Code block", run: () => insertFenced(view, "", "") }]),
-      { label: "Math block", run: () => insertMath(view, true) },
+      { label: t("Link"), hint: "Ctrl+K", run: () => insertLink(view) },
+      { label: t("Table"), run: () => insertTable(view, 3, 3) },
+      { label: t("Footnote"), run: () => insertFootnote(view) },
+      { label: t("Horizontal rule"), run: () => insertBlock(view, typ ? "#line(length: 100%)" : "---") },
+      ...(typ ? [] : [{ label: t("Code block"), run: () => insertFenced(view, "", "") }]),
+      { label: t("Math block"), run: () => insertMath(view, true) },
     ],
   });
   // On a heading: bookmark it.
@@ -176,20 +177,24 @@ function buildMenu(view: EditorView, pos: number, openLink: (t: string) => boole
   const heading = /^#{1,6}\s+(.*?)\s*(\{[^}]*\})?\s*$/.exec(lineText);
   if (heading && state.active && !typ) {
     const b = { type: "file" as const, path: state.active, subpath: `#${heading[1].trim()}` };
-    items.push("-", { label: isBookmarked(b) ? "Remove heading bookmark" : "Bookmark this heading", run: () => toggleBookmark(b) });
+    items.push("-", { label: isBookmarked(b) ? t("Remove heading bookmark") : t("Bookmark this heading"), run: () => toggleBookmark(b) });
   }
   items.push(
     "-",
-    { label: "Copy note path", run: () => void navigator.clipboard.writeText(state.active ?? "") },
+    { label: t("Copy note path"), run: () => void navigator.clipboard.writeText(state.active ?? "") },
     {
-      label: "Show note in file manager",
+      label: t("Show note in file manager"),
       run: () => {
         const r = root();
         const a = state.active;
         if (r && a) void openPath(`${r}/${a.includes("/") ? a.slice(0, a.lastIndexOf("/")) : ""}`);
       },
     },
-    { label: "Export PDF", hint: "Ctrl+Shift+S", run: () => void exportPdf() },
+    ...exportFormats(state.active ?? "").map((f) => ({
+      label: exportLabel(f),
+      hint: f === "pdf" ? "Ctrl+Shift+S" : "",
+      run: () => void exportNote(state.active, f),
+    })),
   );
   return items;
 }
@@ -219,8 +224,8 @@ onSpellMenu((info) => {
   if (info.word) {
     const fake = new MouseEvent("contextmenu", { clientX: info.x, clientY: info.y });
     const items: Item[] = info.suggestions.slice(0, 6).map((s) => ({ label: s, run: () => replaceMisspelling(s) }));
-    if (!items.length) items.push({ label: "No spelling suggestions", run: () => {} });
-    items.push("-", { label: `Add “${info.word}” to dictionary`, run: () => addToDictionary(info.word) });
+    if (!items.length) items.push({ label: t("No spelling suggestions"), run: () => {} });
+    items.push("-", { label: t("Add “{word}” to dictionary", { word: info.word }), run: () => addToDictionary(info.word) });
     openMenu(fake, items);
   }
 });

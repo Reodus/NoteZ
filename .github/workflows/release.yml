@@ -4,6 +4,9 @@
 # a version tag is pushed:
 #   git tag v0.4.2 && git push origin v0.4.2
 # The tag must match "version" in package.json.
+#
+# latest-linux.yml and latest.yml are what installed copies read to update
+# themselves (electron/updater.mjs); they must stay next to the packages.
 name: Release
 
 on:
@@ -33,10 +36,12 @@ jobs:
               release/*.AppImage
               release/*.deb
               release/*.rpm
+              release/latest-linux.yml
           - os: windows-latest
             platform: win
             files: |
               release/*.exe
+              release/latest.yml
           - os: macos-latest # Apple Silicon
             platform: mac
             arch: arm64
@@ -121,3 +126,5 @@ jobs:
             release/*.exe
             release/*.dmg
             release/*.zip
+            release/latest-linux.yml
+            release/latest.yml

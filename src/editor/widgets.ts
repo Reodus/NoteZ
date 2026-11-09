@@ -7,6 +7,7 @@ import { app } from "../core/app";
 import { ipc } from "../core/ipc";
 import { holdDecorations, released } from "./pointer";
 
+import { t } from "../core/i18n";
 /** Langs the Rust side can render (see core/src/render/blocks.rs). */
 export const NATIVE_BLOCKS = new Set([
   "chart", "plot", "flow", "flowchart", "diagram", "fletcher", "mindmap", "timeline", "draw", "cetz", "math", "latex", "tex",
@@ -49,7 +50,7 @@ class DataBlock extends WidgetType {
     const label = document.createElement("button");
     label.className = "cm-nz-block-tag";
     label.textContent = `${this.lang} · edit`;
-    label.title = "Show the source";
+    label.title = t("Show the source");
     label.addEventListener("mousedown", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -128,7 +129,7 @@ class BlockPreview extends WidgetType {
     const wrap = document.createElement("div");
     wrap.className = "cm-nz-block-preview";
     wrap.setAttribute("dir", "ltr");
-    wrap.title = "Click to edit";
+    wrap.title = t("Click to edit");
     const label = document.createElement("span");
     label.className = "cm-nz-block-tag";
     label.textContent = this.lang;

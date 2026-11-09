@@ -19,6 +19,7 @@
 import { createSignal } from "solid-js";
 import { userCss } from "./native";
 
+import { t } from "./i18n";
 export interface UiTheme {
   id: string;
   name: string;
@@ -64,8 +65,8 @@ export function makeTheme(id: string, css: string, source: UiTheme["source"], pa
 }
 
 const BASE: UiTheme[] = [
-  { id: "light", name: "Light", mode: "light", description: "The default light theme.", accent: null, source: "builtin", css: "" },
-  { id: "dark", name: "Dark", mode: "dark", description: "The default dark theme.", accent: null, source: "builtin", css: "" },
+  { id: "light", name: "Light", mode: "light", description: t("The default light theme."), accent: null, source: "builtin", css: "" },
+  { id: "dark", name: "Dark", mode: "dark", description: t("The default dark theme."), accent: null, source: "builtin", css: "" },
 ];
 
 const FILES = import.meta.glob("../styles/themes/*.css", { query: "?raw", import: "default", eager: true }) as Record<string, string>;

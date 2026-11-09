@@ -13,6 +13,7 @@ import { ColorGrid, ComboBox, Field, Modal, Popover, Segmented, askText } from "
 import { previewCss } from "./Toolbar";
 import { STYLE_LABELS } from "./RightPanel";
 
+import { t } from "../core/i18n";
 /** Theme id of the active note. */
 export function docThemeId(): string {
   const path = state.active;
@@ -112,15 +113,15 @@ function ScriptFonts(props: {
   const sample = (key: string) => SCRIPT_FONT_KEYS.find((k) => k.key === key)?.sample ?? "";
   return (
     <div class="field wide script-fonts">
-      <span class="field-label">Fonts for other scripts</span>
+      <span class="field-label">{t("Fonts for other scripts")}</span>
       <For each={used()}>
         {(key) => (
           <div class="script-font-row">
             <span class="script-name" title={label(key)}>{label(key)}</span>
-            <ComboBox value={rows()[key] ?? ""} placeholder="Bundled default" options={props.fonts}
+            <ComboBox value={rows()[key] ?? ""} placeholder={t("Bundled default")} options={props.fonts}
               onChange={(v) => put(v ? { ...rows(), [key]: v } : Object.fromEntries(Object.entries(rows()).filter(([k]) => k !== key)))}
               renderOption={(f) => <span style={{ "font-family": `"${f}", var(--font-ui)` }}>{f} — {sample(key)}</span>} />
-            <button type="button" class="icon-btn small" title="Remove" onClick={() => put(Object.fromEntries(Object.entries(rows()).filter(([k]) => k !== key)))}>×</button>
+            <button type="button" class="icon-btn small" title={t("Remove")} onClick={() => put(Object.fromEntries(Object.entries(rows()).filter(([k]) => k !== key)))}>×</button>
           </div>
         )}
       </For>
@@ -129,25 +130,25 @@ function ScriptFonts(props: {
         e.currentTarget.value = "";
         if (key) put({ ...rows(), [key]: SCRIPT_FONT_KEYS.find((k) => k.key === key)?.font ?? "" });
       }}>
-        <option value="">+ Add a font for a script…</option>
+        <option value="">{t("+ Add a font for a script…")}</option>
         <For each={unused()}>{(k) => <option value={k.key}>{k.label} ({k.sample})</option>}</For>
       </select>
-      <span class="field-hint">Scripts not listed use this style's font when it has their letters, else a bundled Noto font.</span>
+      <span class="field-hint">{t("Scripts not listed use this style's font when it has their letters, else a bundled Noto font.")}</span>
     </div>
   );
 }
 
 const WEIGHTS = ["light", "regular", "medium", "semibold", "bold", "extrabold"];
 const SPACING = [
-  { v: 1.0, l: "Single (1.0)" },
+  { v: 1.0, l: t("Single (1.0)") },
   { v: 1.15, l: "1.15" },
   { v: 1.3, l: "1.3" },
   { v: 1.5, l: "1.5" },
   { v: 1.75, l: "1.75" },
-  { v: 2.0, l: "Double (2.0)" },
+  { v: 2.0, l: t("Double (2.0)") },
 ];
 const NUMBERING = [
-  { v: "none", l: "None" },
+  { v: "none", l: t("None") },
   { v: "1.", l: "1.  2.  3." },
   { v: "1.1.", l: "1.1.  1.2." },
   { v: "1.1.1.", l: "1.1.1." },
@@ -171,13 +172,13 @@ function ScopeSwitch(props: { scope: "note" | "theme"; onChange: (s: "note" | "t
   return (
     <Show when={!isTypst()}>
       <div class="scope-switch">
-        <span>Apply to</span>
+        <span>{t("Apply to")}</span>
         <Segmented
           value={props.scope}
           onChange={props.onChange}
           options={[
-            { value: "note", label: "This note only" },
-            { value: "theme", label: <>Theme “{props.themeId}”</>, title: "All notes using this theme" },
+            { value: "note", label: t("This note only") },
+            { value: "theme", label: <>{t("Theme “{name}”", { name: props.themeId })}</>, title: t("All notes using this theme") },
           ]}
         />
       </div>
@@ -193,7 +194,7 @@ function ColorField(props: { label: string; value?: string | null; onChange: (c:
         trigger={() => (
           <>
             <i class="color-chip" style={{ background: props.value ?? "transparent" }} classList={{ none: !props.value }} />
-            <span>{props.value ?? "Default"}</span>
+            <span>{props.value ?? t("Default")}</span>
           </>
         )}
       >
@@ -233,13 +234,13 @@ export function StyleDialog(props: { styleKey: string; scope: "note" | "theme"; 
         if (!view) return;
         setFrontmatter(view, ["styles", props.styleKey], diff(edited, theme.styles[props.styleKey] ?? {}));
       } else {
-        const t: Theme = structuredClone(unwrap(theme));
-        t.styles[props.styleKey] = { ...edited };
-        await ipc.saveTheme(themeId, t);
+        const th: Theme = structuredClone(unwrap(theme));
+        th.styles[props.styleKey] = { ...edited };
+        await ipc.saveTheme(themeId, th);
         // Remove note-level overrides so the theme change is visible.
         const view = editorView();
         if (view && !isTypst()) setFrontmatter(view, ["styles", props.styleKey], null);
-        notify(`Updated theme “${themeId}”`, "success");
+        notify(t("Updated theme “{themeId}”", { themeId }), "success");
       }
       await refreshTheme();
       props.onClose();
@@ -252,20 +253,20 @@ export function StyleDialog(props: { styleKey: string; scope: "note" | "theme"; 
 
   return (
     <Modal
-      title={`Modify style — ${label}`}
-      subtitle="Formatting is stored with the document and used for both the editor and the PDF."
+      title={t("Modify style — {label}", { label })}
+      subtitle={t("Formatting is stored with the document and used for both the editor and the PDF.")}
       width="640px"
       onClose={props.onClose}
       footer={
         <>
           <ScopeSwitch scope={scope()} onChange={setScope} themeId={themeId} />
           <div class="spacer" />
-          <button class="btn" onClick={props.onClose}>Cancel</button>
-          <button class="btn primary" onClick={save}><Check size={15} /> Apply</button>
+          <button class="btn" onClick={props.onClose}>{t("Cancel")}</button>
+          <button class="btn primary" onClick={save}><Check size={15} /> {t("Apply")}</button>
         </>
       }
     >
-      <Show when={!base.loading} fallback={<div class="pane-empty">Loading…</div>}>
+      <Show when={!base.loading} fallback={<div class="pane-empty">{t("Loading…")}</div>}>
         <div class="style-preview" dir="auto">
           <span style={{ ...previewCss(st), "text-align": (st.align === "justify" ? "justify" : st.align ?? "start") as any, "text-decoration": st.underline ? "underline" : undefined }}>
             {isHeading || props.styleKey === "title" ? "Sample Heading — عنوان — 見出し" : "The quick brown fox jumps over the lazy dog. Съешь ещё этих булок. 敏捷的棕色狐狸。"}
@@ -273,84 +274,84 @@ export function StyleDialog(props: { styleKey: string; scope: "note" | "theme"; 
         </div>
 
         <div class="form-grid">
-          <Field label="Font" hint="Used for every script it has letters for.">
-            <ComboBox value={st.font ?? ""} placeholder="Inherit" options={fonts()} onChange={(v) => set("font", v)}
+          <Field label={t("Font")} hint={t("Used for every script it has letters for.")}>
+            <ComboBox value={st.font ?? ""} placeholder={t("Inherit")} options={fonts()} onChange={(v) => set("font", v)}
               renderOption={(f) => <span style={{ "font-family": `"${f}"` }}>{f}</span>} />
           </Field>
-          <Field label="Size">
-            <ComboBox value={st.size ?? ""} placeholder="Inherit" options={FONT_SIZES}
+          <Field label={t("Size")}>
+            <ComboBox value={st.size ?? ""} placeholder={t("Inherit")} options={FONT_SIZES}
               onChange={(v) => set("size", /^\d+(\.\d+)?$/.test(v) ? `${v}pt` : v)} />
           </Field>
-          <Field label="Weight">
+          <Field label={t("Weight")}>
             <select class="input" value={st.weight ?? ""} onChange={(e) => set("weight", e.currentTarget.value || null)}>
-              <option value="">Inherit</option>
+              <option value="">{t("Inherit")}</option>
               <For each={WEIGHTS}>{(w) => <option value={w}>{w}</option>}</For>
             </select>
           </Field>
-          <Field label="Emphasis">
+          <Field label={t("Emphasis")}>
             <div class="toggle-row">
-              <button type="button" class="tb-btn" classList={{ active: st.weight === "bold" }} onClick={() => set("weight", st.weight === "bold" ? null : "bold")} title="Bold"><BoldIcon size={15} /></button>
-              <button type="button" class="tb-btn" classList={{ active: !!st.italic }} onClick={() => set("italic", st.italic ? null : true)} title="Italic"><ItalicIcon size={15} /></button>
-              <button type="button" class="tb-btn" classList={{ active: !!st.underline }} onClick={() => set("underline", st.underline ? null : true)} title="Underline"><UnderlineIcon size={15} /></button>
-              <button type="button" class="tb-btn sc" classList={{ active: !!st.smallcaps }} onClick={() => set("smallcaps", st.smallcaps ? null : true)} title="Small capitals">Aᴀ</button>
+              <button type="button" class="tb-btn" classList={{ active: st.weight === "bold" }} onClick={() => set("weight", st.weight === "bold" ? null : "bold")} title={t("Bold")}><BoldIcon size={15} /></button>
+              <button type="button" class="tb-btn" classList={{ active: !!st.italic }} onClick={() => set("italic", st.italic ? null : true)} title={t("Italic")}><ItalicIcon size={15} /></button>
+              <button type="button" class="tb-btn" classList={{ active: !!st.underline }} onClick={() => set("underline", st.underline ? null : true)} title={t("Underline")}><UnderlineIcon size={15} /></button>
+              <button type="button" class="tb-btn sc" classList={{ active: !!st.smallcaps }} onClick={() => set("smallcaps", st.smallcaps ? null : true)} title={t("Small capitals")}>Aᴀ</button>
             </div>
           </Field>
-          <ColorField label="Color" value={st.color} onChange={(c) => set("color", c)} />
-          <Field label="Letter spacing" hint="e.g. 0.05em; empty = normal">
-            <input class="input" value={st.tracking ?? ""} placeholder="Normal" onChange={(e) => set("tracking", withUnit(e.currentTarget.value.trim(), "em") || null)} />
+          <ColorField label={t("Color")} value={st.color} onChange={(c) => set("color", c)} />
+          <Field label={t("Letter spacing")} hint={t("e.g. 0.05em; empty = normal")}>
+            <input class="input" value={st.tracking ?? ""} placeholder={t("Normal")} onChange={(e) => set("tracking", withUnit(e.currentTarget.value.trim(), "em") || null)} />
           </Field>
           <ScriptFonts value={st.fonts ?? {}} legacy={st["font-fa"]} fonts={fonts()} onChange={(m, clearLegacy) => {
             setSt("fonts", Object.keys(m).length ? m : (null as any));
             if (clearLegacy) setSt("font-fa", null as any);
           }} />
           <Show when={!inline}>
-          <Field label="Alignment" wide>
+          <Field label={t("Alignment")} wide>
             <Segmented
               value={st.align ?? "inherit"}
               onChange={(v) => set("align", v === "inherit" ? null : v)}
               options={[
-                { value: "inherit", label: "Inherit" },
-                { value: "start", label: "Start" },
-                { value: "left", label: "Left" },
-                { value: "center", label: "Center" },
-                { value: "right", label: "Right" },
-                ...(body ? [{ value: "justify", label: "Justify" }] : []),
+                { value: "inherit", label: t("Inherit") },
+                { value: "start", label: t("Start") },
+                { value: "left", label: t("Left") },
+                { value: "center", label: t("Center") },
+                { value: "right", label: t("Right") },
+                ...(body ? [{ value: "justify", label: t("Justify") }] : []),
               ]}
             />
           </Field>
           </Show>
           <Show when={body}>
-            <Field label="Line spacing">
+            <Field label={t("Line spacing")}>
               <select class="input" value={st["line-spacing"] ?? ""} onChange={(e) => set("line-spacing", e.currentTarget.value ? Number(e.currentTarget.value) : null)}>
-                <option value="">Inherit</option>
+                <option value="">{t("Inherit")}</option>
                 <For each={SPACING}>{(s) => <option value={s.v}>{s.l}</option>}</For>
               </select>
             </Field>
-            <Field label="First-line indent" hint="e.g. 1.2em, 0.5cm">
+            <Field label={t("First-line indent")} hint={t("e.g. 1.2em, 0.5cm")}>
               <input class="input" value={st.indent ?? ""} placeholder="none" onChange={(e) => set("indent", pt(e.currentTarget.value))} />
             </Field>
           </Show>
           <Show when={!body && !inline}>
-            <Field label={props.styleKey === "caption" ? "Gap above caption" : "Space before"} hint="e.g. 12pt, 1em">
-              <input class="input" value={st["space-before"] ?? ""} placeholder="Inherit" onChange={(e) => set("space-before", pt(e.currentTarget.value))} />
+            <Field label={props.styleKey === "caption" ? t("Gap above caption") : t("Space before")} hint={t("e.g. 12pt, 1em")}>
+              <input class="input" value={st["space-before"] ?? ""} placeholder={t("Inherit")} onChange={(e) => set("space-before", pt(e.currentTarget.value))} />
             </Field>
           </Show>
           <Show when={!inline}>
-          <Field label={body ? "Paragraph spacing" : "Space after"} hint="e.g. 8pt, 0.8em">
-            <input class="input" value={st["space-after"] ?? ""} placeholder="Inherit" onChange={(e) => set("space-after", pt(e.currentTarget.value))} />
+          <Field label={body ? t("Paragraph spacing") : t("Space after")} hint={t("e.g. 8pt, 0.8em")}>
+            <input class="input" value={st["space-after"] ?? ""} placeholder={t("Inherit")} onChange={(e) => set("space-after", pt(e.currentTarget.value))} />
           </Field>
           </Show>
           <Show when={isHeading}>
-            <Field label="Numbering">
+            <Field label={t("Numbering")}>
               <select class="input" value={st.numbering ?? "none"} onChange={(e) => set("numbering", e.currentTarget.value === "none" ? null : e.currentTarget.value)}>
                 <For each={NUMBERING}>{(n) => <option value={n.v}>{n.l}</option>}</For>
               </select>
             </Field>
-            <ColorField label="Underline rule" value={st.border} onChange={(c) => set("border", c)} />
+            <ColorField label={t("Underline rule")} value={st.border} onChange={(c) => set("border", c)} />
           </Show>
           <Show when={boxy}>
-            <ColorField label="Background" value={st.background} onChange={(c) => set("background", c)} />
-            <ColorField label="Border / accent" value={st.border} onChange={(c) => set("border", c)} />
+            <ColorField label={t("Background")} value={st.background} onChange={(c) => set("background", c)} />
+            <ColorField label={t("Border / accent")} value={st.border} onChange={(c) => set("border", c)} />
           </Show>
         </div>
       </Show>
@@ -371,13 +372,13 @@ function HFEditor(props: { label: string; value: HeaderFooter; onChange: (v: Hea
       <div class="hf-head">
         <b>{props.label}</b>
         <label class="check">
-          <input type="checkbox" checked={!!props.value.line} onChange={(e) => up("line", e.currentTarget.checked || null)} /> Separator line
+          <input type="checkbox" checked={!!props.value.line} onChange={(e) => up("line", e.currentTarget.checked || null)} /> {t("Separator line")}
         </label>
       </div>
       <div class="hf-row">
-        <input class="input" dir="auto" placeholder="Left" value={props.value.left ?? ""} onChange={(e) => up("left", e.currentTarget.value)} />
-        <input class="input center" dir="auto" placeholder="Center" value={props.value.center ?? ""} onChange={(e) => up("center", e.currentTarget.value)} />
-        <input class="input right" dir="auto" placeholder="Right" value={props.value.right ?? ""} onChange={(e) => up("right", e.currentTarget.value)} />
+        <input class="input" dir="auto" placeholder={t("Left")} value={props.value.left ?? ""} onChange={(e) => up("left", e.currentTarget.value)} />
+        <input class="input center" dir="auto" placeholder={t("Center")} value={props.value.center ?? ""} onChange={(e) => up("center", e.currentTarget.value)} />
+        <input class="input right" dir="auto" placeholder={t("Right")} value={props.value.right ?? ""} onChange={(e) => up("right", e.currentTarget.value)} />
       </div>
     </div>
   );
@@ -415,16 +416,16 @@ export function PageSetupDialog(props: { onClose: () => void }) {
           setFrontmatter(view, ["lang"], lang() && lang() !== theme.lang ? lang() : null);
         }
       } else {
-        const t: Theme = structuredClone(unwrap(theme));
-        t.page = page;
-        t.lang = lang() || null;
-        await ipc.saveTheme(themeId, t);
+        const th: Theme = structuredClone(unwrap(theme));
+        th.page = page;
+        th.lang = lang() || null;
+        await ipc.saveTheme(themeId, th);
         const view = editorView();
         if (view && !isTypst()) {
           setFrontmatter(view, ["page"], null);
           setFrontmatter(view, ["lang"], null);
         }
-        notify(`Updated theme “${themeId}”`, "success");
+        notify(t("Updated theme “{themeId}”", { themeId }), "success");
       }
       await refreshTheme();
       props.onClose();
@@ -435,20 +436,20 @@ export function PageSetupDialog(props: { onClose: () => void }) {
 
   return (
     <Modal
-      title="Page setup"
-      subtitle="Paper, margins, columns, language, numbering, header and footer."
+      title={t("Page setup")}
+      subtitle={t("Paper, margins, columns, language, numbering, header and footer.")}
       width="680px"
       onClose={props.onClose}
       footer={
         <>
           <ScopeSwitch scope={scope()} onChange={setScope} themeId={themeId} />
           <div class="spacer" />
-          <button class="btn" onClick={props.onClose}>Cancel</button>
-          <button class="btn primary" onClick={save}><Check size={15} /> Apply</button>
+          <button class="btn" onClick={props.onClose}>{t("Cancel")}</button>
+          <button class="btn primary" onClick={save}><Check size={15} /> {t("Apply")}</button>
         </>
       }
     >
-      <Show when={!base.loading} fallback={<div class="pane-empty">Loading…</div>}>
+      <Show when={!base.loading} fallback={<div class="pane-empty">{t("Loading…")}</div>}>
         <div class="page-setup">
           <div class="page-mock" classList={{ landscape: pg.orientation === "landscape" }}>
             <div class="mock-hf" classList={{ line: !!pg.header?.line }}>
@@ -462,37 +463,37 @@ export function PageSetupDialog(props: { onClose: () => void }) {
             </div>
           </div>
           <div class="form-grid">
-            <Field label="Paper">
+            <Field label={t("Paper")}>
               <select class="input" value={pg.paper ?? "a4"} onChange={(e) => setPg("paper", e.currentTarget.value)}>
                 <For each={PAPERS}>{([v, l]) => <option value={v}>{l}</option>}</For>
               </select>
             </Field>
-            <Field label="Orientation">
+            <Field label={t("Orientation")}>
               <Segmented value={pg.orientation ?? "portrait"} onChange={(v) => setPg("orientation", v)}
-                options={[{ value: "portrait", label: "Portrait" }, { value: "landscape", label: "Landscape" }]} />
+                options={[{ value: "portrait", label: t("Portrait") }, { value: "landscape", label: t("Landscape") }]} />
             </Field>
-            <Field label="Margins (top · right · bottom · left)" wide>
+            <Field label={t("Margins (top · right · bottom · left)")} wide>
               <div class="margin-row">
                 <For each={["top", "right", "bottom", "left"] as const}>
                   {(k) => <input class="input" value={margins[k]} onChange={(e) => setMargins(k, e.currentTarget.value.trim())} title={k} />}
                 </For>
               </div>
             </Field>
-            <Field label="Columns">
+            <Field label={t("Columns")}>
               <Segmented value={String(pg.columns ?? 1)} onChange={(v) => setPg("columns", v === "1" ? null : Number(v))}
                 options={[{ value: "1", label: "1" }, { value: "2", label: "2" }, { value: "3", label: "3" }]} />
             </Field>
-            <Field label="Document language" hint="Direction, hyphenation, quotes and automatic digits follow it.">
+            <Field label={t("Document language")} hint={t("Direction, hyphenation, quotes and automatic digits follow it.")}>
               <select class="input" value={lang()} onChange={(e) => setLang(e.currentTarget.value)}>
                 <For each={languageOptions()}>{(o) => <option value={o.value}>{o.label}</option>}</For>
               </select>
             </Field>
-            <Field label="Page numbers">
+            <Field label={t("Page numbers")}>
               <select class="input" value={pg.numbering ?? "1"} onChange={(e) => setPg("numbering", e.currentTarget.value)}>
                 <option value="1">1, 2, 3</option>
                 <option value="1 / 1">1 / 3, 2 / 3 …</option>
-                <option value="i">i, ii, iii</option>
-                <option value="I">I, II, III</option>
+                <option value="i">{t("i, ii, iii")}</option>
+                <option value="I">{t("I, II, III")}</option>
                 <option value="a">a, b, c</option>
                 <option value="A">A, B, C</option>
                 <option value="α">α, β, γ</option>
@@ -504,29 +505,29 @@ export function PageSetupDialog(props: { onClose: () => void }) {
                 </Show>
               </select>
             </Field>
-            <Field label="Digits" hint="For page numbers and numbered headings.">
+            <Field label={t("Digits")} hint={t("For page numbers and numbered headings.")}>
               <select class="input" value={pg.digits ?? ""} onChange={(e) => setPg("digits", e.currentTarget.value || null)}>
                 <For each={DIGIT_OPTIONS}>{(o) => <option value={o.value}>{o.label}</option>}</For>
               </select>
             </Field>
-            <Field label="Heading digits" hint="Overrides Digits for numbered headings only.">
+            <Field label={t("Heading digits")} hint={t("Overrides Digits for numbered headings only.")}>
               <select class="input" value={pg["heading-digits"] ?? ""} onChange={(e) => setPg("heading-digits", e.currentTarget.value || null)}>
-                <option value="">Same as page numbers</option>
+                <option value="">{t("Same as page numbers")}</option>
                 <For each={DIGIT_OPTIONS.slice(1)}>{(o) => <option value={o.value}>{o.label}</option>}</For>
               </select>
             </Field>
           </div>
         </div>
-        <HFEditor label="Header" value={pg.header ?? {}} onChange={(v) => setPg("header", v)} />
-        <HFEditor label="Footer" value={pg.footer ?? {}} onChange={(v) => setPg("footer", v)} />
+        <HFEditor label={t("Header")} value={pg.header ?? {}} onChange={(v) => setPg("header", v)} />
+        <HFEditor label={t("Footer")} value={pg.footer ?? {}} onChange={(v) => setPg("footer", v)} />
         <div class="row gap">
           <label class="check">
             <input type="checkbox" checked={!!pg["skip-first"]} onChange={(e) => setPg("skip-first", e.currentTarget.checked || null)} />
-            Different first page (no header/footer on page 1)
+            {t("Different first page (no header/footer on page 1)")}
           </label>
         </div>
         <p class="field-hint">
-          Placeholders: <code>{"{page}"}</code> <code>{"{total}"}</code> <code>{"{title}"}</code> <code>{"{author}"}</code> <code>{"{date}"}</code> <code>{"{chapter}"}</code>
+          {t("Placeholders:")} <code>{"{page}"}</code> <code>{"{total}"}</code> <code>{"{title}"}</code> <code>{"{author}"}</code> <code>{"{date}"}</code> <code>{"{chapter}"}</code>
         </p>
       </Show>
     </Modal>
@@ -576,15 +577,15 @@ export function ThemesDialog(props: { onClose: () => void }) {
   };
 
   const duplicate = async (from: Theme, fromId: string) => {
-    const id = await askText("New theme id (letters, digits, -)", `${fromId}-custom`);
+    const id = await askText(t("New theme id (letters, digits, -)"), `${fromId}-custom`);
     if (!id) return;
-    const t: Theme = structuredClone(unwrap(from));
-    t.name = id;
-    t.description = `Based on ${fromId}`;
+    const th: Theme = structuredClone(unwrap(from));
+    th.name = id;
+    th.description = t("Based on {fromId}", { fromId });
     try {
-      await ipc.saveTheme(id, t);
+      await ipc.saveTheme(id, th);
       refetch();
-      notify(`Created theme “${id}”`, "success");
+      notify(t("Created theme “{id}”", { id }), "success");
     } catch (e) {
       notify(String(e), "error");
     }
@@ -596,7 +597,7 @@ export function ThemesDialog(props: { onClose: () => void }) {
   };
 
   return (
-    <Modal title="Document themes" subtitle="A theme bundles page setup and every paragraph style — like Word templates." width="760px" onClose={props.onClose}>
+    <Modal title={t("Document themes")} subtitle={t("A theme bundles page setup and every paragraph style — like Word templates.")} width="760px" onClose={props.onClose}>
       <div class="theme-grid">
         <For each={themes() ?? []}>
           {({ info, theme }) => (
@@ -613,11 +614,11 @@ export function ThemesDialog(props: { onClose: () => void }) {
                 <div class="theme-swatches">{swatch(theme)}</div>
               </div>
               <div class="theme-actions" onClick={(e) => e.stopPropagation()}>
-                <button class="icon-btn small" title="Duplicate" onClick={() => duplicate(theme, info.id)}><Copy size={14} /></button>
+                <button class="icon-btn small" title={t("Duplicate")} onClick={() => duplicate(theme, info.id)}><Copy size={14} /></button>
                 <Show when={info.customized}>
                   <button
                     class="icon-btn small"
-                    title={info.builtin ? "Reset to factory settings" : "Delete theme"}
+                    title={info.builtin ? t("Reset to factory settings") : t("Delete theme")}
                     onClick={async () => {
                       await ipc.resetTheme(info.id);
                       refetch();
@@ -633,7 +634,7 @@ export function ThemesDialog(props: { onClose: () => void }) {
         </For>
       </div>
       <div class="row gap theme-default">
-        <span>Default theme for new notes:</span>
+        <span>{t("Default theme for new notes:")}</span>
         <select class="input" value={prefs.newNoteTheme} onChange={(e) => setPrefs("newNoteTheme", e.currentTarget.value)}>
           <For each={themes() ?? []}>{({ info }) => <option value={info.id}>{info.name}</option>}</For>
         </select>

@@ -1,6 +1,7 @@
 mod annotations;
 mod bases;
 mod blockidx;
+mod export;
 mod history;
 mod sync;
 mod links;
@@ -486,6 +487,48 @@ fn export_pdf(
     std::fs::write(&output, bytes).map_err(|e| err(e.to_string()))
 }
 
+/// A Markdown note read for Word/HTML export, with its ```base/```query
+/// views run like the PDF's.
+fn export_prepare(state: &AppState, path: &str, text: &str, blocks: Vec<RenderedBlock>) -> export::Prepared {
+    let root = state.root_opt();
+    let mut map = rendered_map(blocks);
+    data_blocks(state, path, text, &mut map);
+    export::prepare(root.as_deref(), path, text, &map)
+}
+
+/// Export a note as one self-contained HTML file. Returns warnings.
+fn export_html(state: &AppState, path: String, text: String, blocks: Vec<RenderedBlock>, output: String) -> Res<Vec<String>> {
+    let p = export_prepare(state, &path, &text, blocks);
+    let drawn = export::draw(&mut state.snippets.lock().unwrap(), &p, true, false);
+    let (html, mut warnings) = export::html::write(&p, &drawn);
+    warnings.extend(p.warnings.iter().cloned());
+    std::fs::write(&output, html).map_err(|e| e.to_string())?;
+    Ok(warnings)
+}
+
+/// Export a note as a Word document (.docx). Returns warnings.
+fn export_docx(state: &AppState, path: String, text: String, blocks: Vec<RenderedBlock>, output: String) -> Res<Vec<String>> {
+    let mut p = export_prepare(state, &path, &text, blocks);
+    export::docx::convert_images(&mut p);
+    let drawn = export::draw(&mut state.snippets.lock().unwrap(), &p, false, true);
+    let (bytes, mut warnings) = export::docx::write(&p, &drawn)?;
+    warnings.extend(p.warnings.iter().cloned());
+    std::fs::write(&output, bytes).map_err(|e| e.to_string())?;
+    Ok(warnings)
+}
+
+/// Export a note as portable Markdown: `output` plus `<name>_files/` with
+/// its attachments and drawings. Returns warnings.
+fn export_markdown(state: &AppState, path: String, text: String, blocks: Vec<RenderedBlock>, output: String) -> Res<Vec<String>> {
+    let root = state.root()?;
+    let mut map = rendered_map(blocks);
+    data_blocks(state, &path, &text, &mut map);
+    let resolve_note = |from: &str, target: &str| -> Option<String> {
+        state.with_index(|idx, r| links::Resolver::new(idx, r).resolve(from, target).map(|(p, _)| p)).ok().flatten()
+    };
+    export::markdown::write(&mut state.snippets.lock().unwrap(), &root, &path, &text, &map, &resolve_note, Path::new(&output))
+}
+
 /// Typst source a note compiles to (for "View generated Typst").
 fn generated_typst(state: &AppState, path: String, text: String, blocks: Vec<RenderedBlock>) -> String {
     let mut map = rendered_map(blocks);
@@ -816,6 +859,9 @@ pub fn dispatch(state: &AppState, cmd: &str, a: &Value) -> Result<Value, Value> 
         "save_attachment" => out(save_attachment(state, arg(a, "name")?, arg(a, "data")?, opt(a, "dir"))),
         "render_preview" => out(render_preview(state, arg(a, "path")?, arg(a, "text")?, arg(a, "blocks")?, a.get("known").and_then(|k| serde_json::from_value(k.clone()).ok()).unwrap_or_default())),
         "export_pdf" => out(export_pdf(state, arg(a, "path")?, arg(a, "text")?, arg(a, "blocks")?, arg(a, "output")?)),
+        "export_html" => out(export_html(state, arg(a, "path")?, arg(a, "text")?, arg(a, "blocks")?, arg(a, "output")?)),
+        "export_docx" => out(export_docx(state, arg(a, "path")?, arg(a, "text")?, arg(a, "blocks")?, arg(a, "output")?)),
+        "export_markdown" => out(export_markdown(state, arg(a, "path")?, arg(a, "text")?, arg(a, "blocks")?, arg(a, "output")?)),
         "generated_typst" => ok(generated_typst(state, arg(a, "path")?, arg(a, "text")?, arg(a, "blocks")?)),
         "render_block" => out(render_block(state, arg(a, "lang")?, arg(a, "code")?)),
         "block_typst" => out(block_typst(arg(a, "lang")?, arg(a, "code")?)),

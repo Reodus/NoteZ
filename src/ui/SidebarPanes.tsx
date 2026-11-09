@@ -14,6 +14,7 @@ import {
 import { ask } from "../core/native";
 import { askText, openMenu } from "./primitives";
 
+import { t, tn, num } from "../core/i18n";
 // ------------------------------------------------------------------ search
 
 const [query, setQuery] = createSignal("");
@@ -60,7 +61,7 @@ function SearchHelp() {
   return (
     <div class="search-help">
       <For each={SYNTAX}>{([k, v]) => <div><code>{k}</code><span>{v}</span></div>}</For>
-      <button class="link" onClick={() => setDialog({ kind: "help", doc: "SEARCH" })}>All search options…</button>
+      <button class="link" onClick={() => setDialog({ kind: "help", doc: "SEARCH" })}>{t("All search options…")}</button>
     </div>
   );
 }
@@ -118,18 +119,18 @@ export function SearchPane() {
         <input
           ref={input}
           dir="auto"
-          placeholder="Search notes…"
+          placeholder={t("Search notes…")}
           value={query()}
           onInput={(e) => setQuery(e.currentTarget.value)}
           onKeyDown={(e) => e.key === "Escape" && setQuery("")}
         />
         <Show when={query()}>
-          <button class="icon-btn small" title="Clear" onClick={() => setQuery("")}><X size={13} /></button>
+          <button class="icon-btn small" title={t("Clear")} onClick={() => setQuery("")}><X size={13} /></button>
         </Show>
-        <button class="icon-btn small" classList={{ active: help() }} title="Search syntax" onClick={() => setHelp(!help())}>
+        <button class="icon-btn small" classList={{ active: help() }} title={t("Search syntax")} onClick={() => setHelp(!help())}>
           <HelpCircle size={14} />
         </button>
-        <button class="icon-btn small" classList={{ active: replaceOn() }} title="Replace in vault (Ctrl+Shift+H)" onClick={() => setReplaceOn(!replaceOn())}>
+        <button class="icon-btn small" classList={{ active: replaceOn() }} title={t("Replace in vault (Ctrl+Shift+H)")} onClick={() => setReplaceOn(!replaceOn())}>
           <Replace size={14} />
         </button>
       </div>
@@ -139,11 +140,11 @@ export function SearchPane() {
       </Show>
       <Show when={!replaceOn()}>
         <div class="search-meta">
-          <Show when={error()} fallback={<Show when={query().trim()}>{busy() ? "Searching…" : `${hits().length}${hits().length >= 500 ? "+" : ""} results in ${grouped().length} notes`}</Show>}>
+          <Show when={error()} fallback={<Show when={query().trim()}>{busy() ? t("Searching…") : t("{results} results in {notes} notes", { results: num(hits().length) + (hits().length >= 500 ? "+" : ""), notes: grouped().length })}</Show>}>
             <span class="error-text">{error()}</span>
           </Show>
           <Show when={query().trim() && hits().length}>
-            <button class="link" title="Bookmark this search" onClick={() => toggleBookmark({ type: "search", query: query() })}>Bookmark</button>
+            <button class="link" title={t("Bookmark this search")} onClick={() => toggleBookmark({ type: "search", query: query() })}>{t("Bookmark")}</button>
           </Show>
         </div>
         <div class="search-results">
@@ -167,7 +168,7 @@ export function SearchPane() {
                     )}
                   </For>
                   <Show when={list.filter((h) => h.line > 0).length > 12}>
-                    <div class="search-more" onClick={() => openNote(path)}>{list.filter((h) => h.line > 0).length - 12} more…</div>
+                    <div class="search-more" onClick={() => openNote(path)}>{t("{n} more…", { n: list.filter((h) => h.line > 0).length - 12 })}</div>
                   </Show>
                 </Show>
               </div>
@@ -220,8 +221,8 @@ function ReplacePanel() {
     const paths = chosen();
     if (!paths.length) return;
     const n = total();
-    const ok = await ask(`Replace ${n} match${n > 1 ? "es" : ""} in ${paths.length} note${paths.length > 1 ? "s" : ""}?`, {
-      title: "Replace in vault", okLabel: "Replace", cancelLabel: "Cancel",
+    const ok = await ask(t("Replace {matches} in {notes}?", { matches: tn(n, "{n} match", "{n} matches"), notes: tn(paths.length, "{n} note", "{n} notes") }), {
+      title: t("Replace in vault"), okLabel: t("Replace"), cancelLabel: t("Cancel"),
     });
     if (!ok) return;
     setBusy(true);
@@ -232,7 +233,7 @@ function ReplacePanel() {
       for (const p of done.filter((p) => state.buffers[p])) {
         await reloadFromDisk(p);
       }
-      notify(`Replaced ${n} match${n > 1 ? "es" : ""} in ${done.length} note${done.length > 1 ? "s" : ""}`, "success");
+      notify(t("Replaced {matches} in {notes}", { matches: tn(n, "{n} match", "{n} matches"), notes: tn(done.length, "{n} note", "{n} notes") }), "success");
       setSkip(new Set<string>());
       refresh();
     } catch (e) {
@@ -264,23 +265,23 @@ function ReplacePanel() {
   return (
     <div class="replace-panel">
       <div class="search-box">
-        <input dir="auto" placeholder="Find" value={find()} onInput={(e) => setFind(e.currentTarget.value)} />
-        <Toggle on={matchCase()} set={setCase} title="Match case"><CaseSensitive size={15} /></Toggle>
-        <Toggle on={word()} set={setWord} title="Whole words"><WholeWord size={15} /></Toggle>
-        <Toggle on={regex()} set={setRegex} title="Regular expression ($1 in the replacement)"><Regex size={15} /></Toggle>
+        <input dir="auto" placeholder={t("Find")} value={find()} onInput={(e) => setFind(e.currentTarget.value)} />
+        <Toggle on={matchCase()} set={setCase} title={t("Match case")}><CaseSensitive size={15} /></Toggle>
+        <Toggle on={word()} set={setWord} title={t("Whole words")}><WholeWord size={15} /></Toggle>
+        <Toggle on={regex()} set={setRegex} title={t("Regular expression ($1 in the replacement)")}><Regex size={15} /></Toggle>
       </div>
       <div class="search-box">
-        <input dir="auto" placeholder="Replace with" value={repl()} onInput={(e) => setRepl(e.currentTarget.value)} />
+        <input dir="auto" placeholder={t("Replace with")} value={repl()} onInput={(e) => setRepl(e.currentTarget.value)} />
       </div>
       <div class="search-box">
-        <input placeholder="Only in… (path:Work tag:draft)" value={scope()} onInput={(e) => setScope(e.currentTarget.value)} />
+        <input placeholder={t("Only in… (path:Work tag:draft)")} value={scope()} onInput={(e) => setScope(e.currentTarget.value)} />
       </div>
       <div class="search-meta">
-        <Show when={error()} fallback={<Show when={find()}>{total()} matches in {chosen().length} notes</Show>}>
+        <Show when={error()} fallback={<Show when={find()}>{t("{matches} in {notes}", { matches: tn(total(), "{n} match", "{n} matches"), notes: tn(chosen().length, "{n} note", "{n} notes") })}</Show>}>
           <span class="error-text">{error()}</span>
         </Show>
         <button class="btn small primary" disabled={!total() || busy()} onClick={apply}>
-          <Replace size={13} /> Replace all
+          <Replace size={13} /> {t("Replace all")}
         </button>
       </div>
       <div class="search-results">
@@ -291,7 +292,7 @@ function ReplacePanel() {
                 <input
                   type="checkbox"
                   checked={!skip().has(f.path)}
-                  title="Include this note"
+                  title={t("Include this note")}
                   onChange={(e) => {
                     const s = new Set(skip());
                     e.currentTarget.checked ? s.delete(f.path) : s.add(f.path);
@@ -331,9 +332,9 @@ function TagRow(props: { node: TagNode; depth: number }) {
         onClick={() => searchFor(`tag:${n().tag}`)}
         onContextMenu={(e) =>
           openMenu(e, [
-            { label: "Search notes with this tag", icon: <Search size={15} />, run: () => searchFor(`tag:${n().tag}`) },
-            { label: "Bookmark this tag's search", icon: <BookmarkIcon size={15} />, run: () => toggleBookmark({ type: "search", query: `tag:${n().tag}` }) },
-            { label: "Rename tag…", icon: <Pencil size={15} />, run: () => renameTag(n().tag) },
+            { label: t("Search notes with this tag"), icon: <Search size={15} />, run: () => searchFor(`tag:${n().tag}`) },
+            { label: t("Bookmark this tag's search"), icon: <BookmarkIcon size={15} />, run: () => toggleBookmark({ type: "search", query: `tag:${n().tag}` }) },
+            { label: t("Rename tag…"), icon: <Pencil size={15} />, run: () => renameTag(n().tag) },
           ])
         }
         title={`#${n().tag}`}
@@ -354,14 +355,14 @@ function TagRow(props: { node: TagNode; depth: number }) {
 
 /** Rename a tag (and its nested tags) everywhere, through find & replace. */
 async function renameTag(tag: string) {
-  const to = (await askText(`Rename #${tag} to`, tag, "new/tag"))?.trim().replace(/^#/, "");
+  const to = (await askText(t("Rename #{tag} to", { tag }), tag, "new/tag"))?.trim().replace(/^#/, "");
   if (!to || to === tag) return;
-  if (!/^[\p{L}\p{N}_\-/]+$/u.test(to)) return notify("Tags may contain letters, digits, _, - and /", "error");
+  if (!/^[\p{L}\p{N}_\-/]+$/u.test(to)) return notify(t("Tags may contain letters, digits, _, - and /"), "error");
   await saveAll();
   try {
     const changed = await ipc.renameTag(tag, to);
     for (const p of changed) if (state.buffers[p]) await reloadFromDisk(p);
-    notify(`Renamed #${tag} to #${to} in ${changed.length} note${changed.length === 1 ? "" : "s"}`, "success");
+    notify(t("Renamed #{tag} to #{to} in {notes}", { tag, to, notes: tn(changed.length, "{n} note", "{n} notes") }), "success");
   } catch (e) {
     notify(String(e), "error");
   }
@@ -370,7 +371,7 @@ async function renameTag(tag: string) {
 export function TagsPane() {
   return (
     <div class="tree tags-pane">
-      <For each={tagTree()} fallback={<div class="empty-hint"><p>No tags yet.</p><p class="muted">Write <code>#tag</code> in a note or add <code>tags:</code> to its properties.</p></div>}>
+      <For each={tagTree()} fallback={<div class="empty-hint"><p>{t("No tags yet.")}</p><p class="muted">{t("Write")} <code>#tag</code> {t("in a note or add")} <code>tags:</code> {t("to its properties.")}</p></div>}>
         {(n) => <TagRow node={n} depth={0} />}
       </For>
     </div>
@@ -416,12 +417,12 @@ function BookmarkRow(props: { b: Bookmark; depth: number }) {
   };
   const menu = (e: MouseEvent) =>
     openMenu(e, [
-      ...(b().type === "group" ? [] : [{ label: "Open", icon: <Check size={15} />, run: () => openBookmark(b()) }]),
-      { label: "Rename…", icon: <Pencil size={15} />, run: async () => {
-        const t = await askText("Bookmark name", bookmarkLabel(b()));
-        if (t !== null) renameBookmark(b(), t.trim());
+      ...(b().type === "group" ? [] : [{ label: t("Open"), icon: <Check size={15} />, run: () => openBookmark(b()) }]),
+      { label: t("Rename…"), icon: <Pencil size={15} />, run: async () => {
+        const name = await askText(t("Bookmark name"), bookmarkLabel(b()));
+        if (name !== null) renameBookmark(b(), name.trim());
       } },
-      { label: b().type === "group" ? "Delete group" : "Remove bookmark", icon: <Trash2 size={15} />, danger: true, run: () => removeBookmark(b()) },
+      { label: b().type === "group" ? t("Delete group") : t("Remove bookmark"), icon: <Trash2 size={15} />, danger: true, run: () => removeBookmark(b()) },
     ]);
   return (
     <>
@@ -477,8 +478,8 @@ export function BookmarksPane() {
         each={bookmarks()}
         fallback={
           <div class="empty-hint">
-            <p>No bookmarks yet.</p>
-            <p class="muted">Bookmark a note from its ⋯ menu or the file tree, a heading from its right-click menu, or drag notes here.</p>
+            <p>{t("No bookmarks yet.")}</p>
+            <p class="muted">{t("Bookmark a note from its ⋯ menu or the file tree, a heading from its right-click menu, or drag notes here.")}</p>
           </div>
         }
       >
@@ -489,7 +490,7 @@ export function BookmarksPane() {
 }
 
 export async function newBookmarkGroup() {
-  const t = (await askText("New bookmark group", "", "Group name"))?.trim();
-  if (t) addGroup(t);
+  const name = (await askText(t("New bookmark group"), "", t("Group name")))?.trim();
+  if (name) addGroup(name);
 }
 

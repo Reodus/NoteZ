@@ -5,6 +5,7 @@ Chinese, Japanese, Korean, Hindi, Bengali, Tamil, Thai, Russian, Greek,
 Amharic and many more, including several languages in one note. This page
 explains what NoteZ does for you automatically and what you can change.
 
+- [The interface language](#the-interface-language)
 - [The note's language](#the-notes-language)
 - [Direction (right-to-left and left-to-right)](#direction-right-to-left-and-left-to-right)
 - [A different language for one block or phrase](#a-different-language-for-one-block-or-phrase)
@@ -14,6 +15,27 @@ explains what NoteZ does for you automatically and what you can change.
 - [Search](#search)
 - [Word count](#word-count)
 - [Supported languages](#supported-languages)
+
+## The interface language
+
+Menus, dialogs, settings and messages can be shown in **English** or
+**Persian (فارسی)**. Choose it in **Settings → Languages → Interface
+language**:
+
+| Choice | What you get |
+|---|---|
+| Automatic (system language) | Persian when your system language is Persian, otherwise English. This is the default. |
+| English | English, left to right. |
+| فارسی (Persian) | Persian, with the whole window mirrored right to left and Persian digits in counts and dates. |
+
+NoteZ saves your open notes and reloads the window to apply the change.
+
+The interface language only changes the app around your notes. It never
+changes a note: each note keeps its own language and direction (see below),
+and the editor and PDF look exactly the same in either interface language.
+
+Translations live in `src/locales/` (one file per language, English text →
+translation). Anything not translated yet is shown in English.
 
 ## The note's language
 

@@ -25,6 +25,7 @@ import { EMOJI, findEmoji } from "./emoji";
 import { formatDate } from "../plugins/templates";
 import { FENCE_LANGUAGES } from "./completions";
 
+import { t } from "../core/i18n";
 const tpl = (id: string) => TEMPLATES.find((t) => t.id === id)!;
 const diagram = (id: string) => (v: EditorView) => {
   const t = tpl(id);
@@ -46,55 +47,55 @@ function size(a: string, b: string): [number, number] {
 }
 
 export const BUILTIN: (SlashCommand & { section: string; icon: string })[] = [
-  { section: "Basic", id: "text", title: "Text", icon: "¶", keys: "paragraph normal plain", run: (v) => setBlockStyle(v, "p") },
-  { section: "Basic", id: "h1", title: "Heading 1", icon: "H1", keys: "title heading", hint: "#", run: (v) => setBlockStyle(v, "h1") },
-  { section: "Basic", id: "h2", title: "Heading 2", icon: "H2", keys: "heading subtitle", hint: "##", run: (v) => setBlockStyle(v, "h2") },
-  { section: "Basic", id: "h3", title: "Heading 3", icon: "H3", keys: "heading", hint: "###", run: (v) => setBlockStyle(v, "h3") },
+  { section: "Basic", id: "text", title: t("Text"), icon: "¶", keys: "paragraph normal plain", run: (v) => setBlockStyle(v, "p") },
+  { section: "Basic", id: "h1", title: t("Heading 1"), icon: "H1", keys: "title heading", hint: "#", run: (v) => setBlockStyle(v, "h1") },
+  { section: "Basic", id: "h2", title: t("Heading 2"), icon: "H2", keys: "heading subtitle", hint: "##", run: (v) => setBlockStyle(v, "h2") },
+  { section: "Basic", id: "h3", title: t("Heading 3"), icon: "H3", keys: "heading", hint: "###", run: (v) => setBlockStyle(v, "h3") },
   {
-    section: "Basic", id: "heading", title: "Heading…", icon: "H", keys: "heading level", hint: "/heading 4",
+    section: "Basic", id: "heading", title: t("Heading…"), icon: "H", keys: "heading level", hint: "/heading 4",
     args: [{ name: "level 1–6", options: () => ["1", "2", "3", "4", "5", "6"] }],
     run: (v, [n]) => setBlockStyle(v, `h${Math.min(6, Math.max(1, Number(n) || 1))}` as "h1"),
   },
-  { section: "Basic", id: "bullet", title: "Bulleted list", icon: "•", keys: "ul list unordered", hint: "-", run: (v) => toggleList(v, "bullet") },
-  { section: "Basic", id: "numbered", title: "Numbered list", icon: "1.", keys: "ol list ordered", hint: "1.", run: (v) => toggleList(v, "number") },
-  { section: "Basic", id: "todo", title: "To-do list", icon: "☑", keys: "task checkbox checklist", hint: "- [ ]", run: (v) => toggleList(v, "task"), mdOnly: true },
-  { section: "Basic", id: "quote", title: "Quote", icon: "❝", keys: "blockquote citation", hint: ">", run: (v) => setBlockStyle(v, "quote") },
-  { section: "Basic", id: "divider", title: "Divider", icon: "—", keys: "hr rule line separator", hint: "---", run: (v) => insertBlock(v, isTypst() ? "#line(length: 100%)" : "---") },
+  { section: "Basic", id: "bullet", title: t("Bulleted list"), icon: "•", keys: "ul list unordered", hint: "-", run: (v) => toggleList(v, "bullet") },
+  { section: "Basic", id: "numbered", title: t("Numbered list"), icon: "1.", keys: "ol list ordered", hint: "1.", run: (v) => toggleList(v, "number") },
+  { section: "Basic", id: "todo", title: t("To-do list"), icon: "☑", keys: "task checkbox checklist", hint: "- [ ]", run: (v) => toggleList(v, "task"), mdOnly: true },
+  { section: "Basic", id: "quote", title: t("Quote"), icon: "❝", keys: "blockquote citation", hint: ">", run: (v) => setBlockStyle(v, "quote") },
+  { section: "Basic", id: "divider", title: t("Divider"), icon: "—", keys: "hr rule line separator", hint: "---", run: (v) => insertBlock(v, isTypst() ? "#line(length: 100%)" : "---") },
   {
-    section: "Basic", id: "table", title: "Table", icon: "▦", keys: "grid", hint: "/table 3x4",
+    section: "Basic", id: "table", title: t("Table"), icon: "▦", keys: "grid", hint: "/table 3x4",
     args: [{ name: "rows×columns" }],
     run: (v, [a = "", b = ""]) => insertTable(v, ...size(a, b)),
   },
   {
-    section: "Basic", id: "code", title: "Code block", icon: "</>", keys: "snippet program fence", hint: "/code python", mdOnly: true,
+    section: "Basic", id: "code", title: t("Code block"), icon: "</>", keys: "snippet program fence", hint: "/code python", mdOnly: true,
     args: [{ name: "language", options: () => FENCE_LANGUAGES }],
     run: (v, [lang]) => insertFenced(v, lang ?? "", ""),
   },
-  { section: "Basic", id: "link", title: "Link", icon: "🔗", keys: "url web", hint: "/link Note", args: [{ name: "note or URL", options: notes }],
+  { section: "Basic", id: "link", title: t("Link"), icon: "🔗", keys: "url web", hint: "/link Note", args: [{ name: "note or URL", options: notes }],
     run: (v, [t]) => {
       if (!t) return insertLink(v);
       if (/^https?:/i.test(t)) return insertText(v, isTypst() ? `#link("${t}")` : `<${t}>`);
       insertText(v, isTypst() ? `#link(<${t}>)` : `[[${t}]]`);
     } },
-  { section: "Basic", id: "embed", title: "Embed note or image", icon: "⧉", keys: "transclude include image", hint: "/embed Note", mdOnly: true,
+  { section: "Basic", id: "embed", title: t("Embed note or image"), icon: "⧉", keys: "transclude include image", hint: "/embed Note", mdOnly: true,
     args: [{ name: "note or file", options: notes }], run: (v, [t]) => insertText(v, `![[${t ?? ""}]]`, t ? undefined : 3) },
-  { section: "Basic", id: "footnote", title: "Footnote", icon: "¹", keys: "note reference", run: (v) => insertFootnote(v) },
+  { section: "Basic", id: "footnote", title: t("Footnote"), icon: "¹", keys: "note reference", run: (v) => insertFootnote(v) },
   {
-    section: "Basic", id: "tag", title: "Tag", icon: "#", keys: "label category", hint: "/tag name", mdOnly: true,
+    section: "Basic", id: "tag", title: t("Tag"), icon: "#", keys: "label category", hint: "/tag name", mdOnly: true,
     args: [{ name: "tag", options: () => allTags().map((t) => t.tag) }],
     run: (v, [t]) => insertText(v, `#${(t ?? "").replace(/^#/, "").replace(/\s+/g, "-")}`),
   },
   {
-    section: "Basic", id: "emoji", title: "Emoji", icon: "😀", keys: "smiley icon", hint: "/emoji smile  ·  :smile:",
+    section: "Basic", id: "emoji", title: t("Emoji"), icon: "😀", keys: "smiley icon", hint: "/emoji smile  ·  :smile:",
     args: [{ name: "name", options: () => EMOJI.map(([n]) => n) }],
     run: (v, [n]) => insertText(v, (n && (EMOJI.find(([k]) => k === n)?.[1] ?? findEmoji(n, 1)[0]?.[1])) || "😀"),
   },
 
-  { section: "Math", id: "math", title: "Equation", icon: "∑", keys: "latex formula display", hint: "$$", run: (v) => insertMath(v, true) },
-  { section: "Math", id: "inline-math", title: "Inline math", icon: "x²", keys: "latex formula", hint: "$", run: (v) => insertMath(v, false) },
+  { section: "Math", id: "math", title: t("Equation"), icon: "∑", keys: "latex formula display", hint: "$$", run: (v) => insertMath(v, true) },
+  { section: "Math", id: "inline-math", title: t("Inline math"), icon: "x²", keys: "latex formula", hint: "$", run: (v) => insertMath(v, false) },
 
   {
-    section: "Callouts", id: "callout", title: "Callout", icon: "ℹ", keys: "box admonition alert", hint: "/callout warning Title", mdOnly: true,
+    section: "Callouts", id: "callout", title: t("Callout"), icon: "ℹ", keys: "box admonition alert", hint: "/callout warning Title", mdOnly: true,
     args: [{ name: "type", options: () => Object.keys(CALLOUTS) }, { name: "title" }],
     run: (v, [type, title]) => {
       const t = type && CALLOUTS[type.toLowerCase()] ? type.toLowerCase() : "note";
@@ -103,25 +104,25 @@ export const BUILTIN: (SlashCommand & { section: string; icon: string })[] = [
     },
   },
   ...Object.entries(CALLOUTS).map(([type, c]) => ({
-    section: "Callouts", id: type, title: `Callout: ${c.label}`, icon: c.icon, keys: `callout box admonition`, mdOnly: true,
+    section: "Callouts", id: type, title: t("Callout: {name}", { name: t(c.label) }), icon: c.icon, keys: `callout box admonition`, mdOnly: true,
     run: (v: EditorView) => insertCallout(v, type),
   })),
 
   {
-    section: "Charts & diagrams", id: "chart", title: "Chart", icon: "📊", keys: "graph plot", hint: "/chart pie",
+    section: "Charts & diagrams", id: "chart", title: t("Chart"), icon: "📊", keys: "graph plot", hint: "/chart pie",
     args: [{ name: "kind", options: () => CHARTS }], run: (v, [k]) => diagram(CHARTS.includes(k ?? "") ? k! : "bar")(v),
   },
   {
-    section: "Charts & diagrams", id: "diagram", title: "Diagram", icon: "⇉", keys: "flowchart mindmap timeline sequence", hint: "/diagram mindmap",
+    section: "Charts & diagrams", id: "diagram", title: t("Diagram"), icon: "⇉", keys: "flowchart mindmap timeline sequence", hint: "/diagram mindmap",
     args: [{ name: "kind", options: () => DIAGRAMS }], run: (v, [k]) => diagram(DIAGRAMS.includes(k ?? "") ? k! : "flow")(v),
   },
-  { section: "Charts & diagrams", id: "flowchart", title: "Flowchart", icon: "⇉", keys: "flow diagram process", run: diagram("flow") },
-  { section: "Charts & diagrams", id: "mindmap", title: "Mind map", icon: "✺", keys: "tree brainstorm", run: diagram("mindmap") },
-  { section: "Charts & diagrams", id: "timeline", title: "Timeline", icon: "⟶", keys: "history events", run: diagram("timeline") },
-  { section: "Charts & diagrams", id: "mermaid", title: "Sequence diagram", icon: "⇄", keys: "mermaid sequence", run: diagram("seq") },
-  { section: "Charts & diagrams", id: "shapes", title: "Shapes", icon: "◯", keys: "draw cetz shape", run: diagram("shapes") },
+  { section: "Charts & diagrams", id: "flowchart", title: t("Flowchart"), icon: "⇉", keys: "flow diagram process", run: diagram("flow") },
+  { section: "Charts & diagrams", id: "mindmap", title: t("Mind map"), icon: "✺", keys: "tree brainstorm", run: diagram("mindmap") },
+  { section: "Charts & diagrams", id: "timeline", title: t("Timeline"), icon: "⟶", keys: "history events", run: diagram("timeline") },
+  { section: "Charts & diagrams", id: "mermaid", title: t("Sequence diagram"), icon: "⇄", keys: "mermaid sequence", run: diagram("seq") },
+  { section: "Charts & diagrams", id: "shapes", title: t("Shapes"), icon: "◯", keys: "draw cetz shape", run: diagram("shapes") },
   {
-    section: "Data", id: "base", title: "Database view", icon: "▦", keys: "base bases table database board kanban cards", hint: "/base board", mdOnly: true,
+    section: "Data", id: "base", title: t("Database view"), icon: "▦", keys: "base bases table database board kanban cards", hint: "/base board", mdOnly: true,
     args: [{ name: "layout", options: () => ["table", "cards", "list", "board"] }],
     run: (v, [k]) => {
       const t = ["table", "cards", "list", "board"].includes(k ?? "") ? k! : "table";
@@ -130,46 +131,46 @@ export const BUILTIN: (SlashCommand & { section: string; icon: string })[] = [
     },
   },
   {
-    section: "Data", id: "query", title: "Query", icon: "⌕", keys: "search results list tasks find", hint: "/query tag:project", mdOnly: true,
+    section: "Data", id: "query", title: t("Query"), icon: "⌕", keys: "search results list tasks find", hint: "/query tag:project", mdOnly: true,
     args: [{ name: "search, e.g. tag:x path:y", options: () => ["tag:", "path:", "prop:status=", "type:task", "type:heading"] }],
     run: (v, args) => insertFenced(v, "query", args.filter(Boolean).join(" ") || "tag:todo"),
   },
-  { section: "Charts & diagrams", id: "gallery", title: "More diagrams…", icon: "✦", keys: "gallery template diagram chart", run: () => setDialog({ kind: "diagrams" }) },
+  { section: "Charts & diagrams", id: "gallery", title: t("More diagrams…"), icon: "✦", keys: "gallery template diagram chart", run: () => setDialog({ kind: "diagrams" }) },
 
-  { section: "Layout", id: "center", title: "Centered block", icon: "≡", keys: "align middle", mdOnly: true, run: block("align=center") },
+  { section: "Layout", id: "center", title: t("Centered block"), icon: "≡", keys: "align middle", mdOnly: true, run: block("align=center") },
   {
-    section: "Layout", id: "columns", title: "Columns", icon: "▥", keys: "column layout side by side", hint: "/columns 3", mdOnly: true,
+    section: "Layout", id: "columns", title: t("Columns"), icon: "▥", keys: "column layout side by side", hint: "/columns 3", mdOnly: true,
     args: [{ name: "count 2–4", options: () => ["2", "3", "4"] }],
     run: (v, [n]) => block(`columns=${Math.min(4, Math.max(2, Number(n) || 2))}`)(v),
   },
-  { section: "Layout", id: "ltr", title: "Left-to-right block", icon: "⇥", keys: "direction english", mdOnly: true, run: block("dir=ltr") },
-  { section: "Layout", id: "rtl", title: "Right-to-left block", icon: "⇤", keys: "direction arabic persian urdu", mdOnly: true, run: block("dir=rtl") },
+  { section: "Layout", id: "ltr", title: t("Left-to-right block"), icon: "⇥", keys: "direction english", mdOnly: true, run: block("dir=ltr") },
+  { section: "Layout", id: "rtl", title: t("Right-to-left block"), icon: "⇤", keys: "direction arabic persian urdu", mdOnly: true, run: block("dir=rtl") },
   {
-    section: "Layout", id: "lang", title: "Block in another language", icon: "文", keys: "language direction font", hint: "/lang ja", mdOnly: true,
+    section: "Layout", id: "lang", title: t("Block in another language"), icon: "文", keys: "language direction font", hint: "/lang ja", mdOnly: true,
     args: [{ name: "language code", options: () => LANGUAGE_CODES }], run: (v, [l]) => block(`lang=${l || "en"}`)(v),
   },
-  { section: "Layout", id: "pagebreak", title: "Page break", icon: "⤓", keys: "new page", run: (v) => insertPageBreak(v) },
-  { section: "Layout", id: "toc", title: "Table of contents", icon: "☰", keys: "outline contents", run: (v) => insertToc(v) },
+  { section: "Layout", id: "pagebreak", title: t("Page break"), icon: "⤓", keys: "new page", run: (v) => insertPageBreak(v) },
+  { section: "Layout", id: "toc", title: t("Table of contents"), icon: "☰", keys: "outline contents", run: (v) => insertToc(v) },
 
   {
-    section: "Date & time", id: "today", title: "Today's date", icon: "📅", keys: "date day now",
+    section: "Date & time", id: "today", title: t("Today's date"), icon: "📅", keys: "date day now",
     run: (v) => insertText(v, formatDate(new Date(), "YYYY-MM-DD")),
   },
-  { section: "Date & time", id: "tomorrow", title: "Tomorrow's date", icon: "📅", keys: "date next day", run: (v) => insertText(v, formatDate(day(1), "YYYY-MM-DD")) },
-  { section: "Date & time", id: "yesterday", title: "Yesterday's date", icon: "📅", keys: "date previous day", run: (v) => insertText(v, formatDate(day(-1), "YYYY-MM-DD")) },
+  { section: "Date & time", id: "tomorrow", title: t("Tomorrow's date"), icon: "📅", keys: "date next day", run: (v) => insertText(v, formatDate(day(1), "YYYY-MM-DD")) },
+  { section: "Date & time", id: "yesterday", title: t("Yesterday's date"), icon: "📅", keys: "date previous day", run: (v) => insertText(v, formatDate(day(-1), "YYYY-MM-DD")) },
   {
-    section: "Date & time", id: "date", title: "Date…", icon: "📆", keys: "format day", hint: "/date dddd, D MMMM YYYY",
+    section: "Date & time", id: "date", title: t("Date…"), icon: "📆", keys: "format day", hint: "/date dddd, D MMMM YYYY",
     args: [{ name: "format", options: () => ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY", "D MMMM YYYY", "dddd, D MMMM YYYY", "MMMM YYYY", "YYYY-[W]ww"] }],
     run: (v, [f]) => insertText(v, formatDate(new Date(), f || "YYYY-MM-DD")),
   },
   {
-    section: "Date & time", id: "time", title: "Time", icon: "🕒", keys: "clock hour now", hint: "/time HH:mm",
+    section: "Date & time", id: "time", title: t("Time"), icon: "🕒", keys: "clock hour now", hint: "/time HH:mm",
     args: [{ name: "format", options: () => ["HH:mm", "HH:mm:ss", "h:mm A"] }],
     run: (v, [f]) => insertText(v, formatDate(new Date(), f || "HH:mm")),
   },
-  { section: "Date & time", id: "now", title: "Date and time", icon: "🕒", keys: "timestamp datetime", run: (v) => insertText(v, formatDate(new Date(), "YYYY-MM-DD HH:mm")) },
+  { section: "Date & time", id: "now", title: t("Date and time"), icon: "🕒", keys: "timestamp datetime", run: (v) => insertText(v, formatDate(new Date(), "YYYY-MM-DD HH:mm")) },
   {
-    section: "Date & time", id: "daily", title: "Link to today's daily note", icon: "🗓", keys: "journal diary today", mdOnly: true,
+    section: "Date & time", id: "daily", title: t("Link to today's daily note"), icon: "🗓", keys: "journal diary today", mdOnly: true,
     run: async (v) => {
       const { dailyPath } = await import("../plugins/daily");
       insertText(v, `[[${stem(dailyPath(new Date()))}]]`);
@@ -293,7 +294,7 @@ export async function slashCompletion(ctx: CompletionContext): Promise<Completio
       ...(typed || !matches.length
         ? [{
             label: `${c.title}${p.args.trim() ? ` — ${p.args.trim()}` : ""}`,
-            detail: "↵ insert",
+            detail: t("↵ insert"),
             boost: 99,
             apply: (v: EditorView, comp: Completion, _f: number, to: number) => runner(c, done)(v, comp, p.from, Math.max(to, lineEnd)),
           } as Completion]
@@ -332,7 +333,7 @@ export async function slashCompletion(ctx: CompletionContext): Promise<Completio
       icon: c.icon ?? "⚡",
       slash: c,
       boost: -idx,
-      section: { name: c.section ?? "Plugins", rank: SECTION_RANK[c.section ?? "Plugins"] ?? 9 },
+      section: { name: t(c.section ?? "Plugins"), rank: SECTION_RANK[c.section ?? "Plugins"] ?? 9 },
       apply: runner(c, []),
     })),
   };

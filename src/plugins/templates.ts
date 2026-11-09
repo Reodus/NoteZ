@@ -10,6 +10,7 @@ import { frontmatterRange, editFrontmatter, readFrontmatter } from "../core/fron
 import { insertText } from "../editor/format";
 import { parseDocument } from "yaml";
 
+import { t } from "../core/i18n";
 /** The templates folder: the setting, or a top-level folder named like "Templates". */
 export function templatesDir(): string | null {
   if (prefs.templatesFolder.trim()) return prefs.templatesFolder.trim().replace(/^\/+|\/+$/g, "");
@@ -113,7 +114,7 @@ async function chooseTemplate(placeholder: string, use: (path: string) => void) 
   const list = templates();
   if (!list.length) {
     const dir = templatesDir();
-    notify(dir ? `No templates in "${dir}".` : 'No templates folder. Create a "Templates" folder or set one in Settings → Files.', "error");
+    notify(dir ? t("No templates in \"{dir}\".", { dir }) : t("No templates folder. Create a \"Templates\" folder or set one in Settings → Files."), "error");
     return;
   }
   pick(placeholder, list.map((p) => ({ label: stem(p), detail: dirname(p), run: () => use(p) })));
@@ -135,7 +136,7 @@ async function insertTemplate(path: string) {
 }
 
 async function newFromTemplate(path: string) {
-  const name = await askText("New note from template", "", "Note name");
+  const name = await askText(t("New note from template"), "", t("Note name"));
   if (!name?.trim()) return;
   const tpl = await ipc.read(path);
   const dir = state.active ? dirname(state.active) : "";
@@ -145,11 +146,11 @@ async function newFromTemplate(path: string) {
 
 export const templatesPlugin: BuiltinPlugin = {
   id: "core.templates",
-  name: "Templates",
-  description: "New notes from templates and inserting templates ({{title}}, {{date:YYYY-MM-DD}}, {{time}}).",
+  name: t("Templates"),
+  description: t("New notes from templates and inserting templates ({{title}}, {{date:YYYY-MM-DD}}, {{time}})."),
   optional: true,
   onload(api) {
-    api.commands.register({ id: "template.new", title: "New note from template…", key: "Mod-Alt-n", run: () => chooseTemplate("Template for the new note…", newFromTemplate) });
-    api.commands.register({ id: "template.insert", title: "Insert template…", key: "Mod-Alt-t", run: () => chooseTemplate("Insert template…", insertTemplate) });
+    api.commands.register({ id: "template.new", title: t("New note from template…"), key: "Mod-Alt-n", run: () => chooseTemplate(t("Template for the new note…"), newFromTemplate) });
+    api.commands.register({ id: "template.insert", title: t("Insert template…"), key: "Mod-Alt-t", run: () => chooseTemplate(t("Insert template…"), insertTemplate) });
   },
 };

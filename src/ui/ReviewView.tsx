@@ -11,6 +11,7 @@ import { previewHtml } from "../core/blocks";
 import { hydrateImages } from "../editor/livepreview";
 import { srsSettings } from "../core/srs";
 
+import { t, tn, num } from "../core/i18n";
 /** Markdown (with $math$, images, ==marks==) into `el`. */
 async function renderInto(el: HTMLElement, md: string) {
   el.innerHTML = await previewHtml(md);
@@ -135,28 +136,28 @@ function Session(props: { deck: string | null; onDone: () => void }) {
   return (
     <div class="srs-session">
       <div class="srs-session-head">
-        <button class="btn small" onClick={props.onDone}><Layers size={14} /> Decks</button>
-        <span class="srs-deck-name" dir="auto">{props.deck ?? "All decks"}</span>
+        <button class="btn small" onClick={props.onDone}><Layers size={14} /> {t("Decks")}</button>
+        <span class="srs-deck-name" dir="auto">{props.deck ?? t("All decks")}</span>
         <span class="grow" />
-        <span class="srs-counts" title="New · learning · due">
+        <span class="srs-counts" title={t("New · learning · due")}>
           <span class="n">{counts().new}</span> <span class="l">{counts().learn}</span> <span class="d">{counts().due}</span>
         </span>
-        <button class="btn small icon" title="Undo (U)" disabled={!canUndo()} onClick={() => void back()}><Undo2 size={14} /></button>
+        <button class="btn small icon" title={t("Undo (U)")} disabled={!canUndo()} onClick={() => void back()}><Undo2 size={14} /></button>
       </div>
-      <Show when={loaded()} fallback={<div class="srs-empty">Loading…</div>}>
+      <Show when={loaded()} fallback={<div class="srs-empty">{t("Loading…")}</div>}>
         <Show when={card()} fallback={
           <div class="srs-empty">
             <div class="srs-big">🎉</div>
-            <p>{done() ? `Done for now: ${done()} card${done() === 1 ? "" : "s"} reviewed.` : "Nothing to study in this deck right now."}</p>
-            <button class="btn primary" onClick={props.onDone}>Back to decks</button>
+            <p>{done() ? tn(done(), t("Done for now: {n} card reviewed."), t("Done for now: {n} cards reviewed.")) : t("Nothing to study in this deck right now.")}</p>
+            <button class="btn primary" onClick={props.onDone}>{t("Back to decks")}</button>
           </div>
         }>
           {(c) => (
             <>
               <div class="srs-card" classList={{ cloze: c().kind === "cloze" }}>
                 <div class="srs-meta">
-                  <span class="srs-kind">{c().state === 0 ? "New" : c().state === 2 ? "Review" : "Learning"}</span>
-                  <a class="srs-source" title="Open the note (E)" onClick={edit}><Pencil size={12} /> {stem(c().path)}</a>
+                  <span class="srs-kind">{c().state === 0 ? t("New") : c().state === 2 ? t("Review") : t("Learning")}</span>
+                  <a class="srs-source" title={t("Open the note (E)")} onClick={edit}><Pencil size={12} /> {stem(c().path)}</a>
                 </div>
                 <CardFace md={c().front} />
                 <Show when={shown()}>
@@ -166,7 +167,7 @@ function Session(props: { deck: string | null; onDone: () => void }) {
               </div>
               <div class="srs-actions">
                 <Show when={shown()} fallback={
-                  <button class="btn primary srs-show" onClick={() => setShown(true)}>Show answer <kbd>Space</kbd></button>
+                  <button class="btn primary srs-show" onClick={() => setShown(true)}>{t("Show answer")} <kbd>{t("Space")}</kbd></button>
                 }>
                   <For each={GRADES}>
                     {([g, label]) => (
@@ -205,7 +206,7 @@ function Heatmap(props: { days: Record<string, number> }) {
   const level = (n: number) => (n === 0 ? 0 : Math.min(4, Math.ceil((n / max()) * 4)));
   return (
     <div class="srs-heatmap">
-      <For each={cells()}>{(c) => <span class={`h${level(c.n)}`} title={`${c.date}: ${c.n} review${c.n === 1 ? "" : "s"}`} />}</For>
+      <For each={cells()}>{(c) => <span class={`h${level(c.n)}`} title={`${c.date}: ${tn(c.n, "{n} review", "{n} reviews")}`} />}</For>
     </div>
   );
 }
@@ -223,18 +224,18 @@ function Overview(props: { onStudy: (deck: string | null) => void }) {
       <Show when={ov.error}>
         <div class="base-errors">{String(ov.error)}</div>
       </Show>
-      <Show when={ov()} fallback={<div class="srs-empty">Loading…</div>}>
+      <Show when={ov()} fallback={<div class="srs-empty">{t("Loading…")}</div>}>
         <Show when={ov()!.decks.length} fallback={
           <div class="srs-empty">
             <div class="srs-big"><BookOpen size={36} /></div>
-            <p>No flashcards yet. Tag a note <code>#flashcards</code> and write cards in it:</p>
+            <p>{t("No flashcards yet. Tag a note")} <code>#flashcards</code> {t("and write cards in it:")}</p>
             <pre class="srs-sample">{"#flashcards\n\nperro::dog\nThe ==mitochondria== is the powerhouse of the cell.\n\nWhat does FSRS stand for?\n?\nFree Spaced Repetition Scheduler"}</pre>
-            <button class="btn" onClick={() => setDialog({ kind: "help", doc: "FLASHCARDS" })}>How to write cards</button>
+            <button class="btn" onClick={() => setDialog({ kind: "help", doc: "FLASHCARDS" })}>{t("How to write cards")}</button>
           </div>
         }>
           <table class="srs-decks">
             <thead>
-              <tr><th>Deck</th><th class="n">New</th><th class="l">Learning</th><th class="d">Due</th><th>Cards</th><th /></tr>
+              <tr><th>{t("Deck")}</th><th class="n">{t("New")}</th><th class="l">{t("Learning")}</th><th class="d">{t("Due")}</th><th>{t("Cards")}</th><th /></tr>
             </thead>
             <tbody>
               <For each={ov()!.decks}>
@@ -245,7 +246,7 @@ function Overview(props: { onStudy: (deck: string | null) => void }) {
                     <td class="l">{d.learning}</td>
                     <td class="d">{d.due}</td>
                     <td class="muted">{d.total}</td>
-                    <td><button class="btn small" disabled={!studyable(d)} onClick={() => props.onStudy(d.name)}>Study</button></td>
+                    <td><button class="btn small" disabled={!studyable(d)} onClick={() => props.onStudy(d.name)}>{t("Study")}</button></td>
                   </tr>
                 )}
               </For>
@@ -256,26 +257,26 @@ function Overview(props: { onStudy: (deck: string | null) => void }) {
               Study all{studyable(total()) ? ` (${total().new + total().learning + total().due})` : ""}
             </button>
             <span class="field-hint">
-              Reviewed today: {ov()!.reviewed_today} · new cards left today: {ov()!.new_left_today}
+              {t("Reviewed today: {reviewed} · new cards left today: {left}", { reviewed: ov()!.reviewed_today, left: ov()!.new_left_today })}
             </span>
           </div>
         </Show>
       </Show>
       <Show when={stats() && stats()!.total_reviews + stats()!.young + stats()!.mature + stats()!.new > 0}>
-        <h4 class="srs-h">Activity</h4>
+        <h4 class="srs-h">{t("Activity")}</h4>
         <Heatmap days={stats()!.days} />
-        <h4 class="srs-h">Due in the next 30 days</h4>
+        <h4 class="srs-h">{t("Due in the next 30 days")}</h4>
         <div class="srs-forecast">
           <For each={stats()!.forecast}>
-            {(n, i) => <span style={{ height: `${Math.round((n / Math.max(1, ...stats()!.forecast)) * 100)}%` }} title={`${i() === 0 ? "Today" : `In ${i()} day${i() === 1 ? "" : "s"}`}: ${n}`} />}
+            {(n, i) => <span style={{ height: `${Math.round((n / Math.max(1, ...stats()!.forecast)) * 100)}%` }} title={`${i() === 0 ? t("Today") : tn(i(), "In {n} day", "In {n} days")}: ${num(n)}`} />}
           </For>
         </div>
         <div class="srs-legend">
-          <span><i class="n" /> New {stats()!.new}</span>
+          <span><i class="n" /> {t("New")} {num(stats()!.new)}</span>
           <span><i class="l" /> Learning {stats()!.learning}</span>
           <span><i class="y" /> Young {stats()!.young}</span>
           <span><i class="m" /> Mature {stats()!.mature}</span>
-          <span class="muted">{stats()!.total_reviews} reviews in all</span>
+          <span class="muted">{tn(stats()!.total_reviews, "{n} review in all", "{n} reviews in all")}</span>
         </div>
       </Show>
     </div>
@@ -285,14 +286,14 @@ function Overview(props: { onStudy: (deck: string | null) => void }) {
 export default function ReviewView(props: { deck?: string | null; onClose: () => void }) {
   const [deck, setDeck] = createSignal<string | null | undefined>(props.deck);
   return (
-    <Modal title="Flashcards" subtitle="Cards from notes tagged #flashcards, scheduled with FSRS." width="min(820px, 94vw)" class="srs-dialog" onClose={props.onClose}>
+    <Modal title={t("Flashcards")} subtitle={t("Cards from notes tagged #flashcards, scheduled with FSRS.")} width="min(820px, 94vw)" class="srs-dialog" onClose={props.onClose}>
       <Show when={deck() !== undefined} fallback={<Overview onStudy={(d) => setDeck(d)} />}>
         <Session deck={deck() ?? null} onDone={() => setDeck(undefined)} />
       </Show>
       <div class="srs-foot">
-        <button class="btn small" onClick={() => setDialog({ kind: "settings", tab: "flashcards" })}><RotateCcw size={13} /> Scheduling settings</button>
+        <button class="btn small" onClick={() => setDialog({ kind: "settings", tab: "flashcards" })}><RotateCcw size={13} /> {t("Scheduling settings")}</button>
         <span class="grow" />
-        <span class="field-hint"><kbd>Space</kbd> show / good · <kbd>1</kbd>–<kbd>4</kbd> grade · <kbd>U</kbd> undo · <kbd>E</kbd> edit</span>
+        <span class="field-hint"><kbd>{t("Space")}</kbd> {t("show / good ·")} <kbd>1</kbd>–<kbd>4</kbd> {t("grade ·")} <kbd>U</kbd> {t("undo ·")} <kbd>E</kbd> {t("edit")}</span>
       </div>
     </Modal>
   );

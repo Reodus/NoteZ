@@ -8,29 +8,30 @@ import { app, notify } from "../core/app";
 import { ask } from "../core/native";
 import { openNote, refreshTree, reloadFromDisk, saveAll, state } from "../core/store";
 
+import { t, tn } from "../core/i18n";
 export type HistoryTab = "note" | "deleted" | "snapshots";
 
 const REASONS: Record<string, string> = {
-  edit: "Edited",
-  first: "First seen",
-  outside: "Changed outside NoteZ",
-  deleted: "Before deleting",
-  restored: "Restored",
-  "before-restore": "Before a restore",
-  "before-replace": "Before replace in vault",
-  "before-tag-rename": "Before renaming a tag",
-  "before-link-update": "Before updating links",
-  "before-sync": "Before sync changed it",
+  edit: t("Edited"),
+  first: t("First seen"),
+  outside: t("Changed outside NoteZ"),
+  deleted: t("Before deleting"),
+  restored: t("Restored"),
+  "before-restore": t("Before a restore"),
+  "before-replace": t("Before replace in vault"),
+  "before-tag-rename": t("Before renaming a tag"),
+  "before-link-update": t("Before updating links"),
+  "before-sync": t("Before sync changed it"),
 };
 
 /** "Today 14:05", "Yesterday 09:12", "3 Nov 2026 18:40". */
-export function when(t: number): string {
-  const d = new Date(t);
+export function when(ms: number): string {
+  const d = new Date(ms);
   const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   const day = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const today = new Date(new Date().toDateString()).getTime();
-  if (day === today) return `Today ${time}`;
-  if (day === today - 86_400_000) return `Yesterday ${time}`;
+  if (day === today) return t("Today {time}", { time });
+  if (day === today - 86_400_000) return t("Yesterday {time}", { time });
   return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })} ${time}`;
 }
 
@@ -45,12 +46,12 @@ export function DiffView(props: { before: string; after: string; empty?: string 
       <div class="diff-stats">
         <span class="ins">+{stats().added}</span> <span class="del">−{stats().removed}</span>
       </div>
-      <Show when={stats().added + stats().removed} fallback={<div class="pane-empty">{props.empty ?? "No differences."}</div>}>
+      <Show when={stats().added + stats().removed} fallback={<div class="pane-empty">{props.empty ?? t("No differences.")}</div>}>
         <div class="diff-lines" dir="auto">
           <For each={withContext(ops())}>
             {(o) =>
               o.kind === "skip" ? (
-                <div class="diff-skip">⋯ {o.count} unchanged line{o.count > 1 ? "s" : ""}</div>
+                <div class="diff-skip">⋯ {tn(o.count, "{n} unchanged line", "{n} unchanged lines")}</div>
               ) : (
                 <div class={`diff-line ${o.kind}`}>
                   <span class="ln">{o.kind === "ins" ? "" : o.a}</span>
@@ -91,7 +92,7 @@ function NoteHistory(props: { path: string; close: () => void }) {
     try {
       await ipc.historyRestore(props.path, v.h);
       if (state.buffers[props.path]) await reloadFromDisk(props.path);
-      notify(`Restored the version of ${when(v.t)}. The text it replaced is kept in history.`);
+      notify(t("Restored the version of {x}. The text it replaced is kept in history.", { x: when(v.t) }));
       await refetch();
       setSel(0);
     } catch (e) {
@@ -101,7 +102,7 @@ function NoteHistory(props: { path: string; close: () => void }) {
   return (
     <div class="history-split">
       <div class="history-list">
-        <For each={versions() ?? []} fallback={<div class="pane-empty">{versions.loading ? "Loading…" : "No versions yet. A version is kept as you save."}</div>}>
+        <For each={versions() ?? []} fallback={<div class="pane-empty">{versions.loading ? t("Loading…") : t("No versions yet. A version is kept as you save.")}</div>}>
           {(v, i) => (
             <button class="history-item" classList={{ active: sel() === i() }} onClick={() => setSel(i())}>
               <span class="when">{when(v.t)}</span>
@@ -116,27 +117,27 @@ function NoteHistory(props: { path: string; close: () => void }) {
             <>
               <div class="history-bar">
                 <div class="segmented">
-                  <button classList={{ active: against() === "current" }} onClick={() => setAgainst("current")}>Compared with now</button>
-                  <button classList={{ active: against() === "previous" }} onClick={() => setAgainst("previous")}>Changes in this version</button>
+                  <button classList={{ active: against() === "current" }} onClick={() => setAgainst("current")}>{t("Compared with now")}</button>
+                  <button classList={{ active: against() === "previous" }} onClick={() => setAgainst("previous")}>{t("Changes in this version")}</button>
                 </div>
                 <span class="grow" />
-                <button class="btn" onClick={async () => (await navigator.clipboard.writeText(await ipc.historyText(v().h)), notify("Copied the version's text."))}>
-                  <Copy size={14} /> Copy text
+                <button class="btn" onClick={async () => (await navigator.clipboard.writeText(await ipc.historyText(v().h)), notify(t("Copied the version's text.")))}>
+                  <Copy size={14} /> {t("Copy text")}
                 </button>
                 <button class="btn primary" disabled={sel() === 0 && against() === "current" && texts()?.before === texts()?.after} onClick={() => void restore(v())}>
-                  <RotateCcw size={14} /> Restore
+                  <RotateCcw size={14} /> {t("Restore")}
                 </button>
               </div>
-              <Show when={texts()} fallback={<div class="pane-empty">Loading…</div>}>
-                {(t) => (
+              <Show when={texts()} fallback={<div class="pane-empty">{t("Loading…")}</div>}>
+                {(tx) => (
                   <DiffView
-                    before={t().before}
-                    after={t().after}
-                    empty={against() === "current" ? "Same as the note now." : "No changes."}
+                    before={tx().before}
+                    after={tx().after}
+                    empty={against() === "current" ? t("Same as the note now.") : t("No changes.")}
                   />
                 )}
               </Show>
-              <p class="hint">{against() === "current" ? "− lines are in the note now, + lines are in this version: restoring makes these changes." : "What changed since the version before it."}</p>
+              <p class="hint">{against() === "current" ? t("− lines are in the note now, + lines are in this version: restoring makes these changes.") : t("What changed since the version before it.")}</p>
             </>
           )}
         </Show>
@@ -153,7 +154,7 @@ function DeletedNotes() {
     try {
       await ipc.historyRestore(path, h);
       await refreshTree();
-      notify(`Recovered ${path}.`, "info", { label: "Open", run: () => void openNote(path) });
+      notify(t("Recovered {path}.", { path }), "info", { label: t("Open"), run: () => void openNote(path) });
       await refetch();
       setSel(0);
     } catch (e) {
@@ -163,7 +164,7 @@ function DeletedNotes() {
   return (
     <div class="history-split">
       <div class="history-list">
-        <For each={list() ?? []} fallback={<div class="pane-empty">{list.loading ? "Loading…" : "No deleted notes in history."}</div>}>
+        <For each={list() ?? []} fallback={<div class="pane-empty">{list.loading ? t("Loading…") : t("No deleted notes in history.")}</div>}>
           {(d, i) => (
             <button class="history-item" classList={{ active: sel() === i() }} onClick={() => setSel(i())}>
               <span class="when" dir="auto">{stem(d.path)}</span>
@@ -180,7 +181,7 @@ function DeletedNotes() {
                 <strong dir="auto">{d().path}</strong>
                 <span class="grow" />
                 <button class="btn primary" onClick={() => void recover(d().path, d().h)}>
-                  <RotateCcw size={14} /> Recover
+                  <RotateCcw size={14} /> {t("Recover")}
                 </button>
               </div>
               <pre class="history-text" dir="auto">{text() ?? ""}</pre>
@@ -207,7 +208,7 @@ function Snapshots() {
   );
   const [busy, setBusy] = createSignal(false);
   const take = async () => {
-    const label = await askText("Name this snapshot", "", "e.g. Before reorganizing");
+    const label = await askText(t("Name this snapshot"), "", "e.g. Before reorganizing");
     if (label === null) return;
     setBusy(true);
     try {
@@ -215,7 +216,7 @@ function Snapshots() {
       await ipc.snapshotCreate(label || "Snapshot");
       await refetch();
       setSel(0);
-      notify("Snapshot taken.");
+      notify(t("Snapshot taken."));
     } catch (e) {
       notify(String(e), "error");
     } finally {
@@ -228,13 +229,13 @@ function Snapshots() {
     const added = (changes() ?? []).filter((c) => c.status === "added");
     let removeAdded = false;
     if (!paths) {
-      const ok = await ask(`Put every changed file back as it was in the snapshot of ${when(s.t)}? A snapshot of the vault as it is now is taken first.`, {
-        title: "Restore snapshot", kind: "warning", okLabel: "Restore", cancelLabel: "Cancel",
+      const ok = await ask(t("Put every changed file back as it was in the snapshot of {x}? A snapshot of the vault as it is now is taken first.", { x: when(s.t) }), {
+        title: t("Restore snapshot"), kind: "warning", okLabel: t("Restore"), cancelLabel: t("Cancel"),
       });
       if (!ok) return;
       if (added.length)
-        removeAdded = await ask(`${added.length} file${added.length > 1 ? "s were" : " was"} added since the snapshot. Remove ${added.length > 1 ? "them" : "it"} too?`, {
-          title: "Files added since", kind: "warning", okLabel: "Remove", cancelLabel: "Keep",
+        removeAdded = await ask(tn(added.length, "{n} file was added since the snapshot. Remove it too?", "{n} files were added since the snapshot. Remove them too?"), {
+          title: t("Files added since"), kind: "warning", okLabel: t("Remove"), cancelLabel: t("Keep"),
         });
     }
     setBusy(true);
@@ -243,7 +244,7 @@ function Snapshots() {
       const done = await ipc.snapshotRestore(s.id, paths, removeAdded);
       for (const p of done) if (state.buffers[p]) await reloadFromDisk(p).catch(() => {});
       await refreshTree();
-      notify(done.length ? `Restored ${done.length} file${done.length > 1 ? "s" : ""}.` : "Nothing to restore.");
+      notify(done.length ? tn(done.length, "Restored {n} file.", "Restored {n} files.") : t("Nothing to restore."));
       setFile(null);
       // Restoring takes a "Before restoring" snapshot: stay on this one.
       const fresh = await refetch();
@@ -257,7 +258,7 @@ function Snapshots() {
   };
   const remove = async () => {
     const s = list()?.[sel()];
-    if (!s || !(await ask(`Delete the snapshot of ${when(s.t)}?`, { title: "Delete snapshot", kind: "warning", okLabel: "Delete", cancelLabel: "Cancel" }))) return;
+    if (!s || !(await ask(t("Delete the snapshot of {x}?", { x: when(s.t) }), { title: t("Delete snapshot"), kind: "warning", okLabel: t("Delete"), cancelLabel: t("Cancel") }))) return;
     await ipc.snapshotDelete(s.id).catch((e) => notify(String(e), "error"));
     setSel(0);
     setFile(null);
@@ -268,13 +269,13 @@ function Snapshots() {
     <div class="history-split">
       <div class="history-list">
         <button class="btn history-take" disabled={busy()} onClick={() => void take()}>
-          <Camera size={14} /> Take a snapshot now
+          <Camera size={14} /> {t("Take a snapshot now")}
         </button>
-        <For each={list() ?? []} fallback={<div class="pane-empty">{list.loading ? "Loading…" : "No snapshots yet."}</div>}>
+        <For each={list() ?? []} fallback={<div class="pane-empty">{list.loading ? t("Loading…") : t("No snapshots yet.")}</div>}>
           {(s, i) => (
             <button class="history-item" classList={{ active: sel() === i() }} onClick={() => (setSel(i()), setFile(null))}>
               <span class="when">{when(s.t)}</span>
-              <span class="why">{s.label || (s.auto ? "Automatic" : "Snapshot")} · {s.files} files · {size(s.size)}</span>
+              <span class="why">{s.label || (s.auto ? t("Automatic") : t("Snapshot"))} · {tn(s.files, "{n} file", "{n} files")} · {size(s.size)}</span>
             </button>
           )}
         </For>
@@ -287,32 +288,32 @@ function Snapshots() {
                 <strong>{s().label || "Snapshot"}</strong>
                 <span class="muted">{when(s().t)}</span>
                 <span class="grow" />
-                <button class="btn" disabled={busy()} onClick={() => void remove()} title="Delete this snapshot">
+                <button class="btn" disabled={busy()} onClick={() => void remove()} title={t("Delete this snapshot")}>
                   <Trash2 size={14} />
                 </button>
                 <button class="btn primary" disabled={busy() || !changes()?.length} onClick={() => void restore(null)}>
-                  <RotateCcw size={14} /> Restore all…
+                  <RotateCcw size={14} /> {t("Restore all…")}
                 </button>
               </div>
               <Show when={!file()} fallback={
                 <>
                   <div class="history-bar">
-                    <button class="btn" onClick={() => setFile(null)}>← All changes</button>
+                    <button class="btn" onClick={() => setFile(null)}>{t("← All changes")}</button>
                     <strong dir="auto">{file()!.path}</strong>
                     <span class="muted">{label[file()!.status]}</span>
                     <span class="grow" />
                     <button class="btn primary" disabled={busy()} onClick={() => void restore([file()!.path])}>
-                      <RotateCcw size={14} /> {file()!.status === "added" ? "Remove" : "Restore this file"}
+                      <RotateCcw size={14} /> {file()!.status === "added" ? t("Remove") : t("Restore this file")}
                     </button>
                   </div>
-                  <Show when={texts()} fallback={<div class="pane-empty">Loading…</div>}>
+                  <Show when={texts()} fallback={<div class="pane-empty">{t("Loading…")}</div>}>
                     {(t) => <DiffView before={t().before} after={t().after} />}
                   </Show>
-                  <p class="hint">− lines were in the snapshot, + lines are in the vault now.</p>
+                  <p class="hint">{t("− lines were in the snapshot, + lines are in the vault now.")}</p>
                 </>
               }>
                 <div class="snapshot-changes">
-                  <For each={changes() ?? []} fallback={<div class="pane-empty">{changes.loading ? "Comparing…" : "The vault is the same as in this snapshot."}</div>}>
+                  <For each={changes() ?? []} fallback={<div class="pane-empty">{changes.loading ? t("Comparing…") : t("The vault is the same as in this snapshot.")}</div>}>
                     {(c) => (
                       <button class="snapshot-change" onClick={() => setFile(c)}>
                         <span class={`badge ${c.status}`}>{c.status === "added" ? "new" : c.status === "removed" ? "deleted" : "changed"}</span>
@@ -334,12 +335,12 @@ export default function HistoryDialog(props: { tab?: HistoryTab; path?: string; 
   const path = props.path ?? state.active ?? "";
   const [tab, setTab] = createSignal<HistoryTab>(props.tab ?? (path ? "note" : "snapshots"));
   const tabs: [HistoryTab, string, () => JSX.Element][] = [
-    ["note", path ? `${stem(path)}` : "This note", () => <Clock size={14} />],
-    ["deleted", "Deleted notes", () => <Trash2 size={14} />],
-    ["snapshots", "Vault snapshots", () => <Camera size={14} />],
+    ["note", path ? `${stem(path)}` : t("This note"), () => <Clock size={14} />],
+    ["deleted", t("Deleted notes"), () => <Trash2 size={14} />],
+    ["snapshots", t("Vault snapshots"), () => <Camera size={14} />],
   ];
   return (
-    <Modal title="History" subtitle="Earlier versions of your notes, deleted notes and snapshots of the whole vault." width="min(1080px, 94vw)" class="history-dialog" onClose={props.onClose}>
+    <Modal title={t("History")} subtitle={t("Earlier versions of your notes, deleted notes and snapshots of the whole vault.")} width="min(1080px, 94vw)" class="history-dialog" onClose={props.onClose}>
       <div class="history-tabs">
         <For each={tabs.filter(([t]) => t !== "note" || path)}>
           {([t, label, icon]) => (

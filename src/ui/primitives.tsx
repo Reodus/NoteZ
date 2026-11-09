@@ -3,6 +3,7 @@ import { Portal } from "solid-js/web";
 import { X } from "lucide-solid";
 import { app, dismissToast } from "../core/app";
 
+import { t } from "../core/i18n";
 // ------------------------------------------------------------------ Modal
 
 export function Modal(props: {
@@ -34,7 +35,7 @@ export function Modal(props: {
                   <p>{props.subtitle}</p>
                 </Show>
               </div>
-              <button class="icon-btn" onClick={props.onClose} title="Close (Esc)">
+              <button class="icon-btn" onClick={props.onClose} title={t("Close (Esc)")}>
                 <X size={18} />
               </button>
             </header>
@@ -236,7 +237,7 @@ function MenuList(props: { items: (MenuItem | "-")[]; close: () => void }) {
               <span class="menu-icon">{it.icon}</span>
               <span class="menu-label">{it.label}</span>
               <Show when={it.hint}>
-                <kbd>{it.hint}</kbd>
+                <kbd dir="auto">{it.hint}</kbd>
               </Show>
               <Show when={it.items}>
                 <span class="menu-sub-caret">›</span>
@@ -247,9 +248,9 @@ function MenuList(props: { items: (MenuItem | "-")[]; close: () => void }) {
                 class="context-menu submenu"
                 ref={(el) =>
                   requestAnimationFrame(() => {
-                    // Flip left / up when the submenu would leave the window.
+                    // Flip to the other side / up when the submenu would leave the window.
                     const r = el.getBoundingClientRect();
-                    if (r.right > window.innerWidth - 4) el.classList.add("left");
+                    if (r.right > window.innerWidth - 4 || r.left < 4) el.classList.add("left");
                     if (r.bottom > window.innerHeight - 4) el.style.top = `${Math.max(-r.top + 4, window.innerHeight - 4 - r.bottom)}px`;
                   })
                 }
@@ -311,7 +312,7 @@ export function PromptHost() {
               }
             />
             <div class="row end">
-              <button type="button" class="btn" onClick={() => close(null)}>Cancel</button>
+              <button type="button" class="btn" onClick={() => close(null)}>{t("Cancel")}</button>
               <button type="submit" class="btn primary">OK</button>
             </div>
           </form>
@@ -406,9 +407,9 @@ export function ColorGrid(props: { value?: string | null; onPick: (c: string | n
       </div>
       <div class="row">
         <Show when={props.allowNone !== false}>
-          <button type="button" class="btn small" onClick={() => props.onPick(null)}>{props.noneLabel ?? "Default"}</button>
+          <button type="button" class="btn small" onClick={() => props.onPick(null)}>{props.noneLabel ?? t("Default")}</button>
         </Show>
-        <button type="button" class="btn small" onClick={() => input.click()}>Custom…</button>
+        <button type="button" class="btn small" onClick={() => input.click()}>{t("Custom…")}</button>
         <input
           ref={input}
           type="color"
@@ -484,7 +485,7 @@ export function ComboBox(props: {
             style={{ left: `${pos().x}px`, top: `${pos().y}px`, "min-width": `${pos().w}px` }}
             onMouseDown={(e) => e.preventDefault()}
           >
-            <For each={filtered()} fallback={<div class="combo-empty">No matches</div>}>
+            <For each={filtered()} fallback={<div class="combo-empty">{t("No matches")}</div>}>
               {(o) => (
                 <button
                   type="button"

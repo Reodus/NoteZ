@@ -18,6 +18,7 @@ import { findEmoji } from "./emoji";
 import { frontmatterRange } from "../core/frontmatter";
 import { templatesDir } from "../plugins/templates";
 
+import { t } from "../core/i18n";
 /** Languages offered after ``` (special NoteZ blocks first). */
 export const FENCE_LANGUAGES = [
   "chart", "mermaid", "flow", "mindmap", "timeline", "diagram", "draw", "math", "base", "query",
@@ -99,7 +100,7 @@ function calloutSource(ctx: CompletionContext): CompletionResult | null {
     from,
     options: Object.entries(CALLOUTS).map(([type, c]): Completion => ({
       label: type,
-      detail: `${c.icon} ${c.label}`,
+      detail: `${c.icon} ${t(c.label)}`,
       apply: (view: EditorView, _c: Completion, f: number, t: number) => {
         const insert = type.toUpperCase() + (closed ? "" : "] ");
         view.dispatch({ changes: { from: f, to: t, insert }, selection: { anchor: f + insert.length + (closed ? 2 : 0) } });
@@ -111,11 +112,11 @@ function calloutSource(ctx: CompletionContext): CompletionResult | null {
 
 /** Frontmatter keys NoteZ (and Obsidian) understand. */
 const FM_KEYS: [string, string][] = [
-  ["title", "Document title"], ["subtitle", "Shown under the title"], ["author", "Author"], ["date", "Date (today = today)"],
-  ["tags", "Tags: [a, b]"], ["aliases", "Other names for links"], ["lang", "Language (en, ar, ja…)"],
-  ["theme", "Document theme"], ["icon", "Emoji shown with the note"], ["cover", "Banner image"],
-  ["cssclasses", "CSS classes"], ["description", "Summary"], ["status", "Your own property"],
-  ["page", "Page setup (PDF themes)"], ["styles", "Paragraph styles (PDF themes)"], ["digits", "Digits (page: digits)"],
+  ["title", t("Document title")], ["subtitle", t("Shown under the title")], ["author", "Author"], ["date", t("Date (today = today)")],
+  ["tags", t("Tags: [a, b]")], ["aliases", t("Other names for links")], ["lang", t("Language (en, ar, ja…)")],
+  ["theme", t("Document theme")], ["icon", t("Emoji shown with the note")], ["cover", t("Banner image")],
+  ["cssclasses", "CSS classes"], ["description", "Summary"], ["status", t("Your own property")],
+  ["page", t("Page setup (PDF themes)")], ["styles", t("Paragraph styles (PDF themes)")], ["digits", t("Digits (page: digits)")],
 ];
 
 let themeIds: Promise<string[]> | null = null;
@@ -161,7 +162,7 @@ async function frontmatterSource(ctx: CompletionContext): Promise<CompletionResu
     values = (await themeIds).map((id) => ({ label: id, type: "enum" }));
     setTimeout(() => (themeIds = null), 5000);
   } else if (k === "lang") {
-    values = [{ label: "auto", detail: "detect from the text" }, ...LANGUAGE_CODES.map((c) => ({ label: c, detail: languageLabel(c) }))];
+    values = [{ label: "auto", detail: t("detect from the text") }, ...LANGUAGE_CODES.map((c) => ({ label: c, detail: languageLabel(c) }))];
   } else if (k === "tags" || k === "tag") {
     values = allTags().map((t) => ({ label: t.tag, detail: String(t.count) }));
   } else if (k === "date") {

@@ -35,13 +35,14 @@ data:
 `;
 import { Logo } from "./Logo";
 
+import { t } from "../core/i18n";
 export async function chooseVault() {
-  const picked = await pickFolder({ directory: true, title: "Open vault folder" });
+  const picked = await pickFolder({ directory: true, title: t("Open vault folder") });
   if (typeof picked === "string") await openVault(picked);
 }
 
 async function createVault() {
-  const picked = await pickFolder({ directory: true, title: "Choose an (empty) folder for the new vault" });
+  const picked = await pickFolder({ directory: true, title: t("Choose an (empty) folder for the new vault") });
   if (typeof picked !== "string") return;
   try {
     await ipc.openVault(picked);
@@ -69,7 +70,7 @@ export default function Welcome() {
           <Logo size={56} />
           <div>
             <h1>NoteZ</h1>
-            <p>Notes in Markdown & Typst · any language, any script · beautiful PDFs</p>
+            <p>{t("Notes in Markdown & Typst · any language, any script · beautiful PDFs")}</p>
           </div>
         </div>
 
@@ -77,15 +78,15 @@ export default function Welcome() {
           <button class="big-action" onClick={chooseVault}>
             <FolderOpen size={22} />
             <span>
-              <b>Open vault</b>
-              <small>Use an existing folder of notes (works with Obsidian vaults)</small>
+              <b>{t("Open vault")}</b>
+              <small>{t("Use an existing folder of notes (works with Obsidian vaults)")}</small>
             </span>
           </button>
           <button class="big-action" onClick={createVault}>
             <FolderPlus size={22} />
             <span>
-              <b>Create vault</b>
-              <small>Start fresh in a new folder with a welcome note</small>
+              <b>{t("Create vault")}</b>
+              <small>{t("Start fresh in a new folder with a welcome note")}</small>
             </span>
           </button>
         </div>
@@ -93,7 +94,7 @@ export default function Welcome() {
         <Show when={prefs.recentVaults.length}>
           <div class="recent">
             <h3>
-              <Clock size={14} /> Recent
+              <Clock size={14} /> {t("Recent")}
             </h3>
             <For each={prefs.recentVaults}>
               {(p) => (
@@ -103,7 +104,7 @@ export default function Welcome() {
                   <span class="recent-path">{p}</span>
                   <button
                     class="icon-btn small"
-                    title="Remove from list"
+                    title={t("Remove from list")}
                     onClick={(e) => {
                       e.stopPropagation();
                       setPrefs("recentVaults", (r) => r.filter((x) => x !== p));
@@ -118,9 +119,9 @@ export default function Welcome() {
         </Show>
 
         <div class="welcome-features">
-          <span><Languages size={15} /> Every language & script, LTR and RTL</span>
-          <span><Sparkles size={15} /> Typst-powered PDF</span>
-          <span><PenTool size={15} /> Charts & diagrams</span>
+          <span><Languages size={15} /> {t("Every language & script, LTR and RTL")}</span>
+          <span><Sparkles size={15} /> {t("Typst-powered PDF")}</span>
+          <span><PenTool size={15} /> {t("Charts & diagrams")}</span>
         </div>
       </div>
     </div>

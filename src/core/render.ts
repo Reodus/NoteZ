@@ -6,6 +6,7 @@ import { app, notify } from "./app";
 import { ipc, Diagnostic, RenderedBlock, stem, dirname } from "./ipc";
 import { root, state, viewLayout, prefs } from "./store";
 
+import { t } from "./i18n";
 export interface Fence {
   lang: string;
   code: string;
@@ -132,32 +133,53 @@ export async function runPreview() {
 
 // ----------------------------------------------------------------- export
 
-export async function exportPdf(path = state.active) {
-  if (!path) return notify("Open a note first", "error");
+export type ExportFormat = "pdf" | "docx" | "html" | "md";
+
+const FORMATS: Record<ExportFormat, { name: string; ext: string; run: typeof ipc.exportHtml }> = {
+  pdf: { name: "PDF", ext: "pdf", run: async (...a) => (await ipc.exportPdf(...a), []) },
+  docx: { name: "Word", ext: "docx", run: ipc.exportDocx },
+  html: { name: "HTML", ext: "html", run: ipc.exportHtml },
+  md: { name: "Markdown", ext: "md", run: ipc.exportMarkdown },
+};
+
+/** Formats a note can be exported to (hand-written Typst notes: PDF only). */
+export function exportFormats(path: string): ExportFormat[] {
+  return path.toLowerCase().endsWith(".md") ? ["pdf", "docx", "html", "md"] : ["pdf"];
+}
+
+export const exportLabel = (f: ExportFormat) => t("Export to {x}…", { x: FORMATS[f].name });
+
+export async function exportNote(path = state.active, format: ExportFormat = "pdf") {
+  if (!path) return notify(t("Open a note first"), "error");
+  if (!exportFormats(path).includes(format)) return notify(t("{x} export is for Markdown notes", { x: FORMATS[format].name }), "error");
+  const { name, ext, run } = FORMATS[format];
   const text = state.buffers[path]?.content ?? (await ipc.read(path));
   const dir = !prefs.pdfFolder ? root() : prefs.pdfFolder === "./" ? `${root()}/${dirname(path)}`.replace(/\/$/, "") : prefs.pdfFolder;
   const output = await saveDialog({
-    title: "Export PDF",
-    defaultPath: `${dir}/${stem(path)}.pdf`,
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
+    title: t("Export {name}", { name }),
+    defaultPath: `${dir}/${stem(path)}.${ext}`,
+    filters: [{ name, extensions: [ext] }],
   });
   if (!output) return;
-  const target = output.endsWith(".pdf") ? output : `${output}.pdf`;
-  notify("Exporting PDF…");
+  const target = output.toLowerCase().endsWith(`.${ext}`) ? output : `${output}.${ext}`;
+  notify(t("Exporting {name}…", { name }));
   try {
     const blocks = await renderPluginBlocks(text);
-    await ipc.exportPdf(path, text, blocks, target);
+    const warnings = await run(path, text, blocks, target);
     if (prefs.openAfterExport) await openPath(target).catch((e) => notify(String(e), "error"));
-    notify(`Exported ${target.split(/[\\/]/).pop()}`, "success", {
-      label: "Open",
+    const more = warnings.length ? `\n${warnings.slice(0, 4).join("\n")}${warnings.length > 4 ? `\n${t("…and {n} more", { n: warnings.length - 4 })}` : ""}` : "";
+    notify(t("Exported {x}{more}", { x: target.split(/[\\/]/).pop(), more }), warnings.length ? "info" : "success", {
+      label: t("Open"),
       run: () => openPath(target).catch((e) => notify(String(e), "error")),
-    });
+    }, warnings.length ? 10000 : undefined);
   } catch (e) {
     const diags = e as Diagnostic[];
     const msg = Array.isArray(diags) ? diags.map((d) => (d.line ? `line ${d.line}: ` : "") + d.message).join("\n") : String(e);
-    notify(`Export failed: ${msg}`, "error");
+    notify(t("Export failed: {error}", { error: msg }), "error");
   }
 }
+
+export const exportPdf = (path = state.active) => exportNote(path, "pdf");
 
 export async function showGeneratedTypst() {
   const path = state.active;

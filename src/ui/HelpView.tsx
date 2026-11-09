@@ -7,6 +7,7 @@ import { ipc } from "../core/ipc";
 import { openUrl } from "../core/native";
 import { Modal } from "./primitives";
 
+import { t } from "../core/i18n";
 const RAW = import.meta.glob("../../docs/*.md", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 const DOCS: Record<string, string> = Object.fromEntries(
   Object.entries(RAW).map(([p, text]) => [p.split("/").pop()!.replace(/\.md$/, ""), text]),
@@ -14,20 +15,21 @@ const DOCS: Record<string, string> = Object.fromEntries(
 
 /** Pages in reading order; any other docs/*.md follow. */
 const ORDER: [string, string][] = [
-  ["GUIDE", "User guide"],
-  ["MARKDOWN", "Writing notes (Markdown)"],
-  ["LANGUAGES", "Languages & scripts"],
+  ["GUIDE", t("User guide")],
+  ["MARKDOWN", t("Writing notes (Markdown)")],
+  ["LANGUAGES", t("Languages & scripts")],
   ["PDF-THEMES", "PDF themes"],
+  ["EXPORT", t("Exporting (PDF, Word, HTML, Markdown)")],
   ["UI-THEMES", "UI themes & snippets"],
-  ["ORGANIZING", "Tags, daily notes, bookmarks"],
-  ["SLASH", "Slash commands & completion"],
-  ["SEARCH", "Search & replace"],
-  ["BLOCKS", "Blocks, references & embeds"],
-  ["HISTORY", "History, snapshots & sync"],
-  ["DATABASES", "Databases & queries"],
+  ["ORGANIZING", t("Tags, daily notes, bookmarks")],
+  ["SLASH", t("Slash commands & completion")],
+  ["SEARCH", t("Search & replace")],
+  ["BLOCKS", t("Blocks, references & embeds")],
+  ["HISTORY", t("History, snapshots & sync")],
+  ["DATABASES", t("Databases & queries")],
   ["FLASHCARDS", "Flashcards"],
   ["PDF-ANNOTATIONS", "PDF annotations"],
-  ["PLUGINS", "Writing plugins"],
+  ["PLUGINS", t("Writing plugins")],
 ];
 
 export const helpPages = () => {
@@ -110,12 +112,12 @@ export default function HelpView(props: { doc?: string; anchor?: string; onClose
   };
 
   return (
-    <Modal title="Help" width="1080px" class="help-modal" onClose={props.onClose}>
+    <Modal title={t("Help")} width="1080px" class="help-modal" onClose={props.onClose}>
       <div class="help">
         <nav class="help-nav">
           <div class="settings-search">
             <Search size={14} />
-            <input placeholder="Search the guide" value={q()} onInput={(e) => setQ(e.currentTarget.value)} />
+            <input placeholder={t("Search the guide")} value={q()} onInput={(e) => setQ(e.currentTarget.value)} />
           </div>
           <Show
             when={q().trim()}
@@ -129,7 +131,7 @@ export default function HelpView(props: { doc?: string; anchor?: string; onClose
               </For>
             }
           >
-            <For each={results()} fallback={<div class="pane-empty">No matches</div>}>
+            <For each={results()} fallback={<div class="pane-empty">{t("No matches")}</div>}>
               {(r) => (
                 <button class="help-hit" onClick={() => (setAnchor(r.heading ? slug(r.heading) : ""), setPage(r.id), setQ(""))}>
                   <b>{r.title}{r.heading ? ` › ${r.heading}` : ""}</b>

@@ -18,7 +18,8 @@ command palette, which lists every command with its shortcut.
    start of a line for the insert menu (headings, lists, tables, callouts,
    math, charts, diagrams, dates…). See [Slash commands](SLASH.md).
 4. **See the PDF**: the preview on the right updates as you type. **⋯ →
-   Export PDF** saves it.
+   Export to PDF** saves it. Word, HTML and portable Markdown are there too
+   (see [Exporting](EXPORT.md)).
 5. **Style it**: **⋯ → Themes** picks a document theme; the *Styles* panel
    and **⋯ → Page setup** change fonts, colors, spacing, margins, header and
    footer — for this note or for the whole theme.
@@ -103,6 +104,29 @@ The options button (sliders icon) has more:
 | Note labels from zoom | How far you zoom in before note names appear |
 
 Options and collapsed folders are remembered. **Reset options** goes back to the defaults.
+
+## Updates
+
+NoteZ checks GitHub for a new release a few seconds after it starts and then
+every six hours. When there is one, a message offers **Update**:
+
+- **Linux AppImage, .deb, .rpm and the Windows installer**: NoteZ downloads
+  the new version in the background and shows **Restart** when it is ready.
+  Your notes are saved first. If you don't restart, the update is installed
+  the next time you quit.
+- **macOS and the portable Windows .exe**: these can't replace themselves, so
+  NoteZ downloads the new file to your Downloads folder, checks it against the
+  checksum GitHub publishes, and opens it (macOS) or shows it in the file
+  manager (portable .exe).
+
+**Settings → Updates** shows your version and the state of the check, has a
+**Check now** button, and lets you turn the automatic check off. The command
+palette has **Check for updates** too.
+
+Versions 0.12.0 and older can't update themselves: install 0.12.1 or later
+once by hand from
+[GitHub releases](https://github.com/Reodus/NoteZ/releases); after that,
+updates come in by themselves.
 
 ## Getting help
 

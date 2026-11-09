@@ -48,7 +48,34 @@ interface Native {
   replaceMisspelling?(word: string): Promise<void>;
   addToDictionary?(word: string): Promise<void>;
   onContextMenu?(cb: (info: { word: string; suggestions: string[]; x: number; y: number }) => void): () => void;
+  updateState?(): Promise<UpdateState>;
+  updateCheck?(): Promise<UpdateState>;
+  updateDownload?(): Promise<UpdateState>;
+  updateInstall?(): Promise<void>;
+  onUpdateState?(cb: (s: UpdateState) => void): () => void;
 }
+
+/** electron/updater.mjs */
+export interface UpdateState {
+  status: "idle" | "checking" | "latest" | "available" | "downloading" | "ready" | "error" | "unsupported";
+  current: string;
+  /** auto: installs itself on restart; download: the file is saved for the user; none: can't update. */
+  mode: "auto" | "download" | "none";
+  version?: string;
+  percent?: number;
+  error?: string;
+  notesUrl?: string;
+  /** download mode: the saved file. */
+  file?: string;
+}
+
+export const updates = {
+  state: () => native.updateState?.() ?? Promise.resolve(null),
+  check: () => native.updateCheck?.() ?? Promise.resolve(null),
+  download: () => native.updateDownload?.() ?? Promise.resolve(null),
+  install: () => native.updateInstall?.() ?? Promise.resolve(),
+  onState: (cb: (s: UpdateState) => void) => native.onUpdateState?.(cb) ?? (() => {}),
+};
 
 const native: Native = (window as unknown as { notezNative: Native }).notezNative;
 

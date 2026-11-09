@@ -7,6 +7,7 @@ import { fileMenu, entryFor } from "./fileMenu";
 import { openMenu } from "./primitives";
 import { NoteMenuButton } from "./NoteMenu";
 
+import { t } from "../core/i18n";
 export default function TabBar() {
   let dragFrom = -1;
   return (
@@ -38,10 +39,10 @@ export default function TabBar() {
               onClick={() => setState("active", path)}
               onContextMenu={(e) =>
                 openMenu(e, [
-                  { label: "Close", run: () => closeTab(path) },
-                  { label: "Close others", run: () => state.tabs.filter((t) => t !== path).forEach(closeTab) },
-                  { label: "Close tabs to the right", run: () => state.tabs.slice(state.tabs.indexOf(path) + 1).forEach(closeTab) },
-                  { label: "Close all", run: () => [...state.tabs].forEach(closeTab) },
+                  { label: t("Close"), run: () => closeTab(path) },
+                  { label: t("Close others"), run: () => state.tabs.filter((t) => t !== path).forEach(closeTab) },
+                  { label: t("Close tabs to the right"), run: () => state.tabs.slice(state.tabs.indexOf(path) + 1).forEach(closeTab) },
+                  { label: t("Close all"), run: () => [...state.tabs].forEach(closeTab) },
                   "-",
                   ...fileMenu(entryFor(path), "tab"),
                 ])
@@ -71,25 +72,25 @@ export default function TabBar() {
       </div>
       <Show when={prefs.layout !== "preview" && isNotePath(state.active) && !state.active!.endsWith(".typ")}>
         <div class="layout-switch mode-switch">
-          <button classList={{ active: prefs.editorMode === "live" }} title="Live preview (Ctrl+Shift+M)" onClick={() => setPrefs("editorMode", "live")}>
+          <button classList={{ active: prefs.editorMode === "live" }} title={t("Live preview (Ctrl+Shift+M)")} onClick={() => setPrefs("editorMode", "live")}>
             <BookOpen size={15} />
           </button>
-          <button classList={{ active: prefs.editorMode === "source" }} title="Source mode (Ctrl+Shift+M)" onClick={() => setPrefs("editorMode", "source")}>
+          <button classList={{ active: prefs.editorMode === "source" }} title={t("Source mode (Ctrl+Shift+M)")} onClick={() => setPrefs("editorMode", "source")}>
             <Code2 size={15} />
           </button>
         </div>
       </Show>
-      <button class="icon-btn" title="Focus mode — text only (Ctrl+Shift+Enter)" onClick={() => setFocusMode(true)}>
+      <button class="icon-btn" title={t("Focus mode — text only (Ctrl+Shift+Enter)")} onClick={() => setFocusMode(true)}>
         <Maximize2 size={16} />
       </button>
       <div class="layout-switch">
-        <button classList={{ active: prefs.layout === "editor" }} title="Editor only" onClick={() => setPrefs("layout", "editor")}>
+        <button classList={{ active: prefs.layout === "editor" }} title={t("Editor only")} onClick={() => setPrefs("layout", "editor")}>
           <Square size={15} />
         </button>
-        <button classList={{ active: prefs.layout === "split" }} title="Editor + Preview (Ctrl+Shift+E)" onClick={() => setPrefs("layout", "split")}>
+        <button classList={{ active: prefs.layout === "split" }} title={t("Editor + Preview (Ctrl+Shift+E)")} onClick={() => setPrefs("layout", "split")}>
           <Columns2 size={15} />
         </button>
-        <button classList={{ active: prefs.layout === "preview" }} title="Preview only" onClick={() => setPrefs("layout", "preview")}>
+        <button classList={{ active: prefs.layout === "preview" }} title={t("Preview only")} onClick={() => setPrefs("layout", "preview")}>
           <PanelRight size={15} />
         </button>
       </div>

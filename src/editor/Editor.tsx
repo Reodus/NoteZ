@@ -6,6 +6,7 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { footnoteDefinitions } from "./footnotes";
 import { languages } from "@codemirror/language-data";
 import { codeLanguage } from "./asm";
 import { bracketMatching, indentOnInput, indentUnit } from "@codemirror/language";
@@ -210,7 +211,7 @@ function formattingKeymap() {
 
 function languageFor(path: string): Extension {
   if (path.endsWith(".typ")) return typst;
-  return markdown({ base: markdownLanguage, codeLanguages: codeLanguage(languages) });
+  return markdown({ base: markdownLanguage, codeLanguages: codeLanguage(languages), extensions: [footnoteDefinitions] });
 }
 
 /** Editor state per open tab (undo history, cursor), kept while the editor

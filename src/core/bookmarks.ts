@@ -6,6 +6,7 @@ import { app } from "./app";
 import { ipc } from "./ipc";
 import { notify } from "./app";
 
+import { t } from "./i18n";
 export interface Bookmark {
   type: "file" | "folder" | "search" | "group";
   /** file / folder: vault path. */
@@ -39,7 +40,7 @@ async function load() {
 
 function save(next: Bookmark[]) {
   setItemsRaw(next);
-  ipc.write(FILE, JSON.stringify({ items: next }, null, 2) + "\n").catch((e) => notify(`Bookmarks: ${e}`, "error"));
+  ipc.write(FILE, JSON.stringify({ items: next }, null, 2) + "\n").catch((e) => notify(t("Bookmarks: {error}", { error: e }), "error"));
 }
 
 app.events.on("vault:opened", () => void load());

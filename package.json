@@ -1,6 +1,6 @@
 {
   "name": "notez",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Bilingual notes with beautiful PDF export",
   "type": "module",
   "scripts": {
@@ -14,7 +14,8 @@
     "dist:win": "npm run build && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
     "fonts": "node scripts/fonts.mjs",
-    "test:asm": "node --experimental-strip-types scripts/test-asm.ts"
+    "test:asm": "node --experimental-strip-types scripts/test-asm.ts",
+    "test:dir": "node --experimental-strip-types scripts/test-dir.ts"
   },
   "license": "Apache-2.0",
   "devDependencies": {
@@ -112,7 +113,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "mac": {
       "target": [
@@ -143,6 +145,16 @@
     },
     "dmg": {
       "writeUpdateInfo": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Reodus",
+        "repo": "NoteZ"
+      }
+    ],
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
     }
   },
   "homepage": "https://github.com/Reodus/NoteZ",
@@ -151,6 +163,7 @@
     "url": "https://github.com/Reodus/NoteZ.git"
   },
   "dependencies": {
+    "electron-updater": "^6.8.11",
     "pdfjs-dist": "^4.10.38"
   }
 }

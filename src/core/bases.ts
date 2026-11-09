@@ -8,6 +8,7 @@ import { applyText } from "./blocks";
 import { app, notify } from "./app";
 import { saveAll, state } from "./store";
 
+import { t } from "./i18n";
 /** A cell as plain text. */
 export function cellText(c: BaseCell): string {
   if (c === null || c === undefined) return "";
@@ -49,7 +50,7 @@ export function parseInput(text: string, like: BaseCell): unknown {
 /** Set (or with null remove) property `key` of note `path`; open notes are edited in place. */
 export async function setNoteProperty(path: string, key: string, value: unknown) {
   if (!/\.md$/i.test(path)) {
-    notify("Only Markdown notes have properties.", "error");
+    notify(t("Only Markdown notes have properties."), "error");
     return;
   }
   const buf = state.buffers[path];

@@ -7,6 +7,7 @@ import { ipc, SyncRemote, SyncReport } from "./ipc";
 import { prefs, root, state, reloadFromDisk, refreshTree, saveAll, setDialog } from "./store";
 import { secretGet, secretSet } from "./native";
 
+import { t, tn } from "./i18n";
 // ------------------------------------------------------------- history
 
 const historyConfig = () => ({
@@ -89,7 +90,7 @@ export async function saveSyncSettings(s: SyncSettings, secrets: { password?: st
   if (secrets.password !== undefined) await secretSet(secretKey("password"), secrets.password || null);
   if (secrets.passphrase !== undefined) {
     sessionPass = secrets.passphrase;
-    await secretSet(secretKey("passphrase"), s.remember ? secrets.passphrase || null : null).catch((e) => notify(`Passphrase not saved: ${e}`, "error"));
+    await secretSet(secretKey("passphrase"), s.remember ? secrets.passphrase || null : null).catch((e) => notify(t("Passphrase not saved: {error}", { error: e }), "error"));
   } else if (!s.remember) await secretSet(secretKey("passphrase"), null).catch(() => {});
   schedule();
 }
@@ -118,8 +119,8 @@ export async function runSync(loud = true): Promise<SyncReport | null> {
   if (!root() || !syncConfigured() || syncState().status === "syncing") return null;
   const pass = await syncPassphrase();
   if (!pass) {
-    setSyncState((s) => ({ ...s, status: "needs-passphrase", error: "Enter the sync passphrase in Settings → Sync." }));
-    if (loud) notify("Sync needs its passphrase: Settings → Sync.", "error");
+    setSyncState((s) => ({ ...s, status: "needs-passphrase", error: t("Enter the sync passphrase in Settings → Sync.") }));
+    if (loud) notify(t("Sync needs its passphrase: Settings → Sync."), "error");
     return null;
   }
   setSyncState((s) => ({ ...s, status: "syncing", error: undefined }));
@@ -132,16 +133,17 @@ export async function runSync(loud = true): Promise<SyncReport | null> {
       await refreshTree();
       app.events.emit("vault:changed", undefined);
     }
-    if (r.conflicts.length) notify(`Sync: ${r.conflicts.length} conflict${r.conflicts.length > 1 ? "s" : ""} — both versions were kept (“… (conflict …)”).`, "error", undefined, 15000);
+    if (r.conflicts.length) notify(tn(r.conflicts.length, "Sync: {n} conflict — both versions were kept (“… (conflict …)”).", "Sync: {n} conflicts — both versions were kept (“… (conflict …)”)."), "error", undefined, 15000);
     else if (loud) {
       const n = r.uploaded.length + r.downloaded.length + r.deleted_here.length + r.deleted_there.length;
-      notify(n ? `Synced: ${r.uploaded.length} sent, ${r.downloaded.length} received${r.deleted_here.length + r.deleted_there.length ? `, ${r.deleted_here.length + r.deleted_there.length} deleted` : ""}.` : "Synced: everything is up to date.");
+      const del = r.deleted_here.length + r.deleted_there.length;
+      notify(n ? (del ? t("Synced: {sent} sent, {received} received, {deleted} deleted.", { sent: r.uploaded.length, received: r.downloaded.length, deleted: del }) : t("Synced: {sent} sent, {received} received.", { sent: r.uploaded.length, received: r.downloaded.length })) : t("Synced: everything is up to date."));
     }
     return r;
   } catch (e) {
     const msg = String(e);
     setSyncState((s) => ({ ...s, status: /passphrase/i.test(msg) ? "needs-passphrase" : "error", error: msg }));
-    if (loud) notify(`Sync failed: ${msg}`, "error", undefined, 12000);
+    if (loud) notify(t("Sync failed: {error}", { error: msg }), "error", undefined, 12000);
     return null;
   }
 }
@@ -157,13 +159,13 @@ function schedule() {
 export async function takeSnapshot(label?: string) {
   if (!root()) return;
   const { askText } = await import("../ui/primitives");
-  const name = label ?? (await askText("Name this snapshot", "", "e.g. Before reorganizing"));
+  const name = label ?? (await askText(t("Name this snapshot"), "", "e.g. Before reorganizing"));
   if (name === null) return;
   try {
     await saveAll();
     const s = await ipc.snapshotCreate(name || "Snapshot");
-    notify(s ? `Snapshot taken (${s.files} files).` : "Nothing changed since the last snapshot.", "info", { label: "Show", run: () => setDialog({ kind: "history", tab: "snapshots" }) });
+    notify(s ? t("Snapshot taken ({files} files).", { files: s.files }) : t("Nothing changed since the last snapshot."), "info", { label: t("Show"), run: () => setDialog({ kind: "history", tab: "snapshots" }) });
   } catch (e) {
-    notify(`Snapshot failed: ${e}`, "error");
+    notify(t("Snapshot failed: {error}", { error: e }), "error");
   }
 }

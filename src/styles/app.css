@@ -1806,7 +1806,7 @@ mark {
 .style-card-edit {
   position: absolute;
   top: 12px;
-  right: 12px;
+  inset-inline-end: 12px;
   color: var(--fg-faint);
   opacity: 0;
 }
@@ -2234,7 +2234,7 @@ mark {
 .theme-actions {
   position: absolute;
   top: 6px;
-  right: 6px;
+  inset-inline-end: 6px;
   display: flex;
   gap: 2px;
   opacity: 0;
@@ -2341,7 +2341,7 @@ mark {
 .gallery-lang {
   position: absolute;
   top: 6px;
-  right: 6px;
+  inset-inline-end: 6px;
   font-size: 10px;
   color: #8a8fa0;
   background: #f1f1f5;
@@ -2556,7 +2556,7 @@ input[type="range"] {
   width: 16px;
   height: 16px;
   top: 2px;
-  left: 2px;
+  inset-inline-start: 2px;
   border-radius: 50%;
   background: white;
   box-shadow: var(--shadow-sm);
@@ -2567,6 +2567,9 @@ input[type="range"] {
 }
 .switch input:checked + span::after {
   transform: translateX(16px);
+}
+:root[dir="rtl"] .switch input:checked + span::after {
+  transform: translateX(-16px);
 }
 .keys {
   display: flex;
@@ -2662,7 +2665,8 @@ input[type="range"] {
 .tree-item .chev.open {
   transform: rotate(90deg);
 }
-:root[dir="rtl"] .tree-item .chev:not(.open) {
+:root[dir="rtl"] .tree-item .chev:not(.open),
+:root[dir="rtl"] .search-file .chev:not(.open) {
   transform: rotate(180deg);
 }
 .tree-item .folder {
@@ -3794,12 +3798,12 @@ html.no-anim *::after {
 .context-menu.submenu {
   position: absolute;
   top: -5px;
-  left: calc(100% + 2px);
+  inset-inline-start: calc(100% + 2px);
   animation: none;
 }
 .context-menu.submenu.left {
-  left: auto;
-  right: calc(100% + 2px);
+  inset-inline-start: auto;
+  inset-inline-end: calc(100% + 2px);
 }
 
 /* Toolbar callout dropdown */
@@ -4745,3 +4749,29 @@ body.nz-dragging-block, body.nz-dragging-block * { cursor: grabbing !important; 
 .nz-pdf-pop { position: fixed; z-index: 1000; width: 290px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 8px; display: flex; flex-direction: column; gap: 8px; }
 .nz-pdf-pop .row { align-items: center; flex-wrap: nowrap; gap: 2px; }
 .nz-pdf-pop textarea { width: 100%; resize: vertical; min-height: 60px; font: inherit; font-size: 13px; }
+
+/* Settings → Updates */
+.update-panel { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.update-row {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px;
+}
+.update-text { flex: 1; min-width: 0; }
+.update-version { font-weight: 600; }
+.update-status { color: var(--fg-muted); font-size: 0.92em; margin-top: 2px; overflow-wrap: anywhere; }
+.update-status progress { display: block; width: 100%; margin-top: 6px; accent-color: var(--accent); }
+.update-error { color: var(--danger, #c0392b); }
+
+/* Persian (right-to-left) interface: the whole UI mirrors, but a note's
+   editor and its PDF keep their own direction, which comes from the note's
+   language and each line's text, never from the interface language. */
+:root[dir="rtl"] .editor,
+:root[dir="rtl"] .preview-scroll,
+:root[dir="rtl"] .pdfViewer {
+  direction: ltr;
+}
+/* Names shown with dir="auto" (file names, labels) keep their own reading
+   order but line up with the rest of the right-to-left UI. */
+:root[dir="rtl"] [dir="auto"]:not(.editor *, .preview-scroll *, input, textarea) {
+  text-align: right;
+}

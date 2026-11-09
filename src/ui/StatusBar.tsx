@@ -13,6 +13,7 @@ import { docThemeId } from "./StyleDialogs";
 export { countWords } from "../core/words";
 import { activeWords, trackWords } from "../core/words";
 
+import { t, tn } from "../core/i18n";
 export default function StatusBar() {
   // Flashcards due now (learning + review + today's new), refreshed a moment
   // after the vault or a review changes.
@@ -39,14 +40,14 @@ export default function StatusBar() {
   return (
     <footer class="statusbar">
       <Show when={isNotePath(state.active)}>
-        <span class="sb-item" title="Save state">
-          <Show when={isDirty(state.active!)} fallback={<><CheckCircle2 size={12} /> Saved</>}>
-            <Save size={12} /> Editing…
+        <span class="sb-item" title={t("Save state")}>
+          <Show when={isDirty(state.active!)} fallback={<><CheckCircle2 size={12} /> {t("Saved")}</>}>
+            <Save size={12} /> {t("Editing…")}
           </Show>
         </span>
-        <span class="sb-item">{words().toLocaleString()} words</span>
-        <span class="sb-item">{text().length.toLocaleString()} chars</span>
-        <span class="sb-item">Ln {cursor().line}, Col {cursor().col}{cursor().selected ? ` (${cursor().selected} sel)` : ""}</span>
+        <span class="sb-item">{tn(words(), "{n} word", "{n} words")}</span>
+        <span class="sb-item">{tn(text().length, "{n} character", "{n} characters")}</span>
+        <span class="sb-item">{t("Ln {line}, Col {col}", { line: cursor().line, col: cursor().col })}{cursor().selected ? ` ${t("({n} sel)", { n: cursor().selected })}` : ""}</span>
       </Show>
       <For each={isNotePath(state.active) ? items() : []}>
         {(it) => (
@@ -55,35 +56,35 @@ export default function StatusBar() {
       </For>
       <div class="spacer" />
       <Show when={dueCards() > 0}>
-        <span class="sb-item click" title="Flashcards to review — click to study (Ctrl+Shift+R)" onClick={() => setDialog({ kind: "review", deck: null })}>
-          <GraduationCap size={12} /> {dueCards()} due
+        <span class="sb-item click" title={t("Flashcards to review — click to study (Ctrl+Shift+R)")} onClick={() => setDialog({ kind: "review", deck: null })}>
+          <GraduationCap size={12} /> {t("{n} due", { n: dueCards() })}
         </span>
       </Show>
       <Show when={syncConfigured()}>
         <span class="sb-item click" classList={{ err: syncState().status === "error" || syncState().status === "needs-passphrase" }}
-          title={syncState().error ?? (syncState().last ? `Last synced ${when(syncState().last)} — click to sync now` : "Click to sync now")}
+          title={syncState().error ?? (syncState().last ? t("Last synced {x} — click to sync now", { x: when(syncState().last) }) : t("Click to sync now"))}
           onClick={() => void runSync(true)}>
-          <Show when={syncState().status !== "syncing"} fallback={<><RefreshCw size={12} class="spin" /> Syncing</>}>
-            <Show when={syncState().status === "idle"} fallback={<><CloudOff size={12} /> Sync</>}>
-              <Cloud size={12} /> {syncState().last ? "Synced" : "Sync"}
+          <Show when={syncState().status !== "syncing"} fallback={<><RefreshCw size={12} class="spin" /> {t("Syncing")}</>}>
+            <Show when={syncState().status === "idle"} fallback={<><CloudOff size={12} /> {t("Sync")}</>}>
+              <Cloud size={12} /> {syncState().last ? t("Synced") : t("Sync")}
             </Show>
           </Show>
         </span>
       </Show>
       <Show when={isNotePath(state.active)}>
         <span class="sb-item">{state.active!.endsWith(".typ") ? "Typst" : "Markdown"}</span>
-        <span class="sb-item">Theme: {docThemeId()}</span>
+        <span class="sb-item">{t("Theme: {name}", { name: docThemeId() })}</span>
         <Show when={prefs.layout !== "editor"}>
           <span class="sb-item click" classList={{ err: errors() > 0 }} onClick={() => setRightTab("preview")}>
-            <Show when={!preview().busy} fallback={<><Loader2 size={12} class="spin" /> Typesetting</>}>
-              <Show when={errors()} fallback={<><CheckCircle2 size={12} /> {preview().pages.length} pp · {preview().millis} ms</>}>
-                <AlertTriangle size={12} /> {errors()} error{errors() > 1 ? "s" : ""}
+            <Show when={!preview().busy} fallback={<><Loader2 size={12} class="spin" /> {t("Typesetting")}</>}>
+              <Show when={errors()} fallback={<><CheckCircle2 size={12} /> {t("{pages} pp · {ms} ms", { pages: preview().pages.length, ms: preview().millis })}</>}>
+                <AlertTriangle size={12} /> {tn(errors(), "{n} error", "{n} errors")}
               </Show>
             </Show>
           </span>
         </Show>
         <Show when={prefs.layout === "editor"}>
-          <span class="sb-item click" onClick={() => setPrefs("layout", "split")}>Show preview</span>
+          <span class="sb-item click" onClick={() => setPrefs("layout", "split")}>{t("Show preview")}</span>
         </Show>
       </Show>
     </footer>

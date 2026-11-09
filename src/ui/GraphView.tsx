@@ -11,6 +11,7 @@ import { isDark, notesList, openNote, root, state, prefs, setPrefs, tree } from 
 import { openMenuAt } from "./primitives";
 import { revealInTree } from "./Sidebar";
 
+import { t } from "../core/i18n";
 export const [graphOpen, setGraphOpen] = createSignal(false);
 
 type Kind = "root" | "folder" | "note" | "file" | "tag";
@@ -522,25 +523,25 @@ export default function GraphView() {
     const n = hit(e);
     if (!n) {
       openMenuAt(e.clientX, e.clientY, [
-        { label: "Fit to screen", icon: <Maximize2 size={15} />, run: fit },
-        { label: "Collapse all folders", icon: <ChevronsDownUp size={15} />, run: () => setAllCollapsed(true) },
-        { label: "Expand all folders", icon: <ChevronsUpDown size={15} />, run: () => setAllCollapsed(false) },
+        { label: t("Fit to screen"), icon: <Maximize2 size={15} />, run: fit },
+        { label: t("Collapse all folders"), icon: <ChevronsDownUp size={15} />, run: () => setAllCollapsed(true) },
+        { label: t("Expand all folders"), icon: <ChevronsUpDown size={15} />, run: () => setAllCollapsed(false) },
       ]);
       return;
     }
     if (n.kind === "folder") {
       const dir = n.id.slice(4);
       openMenuAt(e.clientX, e.clientY, [
-        { label: n.collapsed ? "Expand folder" : "Collapse folder", icon: n.collapsed ? <ChevronsUpDown size={15} /> : <ChevronsDownUp size={15} />, run: () => toggleFolder(n) },
-        ...(n.note ? [{ label: "Open folder note", icon: <FileText size={15} />, run: () => open(n.note!) }] : []),
-        { label: "Reveal in file tree", icon: <FolderTree size={15} />, run: () => (setGraphOpen(false), revealInTree(dir)) },
-        { label: "Show only this folder", icon: <Crosshair size={15} />, run: () => setQuery(dir + "/") },
+        { label: n.collapsed ? t("Expand folder") : t("Collapse folder"), icon: n.collapsed ? <ChevronsUpDown size={15} /> : <ChevronsDownUp size={15} />, run: () => toggleFolder(n) },
+        ...(n.note ? [{ label: t("Open folder note"), icon: <FileText size={15} />, run: () => open(n.note!) }] : []),
+        { label: t("Reveal in file tree"), icon: <FolderTree size={15} />, run: () => (setGraphOpen(false), revealInTree(dir)) },
+        { label: t("Show only this folder"), icon: <Crosshair size={15} />, run: () => setQuery(dir + "/") },
       ]);
     } else if (n.kind === "note" || n.kind === "file") {
       openMenuAt(e.clientX, e.clientY, [
-        { label: "Open", icon: <FileText size={15} />, run: () => open(n.id) },
-        { label: "Local graph of this note", icon: <Crosshair size={15} />, run: () => (open(n.id), setOpt("local", true), setGraphOpen(true)) },
-        { label: "Reveal in file tree", icon: <FolderOpen size={15} />, run: () => (setGraphOpen(false), revealInTree(n.id)) },
+        { label: t("Open"), icon: <FileText size={15} />, run: () => open(n.id) },
+        { label: t("Local graph of this note"), icon: <Crosshair size={15} />, run: () => (open(n.id), setOpt("local", true), setGraphOpen(true)) },
+        { label: t("Reveal in file tree"), icon: <FolderOpen size={15} />, run: () => (setGraphOpen(false), revealInTree(n.id)) },
       ]);
     }
   };
@@ -648,76 +649,76 @@ export default function GraphView() {
     <div class="graph-view">
       <div class="graph-bar">
         <span class="graph-title">
-          <Waypoints size={16} /> Graph
+          <Waypoints size={16} /> {t("Graph")}
           <small>
-            {counts().notes} notes · {counts().folders} folders · {counts().edges} connections
+            {t("{notes} notes · {folders} folders · {edges} connections", counts())}
           </small>
         </span>
         <div class="spacer" />
         <label class="graph-search">
           <Search size={14} />
-          <input placeholder="Filter…" value={query()} onInput={(e) => setQuery(e.currentTarget.value)} dir="auto" />
+          <input placeholder={t("Filter…")} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} dir="auto" />
         </label>
-        <Toggle k="local" label="Local" hint="Only what is near the open note" />
-        <Toggle k="links" label="Links" hint="[[links]] between notes (dashed)" />
-        <Toggle k="labels" label="Labels" />
-        <button class="icon-btn" classList={{ active: panel() }} title="Graph options" onClick={() => setPanel(!panel())}>
+        <Toggle k="local" label={t("Local")} hint={t("Only what is near the open note")} />
+        <Toggle k="links" label={t("Links")} hint={t("[[links]] between notes (dashed)")} />
+        <Toggle k="labels" label={t("Labels")} />
+        <button class="icon-btn" classList={{ active: panel() }} title={t("Graph options")} onClick={() => setPanel(!panel())}>
           <SlidersHorizontal size={15} />
         </button>
-        <button class="icon-btn" title="Fit to screen" onClick={fit}>
+        <button class="icon-btn" title={t("Fit to screen")} onClick={fit}>
           <Maximize2 size={15} />
         </button>
-        <button class="icon-btn" title="Close graph (Esc)" onClick={() => setGraphOpen(false)}>
+        <button class="icon-btn" title={t("Close graph (Esc)")} onClick={() => setGraphOpen(false)}>
           <X size={16} />
         </button>
       </div>
       <div class="graph-canvas" ref={wrap}>
         <canvas ref={canvas} onMouseDown={onDown} onMouseMove={onMove} onMouseLeave={() => !drag && setHover(null)} onWheel={onWheel} onContextMenu={menu} />
         <Show when={counts().notes === 0 && counts().folders === 0}>
-          <div class="graph-empty">{opts().local ? "Open a note to see its local graph" : "No notes in this vault yet"}</div>
+          <div class="graph-empty">{opts().local ? t("Open a note to see its local graph") : t("No notes in this vault yet")}</div>
         </Show>
         <Show when={panel()}>
           <div class="graph-panel">
-            <h4>Show</h4>
-            <Toggle k="folders" label="Folders" hint="Each folder is a node linked to what is inside it" />
-            <Toggle k="links" label="Note links" />
-            <Toggle k="tags" label="Tags" />
-            <Toggle k="files" label="Attachments (images, PDFs)" />
-            <Toggle k="orphans" label="Notes without links" />
-            <Toggle k="arrows" label="Link arrows" />
-            <Toggle k="labels" label="Labels" />
-            <h4>Local graph</h4>
-            <Toggle k="local" label="Only around the open note" />
-            <Slider k="depth" label="Depth" min={1} max={5} step={1} />
-            <h4>Color by</h4>
+            <h4>{t("Show")}</h4>
+            <Toggle k="folders" label={t("Folders")} hint={t("Each folder is a node linked to what is inside it")} />
+            <Toggle k="links" label={t("Note links")} />
+            <Toggle k="tags" label={t("Tags")} />
+            <Toggle k="files" label={t("Attachments (images, PDFs)")} />
+            <Toggle k="orphans" label={t("Notes without links")} />
+            <Toggle k="arrows" label={t("Link arrows")} />
+            <Toggle k="labels" label={t("Labels")} />
+            <h4>{t("Local graph")}</h4>
+            <Toggle k="local" label={t("Only around the open note")} />
+            <Slider k="depth" label={t("Depth")} min={1} max={5} step={1} />
+            <h4>{t("Color by")}</h4>
             <div class="segmented small">
               <For each={[["folder", "Folder"], ["kind", "Type"], ["none", "None"]] as const}>
                 {([v, l]) => <button classList={{ active: opts().colorBy === v }} onClick={() => setOpt("colorBy", v)}>{l}</button>}
               </For>
             </div>
-            <h4>Folders</h4>
+            <h4>{t("Folders")}</h4>
             <div class="row gap">
-              <button class="btn small" onClick={() => setAllCollapsed(true)}><ChevronsDownUp size={13} /> Collapse all</button>
-              <button class="btn small" onClick={() => setAllCollapsed(false)}><ChevronsUpDown size={13} /> Expand all</button>
+              <button class="btn small" onClick={() => setAllCollapsed(true)}><ChevronsDownUp size={13} /> {t("Collapse all")}</button>
+              <button class="btn small" onClick={() => setAllCollapsed(false)}><ChevronsUpDown size={13} /> {t("Expand all")}</button>
             </div>
-            <h4>Display</h4>
-            <Slider k="nodeSize" label="Node size" min={0.5} max={2.5} step={0.1} />
-            <Slider k="linkDistance" label="Link distance" min={0.4} max={3} step={0.1} />
-            <Slider k="repel" label="Repel force" min={0.2} max={4} step={0.1} />
-            <Slider k="textFade" label="Note labels from zoom" min={0.3} max={3} step={0.1} />
-            <button class="btn small" onClick={() => setPrefs("graph", {})}><RotateCcw size={13} /> Reset options</button>
+            <h4>{t("Display")}</h4>
+            <Slider k="nodeSize" label={t("Node size")} min={0.5} max={2.5} step={0.1} />
+            <Slider k="linkDistance" label={t("Link distance")} min={0.4} max={3} step={0.1} />
+            <Slider k="repel" label={t("Repel force")} min={0.2} max={4} step={0.1} />
+            <Slider k="textFade" label={t("Note labels from zoom")} min={0.3} max={3} step={0.1} />
+            <button class="btn small" onClick={() => setPrefs("graph", {})}><RotateCcw size={13} /> {t("Reset options")}</button>
           </div>
         </Show>
         <div class="graph-legend">
           <Show when={opts().folders}>
-            <span><i class="dot folder" /> Folder — click to collapse</span>
+            <span><i class="dot folder" /> {t("Folder — click to collapse")}</span>
           </Show>
-          <span><i class="dot" /> Note</span>
+          <span><i class="dot" /> {t("Note")}</span>
           <Show when={opts().links}>
-            <span><i class="line dashed" /> Link</span>
+            <span><i class="line dashed" /> {t("Link")}</span>
           </Show>
           <Show when={opts().tags}>
-            <span><i class="dot tag" /> Tag</span>
+            <span><i class="dot tag" /> {t("Tag")}</span>
           </Show>
         </div>
       </div>

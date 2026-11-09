@@ -17,6 +17,7 @@ import { frontmatterRange } from "../core/frontmatter";
 import { setBlockStyle, toggleList, BlockStyle } from "./format";
 import { notify } from "../core/app";
 
+import { t } from "../core/i18n";
 export interface Block {
   /** Start of the first line and end of the last line. */
   from: number;
@@ -121,7 +122,7 @@ async function copyLink(view: EditorView, b: Block, embed: boolean) {
   }
   const link = `${embed ? "!" : ""}[[${name}#${sub}]]`;
   await navigator.clipboard.writeText(link);
-  notify(`Copied ${link}`);
+  notify(t("Copied {link}", { link }));
 }
 
 function turnInto(view: EditorView, b: Block, to: BlockStyle | "bullet" | "number" | "task") {
@@ -150,25 +151,25 @@ function blockMenu(view: EditorView, b: Block, x: number, y: number) {
     folded = true;
   });
   const items: (MenuItem | "-")[] = [
-    { label: "Copy link to block", run: () => void copyLink(view, b, false) },
-    { label: "Copy embed of block", run: () => void copyLink(view, b, true) },
+    { label: t("Copy link to block"), run: () => void copyLink(view, b, false) },
+    { label: t("Copy embed of block"), run: () => void copyLink(view, b, true) },
     "-",
     {
-      label: "Turn into",
+      label: t("Turn into"),
       run: () => {},
       items: [
-        { label: "Text", run: () => turnInto(view, b, "p") },
-        { label: "Heading 1", run: () => turnInto(view, b, "h1") },
-        { label: "Heading 2", run: () => turnInto(view, b, "h2") },
-        { label: "Heading 3", run: () => turnInto(view, b, "h3") },
-        { label: "Bulleted list", run: () => turnInto(view, b, "bullet") },
-        { label: "Numbered list", run: () => turnInto(view, b, "number") },
-        { label: "Task list", run: () => turnInto(view, b, "task") },
-        { label: "Quote", run: () => turnInto(view, b, "quote") },
+        { label: t("Text"), run: () => turnInto(view, b, "p") },
+        { label: t("Heading 1"), run: () => turnInto(view, b, "h1") },
+        { label: t("Heading 2"), run: () => turnInto(view, b, "h2") },
+        { label: t("Heading 3"), run: () => turnInto(view, b, "h3") },
+        { label: t("Bulleted list"), run: () => turnInto(view, b, "bullet") },
+        { label: t("Numbered list"), run: () => turnInto(view, b, "number") },
+        { label: t("Task list"), run: () => turnInto(view, b, "task") },
+        { label: t("Quote"), run: () => turnInto(view, b, "quote") },
       ],
     },
     {
-      label: "Duplicate",
+      label: t("Duplicate"),
       run: () => {
         const text = view.state.doc.sliceString(ext.from, ext.to);
         const sep = b.kind === "item" ? "\n" : "\n\n";
@@ -176,10 +177,10 @@ function blockMenu(view: EditorView, b: Block, x: number, y: number) {
       },
     },
   ];
-  if (foldRange) items.push({ label: folded ? "Unfold" : "Fold", run: () => view.dispatch({ effects: (folded ? unfoldEffect : foldEffect).of(foldRange) }) });
-  if (b.kind === "heading" || b.kind === "item") items.push({ label: "Zoom in", hint: "Ctrl+Shift+.", run: () => zoomTo(view, b) });
+  if (foldRange) items.push({ label: folded ? t("Unfold") : t("Fold"), run: () => view.dispatch({ effects: (folded ? unfoldEffect : foldEffect).of(foldRange) }) });
+  if (b.kind === "heading" || b.kind === "item") items.push({ label: t("Zoom in"), hint: "Ctrl+Shift+.", run: () => zoomTo(view, b) });
   items.push("-", {
-    label: "Delete",
+    label: t("Delete"),
     danger: true,
     run: () => {
       const doc = view.state.doc;
@@ -208,7 +209,7 @@ class Handle {
   constructor(readonly view: EditorView) {
     this.dom = document.createElement("div");
     this.dom.className = "cm-nz-handle";
-    this.dom.title = "Drag to move · click for options";
+    this.dom.title = t("Drag to move · click for options");
     this.dom.setAttribute("aria-hidden", "true");
     this.dom.innerHTML = `<svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg>`;
     this.indicator = document.createElement("div");
@@ -436,7 +437,7 @@ function zoomPanel(view: EditorView): Panel {
       sep.textContent = "›";
       dom.append(sep);
     };
-    crumb(store.active ? stem(store.active) : "Note", () => zoomOut(view));
+    crumb(store.active ? stem(store.active) : t("Note"), () => zoomOut(view));
     for (const a of ancestors(view.state, z.from)) {
       crumb(a.text, () => {
         const b = blockAt(view.state, a.from);
@@ -447,7 +448,7 @@ function zoomPanel(view: EditorView): Panel {
     cur.textContent = view.state.doc.lineAt(z.from).text.replace(/^\s*([-*+]\s(\[.\]\s)?|\d+[.)]\s|#+\s+)/, "").replace(/\s+\^[\w-]+\s*$/, "").slice(0, 80);
     const close = document.createElement("button");
     close.className = "close";
-    close.title = "Zoom out (Esc)";
+    close.title = t("Zoom out (Esc)");
     close.textContent = "×";
     close.onclick = (e) => (e.preventDefault(), zoomOut(view));
     dom.append(cur, close);
@@ -492,7 +493,7 @@ class FoldWidget extends WidgetType {
     const el = document.createElement("span");
     el.className = "cm-nz-folded";
     el.textContent = "…";
-    el.title = "Folded — click to unfold";
+    el.title = t("Folded — click to unfold");
     el.onclick = () => {
       const pos = view.posAtDOM(el);
       foldedRanges(view.state).between(pos, pos + 1, (from, to) => {

@@ -11,8 +11,10 @@ import {
 import { preview, exportPdf, showGeneratedTypst, runPreview } from "../core/render";
 import { isTypst } from "../editor/format";
 import { previewCss } from "./Toolbar";
-import { SvgIcon } from "./primitives";
+import { SvgIcon, openMenuAt } from "./primitives";
+import { exportItems } from "./fileMenu";
 
+import { t, tn } from "../core/i18n";
 // --------------------------------------------------------------- preview
 
 function PreviewPane() {
@@ -46,25 +48,30 @@ function PreviewPane() {
         <span class="preview-status" classList={{ err: errors().length > 0 }}>
           <Show
             when={!preview().busy}
-            fallback={<><Loader2 size={14} class="spin" /> Rendering…</>}
+            fallback={<><Loader2 size={14} class="spin" /> {t("Rendering…")}</>}
           >
-            <Show when={errors().length} fallback={<><CheckCircle2 size={14} /> {preview().pages.length} pages · {preview().millis} ms</>}>
-              <AlertTriangle size={14} /> {errors().length} error{errors().length > 1 ? "s" : ""}
+            <Show when={errors().length} fallback={<><CheckCircle2 size={14} /> {t("{pages} pages · {ms} ms", { pages: preview().pages.length, ms: preview().millis })}</>}>
+              <AlertTriangle size={14} /> {tn(errors().length, "{n} error", "{n} errors")}
             </Show>
           </Show>
         </span>
         <div class="spacer" />
-        <button class="icon-btn" title="Zoom out" onClick={() => step(-0.1)}><ZoomOut size={15} /></button>
-        <button class="zoom-label" title="Fit width" onClick={() => setZoom("fit")}>
-          {zoom() === "fit" ? "Fit" : `${Math.round((zoom() as number) * 100)}%`}
+        <button class="icon-btn" title={t("Zoom out")} onClick={() => step(-0.1)}><ZoomOut size={15} /></button>
+        <button class="zoom-label" title={t("Fit width")} onClick={() => setZoom("fit")}>
+          {zoom() === "fit" ? t("Fit") : `${Math.round((zoom() as number) * 100)}%`}
         </button>
-        <button class="icon-btn" title="Zoom in" onClick={() => step(0.1)}><ZoomIn size={15} /></button>
-        <button class="icon-btn" title="View generated Typst" onClick={async () => {
+        <button class="icon-btn" title={t("Zoom in")} onClick={() => step(0.1)}><ZoomIn size={15} /></button>
+        <button class="icon-btn" title={t("View generated Typst")} onClick={async () => {
           const src = await showGeneratedTypst();
           if (src) setDialog({ kind: "typst", source: src });
         }}><FileCode size={15} /></button>
         <Show when={app.commands.has("pdf.export")}>
-          <button class="icon-btn" title="Export PDF" onClick={() => exportPdf()}><FileDown size={15} /></button>
+          <button class="icon-btn" title={t("Export")} onClick={(e) => {
+            const p = state.active;
+            if (!p) return void exportPdf();
+            const r = e.currentTarget.getBoundingClientRect();
+            openMenuAt(Math.max(8, r.right - 220), r.bottom + 4, exportItems(p));
+          }}><FileDown size={15} /></button>
         </Show>
       </div>
 
@@ -76,7 +83,7 @@ function PreviewPane() {
               <div class={`diag ${d.severity}`} onClick={() => d.line && goToLine(d.line)} classList={{ link: !!d.line }}>
                 <AlertTriangle size={13} />
                 <span>
-                  <Show when={d.line}><b>Line {d.line}: </b></Show>
+                  <Show when={d.line}><b>{t("Line {line}:", { line: d.line! })} </b></Show>
                   {d.message}
                   <Show when={d.hints.length}><em> — {d.hints[0]}</em></Show>
                   <Show when={d.file}><small> ({d.file})</small></Show>
@@ -92,8 +99,8 @@ function PreviewPane() {
           when={preview().pages.length}
           fallback={
             <div class="preview-empty">
-              <Show when={state.active} fallback="Open a note to see its PDF preview">
-                <Show when={preview().busy} fallback="Nothing to show yet">
+              <Show when={state.active} fallback={t("Open a note to see its PDF preview")}>
+                <Show when={preview().busy} fallback={t("Nothing to show yet")}>
                   <Loader2 size={22} class="spin" />
                 </Show>
               </Show>
@@ -127,15 +134,15 @@ function PageImage(props: { svg: string }) {
 // ----------------------------------------------------------------- styles
 
 export const STYLE_LABELS: [string, string][] = [
-  ["body", "Normal text"],
+  ["body", t("Normal text")],
   ["title", "Title"],
   ["subtitle", "Subtitle"],
-  ["h1", "Heading 1"],
-  ["h2", "Heading 2"],
-  ["h3", "Heading 3"],
-  ["h4", "Heading 4"],
-  ["h5", "Heading 5"],
-  ["h6", "Heading 6"],
+  ["h1", t("Heading 1")],
+  ["h2", t("Heading 2")],
+  ["h3", t("Heading 3")],
+  ["h4", t("Heading 4")],
+  ["h5", t("Heading 5")],
+  ["h6", t("Heading 6")],
   ["quote", "Quote"],
   ["code", "Code"],
   ["link", "Link"],
@@ -153,7 +160,7 @@ function StylesPane() {
   return (
     <div class="styles-pane">
       <div class="pane-intro">
-        Click a style to modify it — like Word's <b>Modify Style</b>. Changes apply to {isTypst() ? "the theme" : "this note (or its theme)"}.
+        {t("Click a style to modify it — like Word's")} <b>{t("Modify Style")}</b>. {isTypst() ? t("Changes apply to the theme.") : t("Changes apply to this note (or its theme).")}
       </div>
       <For each={STYLE_LABELS}>
         {([key, label]) => (
@@ -165,8 +172,8 @@ function StylesPane() {
         )}
       </For>
       <div class="row gap">
-        <button class="btn" onClick={() => setDialog({ kind: "page" })}>Page setup…</button>
-        <button class="btn" onClick={() => setDialog({ kind: "themes" })}>Themes…</button>
+        <button class="btn" onClick={() => setDialog({ kind: "page" })}>{t("Page setup…")}</button>
+        <button class="btn" onClick={() => setDialog({ kind: "themes" })}>{t("Themes…")}</button>
       </div>
     </div>
   );
@@ -183,8 +190,8 @@ function PluginPanel(props: { panel: Panel }) {
 
 export default function RightPanel() {
   const builtins = [
-    { id: "preview", title: "Preview", icon: () => <Eye size={16} /> },
-    { id: "styles", title: "Styles", icon: () => <Palette size={16} /> },
+    { id: "preview", title: t("Preview"), icon: () => <Eye size={16} /> },
+    { id: "styles", title: t("Styles"), icon: () => <Palette size={16} /> },
   ];
   const plugins = () => app.panels.items();
   return (

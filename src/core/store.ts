@@ -7,6 +7,7 @@ import { renameBookmarkPaths } from "./bookmarks";
 import { app, notify } from "./app";
 import { ipc, Entry, Theme, dirname, join, fileKind } from "./ipc";
 
+import { t, tn } from "./i18n";
 // ------------------------------------------------------------ preferences
 
 export type ThemeMode = "system" | "light" | "dark";
@@ -115,6 +116,10 @@ export interface Prefs {
   /** Where Export PDF suggests saving: "" = vault root, "./" = next to the note, else an absolute folder. */
   pdfFolder: string;
   openAfterExport: boolean;
+  /** Look for a new NoteZ release on GitHub at startup. */
+  checkUpdates: boolean;
+  /** Language of menus and dialogs: "auto" (system) or a code from UI_LANGUAGES. */
+  uiLanguage: string;
   previewDelayMs: number;
   /** Initial preview zoom: 0 = fit width, else a factor. */
   previewZoom: number;
@@ -190,6 +195,8 @@ const DEFAULT_PREFS: Prefs = {
   snapshotKeep: 14,
   pdfFolder: "",
   openAfterExport: false,
+  checkUpdates: true,
+  uiLanguage: "auto",
   previewDelayMs: 350,
   previewZoom: 0,
   uiZoom: 1,
@@ -320,7 +327,7 @@ export async function openVault(path: string) {
     setTree(await ipc.openVault(path));
     setNotesList(await ipc.notes());
   } catch (e) {
-    notify(`Cannot open vault: ${e}`, "error");
+    notify(t("Cannot open vault: {error}", { error: e }), "error");
     setPrefs("recentVaults", (r) => r.filter((p) => p !== path));
     if (prefs.lastVault === path) setPrefs("lastVault", null);
     return;
@@ -411,7 +418,7 @@ export async function save(path: string) {
     if (state.buffers[path]) setState("buffers", path, "saved", content);
     app.events.emit("note:saved", { path });
   } catch (e) {
-    notify(`Save failed: ${e}`, "error");
+    notify(t("Save failed: {error}", { error: e }), "error");
   }
 }
 
@@ -486,8 +493,8 @@ async function relocate(path: string, to: string) {
     let update = prefs.updateLinks === "always";
     if (prefs.updateLinks === "ask") {
       const n = await ipc.linkRefs(path).catch(() => 0);
-      update = n > 0 && (await ask(`Update links in ${n} note${n > 1 ? "s" : ""} that point to "${path}"?`, {
-        title: "Update links", okLabel: "Update links", cancelLabel: "Don't update",
+      update = n > 0 && (await ask(t("Update links in {notes} that point to \"{path}\"?", { notes: tn(n, "{n} note", "{n} notes"), path }), {
+        title: t("Update links"), okLabel: t("Update links"), cancelLabel: t("Don't update"),
       }));
     }
     const changed = await ipc.rename(path, to, update);
@@ -500,7 +507,7 @@ async function relocate(path: string, to: string) {
       app.events.emit("note:reloaded", { path: p, content });
     }
     await refreshTree();
-    if (changed.length) notify(`Updated links in ${changed.length} note${changed.length > 1 ? "s" : ""}`, "success");
+    if (changed.length) notify(t("Updated links in {notes}", { notes: tn(changed.length, "{n} note", "{n} notes") }), "success");
   } catch (e) {
     notify(String(e), "error");
   }
@@ -528,8 +535,8 @@ export function newNoteDir(): string {
 export async function deleteEntry(path: string) {
   if (prefs.confirmDelete) {
     const ok = await ask(
-      prefs.deleteToTrash ? `Move "${path}" to the trash?` : `Delete "${path}"? This cannot be undone.`,
-      { title: "Delete", kind: "warning", okLabel: prefs.deleteToTrash ? "Move to trash" : "Delete", cancelLabel: "Cancel" },
+      prefs.deleteToTrash ? t("Move \"{path}\" to the trash?", { path }) : t("Delete \"{path}\"? This cannot be undone.", { path }),
+      { title: t("Delete"), kind: "warning", okLabel: prefs.deleteToTrash ? t("Move to trash") : t("Delete"), cancelLabel: t("Cancel") },
     );
     if (!ok) return;
   }
@@ -548,8 +555,8 @@ export async function deleteEntry(path: string) {
         trashed = true;
         await ipc.indexUpdate([path]);
       } catch (e) {
-        const ok = await ask(`Could not move "${path}" to the trash (${e}). Delete it permanently?`, {
-          title: "Delete", kind: "warning", okLabel: "Delete permanently", cancelLabel: "Cancel",
+        const ok = await ask(t("Could not move \"{path}\" to the trash ({error}). Delete it permanently?", { path, error: e }), {
+          title: t("Delete"), kind: "warning", okLabel: t("Delete permanently"), cancelLabel: t("Cancel"),
         });
         if (!ok) return;
       }
@@ -583,32 +590,32 @@ async function vaultChanged(paths: string[]) {
   }
   const hit = (t: string) => paths.some((p) => t === p || t.startsWith(p + "/"));
   if (state.tabs.some((t) => fileKind(t) !== "note" && hit(t))) setFileRev((n) => n + 1);
-  for (const t of state.tabs.filter(hit)) {
-    const b = state.buffers[t];
+  for (const tab of state.tabs.filter(hit)) {
+    const b = state.buffers[tab];
     if (!b) continue;
     let disk: string;
     try {
-      disk = await ipc.read(t);
+      disk = await ipc.read(tab);
     } catch {
       // Deleted (or moved) outside the app.
-      if (b.content === b.saved) await closeTab(t);
-      else notify(`"${t}" was deleted on disk. Save (Ctrl+S) to keep your version.`, "error", undefined, 15000);
-      if (b.content !== b.saved) setState("buffers", t, "saved", "");
+      if (b.content === b.saved) await closeTab(tab);
+      else notify(t("\"{name}\" was deleted on disk. Save (Ctrl+S) to keep your version.", { name: tab }), "error", undefined, 15000);
+      if (b.content !== b.saved) setState("buffers", tab, "saved", "");
       continue;
     }
     if (disk === b.saved || disk === b.content) {
-      if (disk !== b.saved) setState("buffers", t, "saved", disk);
+      if (disk !== b.saved) setState("buffers", tab, "saved", disk);
       continue; // our own save, or nothing new
     }
     const reload = () => {
-      clearTimeout(saveTimers.get(t));
-      setState("buffers", t, { content: disk, saved: disk });
-      app.events.emit("note:reloaded", { path: t, content: disk });
+      clearTimeout(saveTimers.get(tab));
+      setState("buffers", tab, { content: disk, saved: disk });
+      app.events.emit("note:reloaded", { path: tab, content: disk });
     };
     if (b.content === b.saved) reload();
     else {
-      clearTimeout(saveTimers.get(t)); // don't overwrite the disk version silently
-      notify(`"${t}" changed on disk while you were editing.`, "error", { label: "Reload from disk", run: reload }, 20000);
+      clearTimeout(saveTimers.get(tab)); // don't overwrite the disk version silently
+      notify(t("\"{name}\" changed on disk while you were editing.", { name: tab }), "error", { label: t("Reload from disk"), run: reload }, 20000);
     }
   }
 }

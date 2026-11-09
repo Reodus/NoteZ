@@ -6,6 +6,7 @@ import { parseDocument } from "yaml";
 import { editFrontmatter, renameFrontmatterKey } from "../core/frontmatter";
 import { getLiveOpts, hydrateMath, inlineHtml } from "./livepreview";
 
+import { t } from "../core/i18n";
 type Scalar = string | number | boolean | null;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const isScalar = (v: unknown): v is Scalar => v === null || ["string", "number", "boolean"].includes(typeof v);
@@ -123,7 +124,7 @@ export class PropertiesWidget extends WidgetType {
     const card = h("div", "cm-nz-lp-props");
     const head = h("div", "cm-nz-lp-props-title", "Properties");
     const raw = h("button", "nz-prop-btn nz-prop-raw", "</>");
-    raw.title = "Edit as YAML";
+    raw.title = t("Edit as YAML");
     raw.addEventListener("click", () => {
       view.dispatch({ selection: { anchor: 4 }, scrollIntoView: true });
       view.focus();
@@ -154,12 +155,12 @@ export class PropertiesWidget extends WidgetType {
       } else if (isScalar(value)) {
         v.append(inlineEditor(show(value), "empty", (s) => set(key, typed(s, value))));
       } else {
-        const more = h("button", "nz-prop-btn", "Edit YAML…");
+        const more = h("button", "nz-prop-btn", t("Edit YAML…"));
         more.addEventListener("click", () => raw.click());
-        v.append(h("span", "more", Array.isArray(value) ? `${value.length} items` : "{…}"), more);
+        v.append(h("span", "more", Array.isArray(value) ? t("{n} items", { n: value.length }) : "{…}"), more);
       }
       const x = h("button", "nz-prop-btn nz-prop-del", "×");
-      x.title = `Remove "${key}"`;
+      x.title = t("Remove \"{key}\"", { key });
       x.addEventListener("click", () => del(key));
       v.append(x);
       grid.append(k, v);

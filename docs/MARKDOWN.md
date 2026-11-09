@@ -7,7 +7,8 @@ extensions for styling, layout, annotations, charts and PDF output.
 
 Notes are `.md` (Markdown, covered here) or `.typ` ([Typst](https://typst.app/docs),
 written as plain Typst). Each example below shows what to type. Unless marked
-**editor only**, it also appears in the PDF preview and export.
+**editor only**, it also appears in the PDF preview and export. For what Word, HTML and portable
+Markdown exports keep, see [Exporting](EXPORT.md).
 
 - [Text formatting](#text-formatting)
 - [Headings and paragraphs](#headings-and-paragraphs)
@@ -157,6 +158,12 @@ under an item to keep it part of the item.
   grid, and you can use Tab to move between cells.
 - Cells can hold inline formatting, links, math and images, but not block
   elements. Use `<br>` for a line break inside a cell.
+- A right-to-left table puts its first column on the right. The direction
+  comes from an enclosing `::: {dir=rtl}` / `::: {lang=fa}` block if there is
+  one. Otherwise it comes from the cells' text, by the same rule as paragraphs:
+  mostly Persian/Arabic words means right-to-left, even when the first word is
+  English (`| Name | توضیح |`). The editor, PDF, Word and HTML all agree. To
+  force a direction, wrap the table in `::: {dir=ltr}` … `:::`.
 
 ## Quotes and callouts
 

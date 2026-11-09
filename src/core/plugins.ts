@@ -12,6 +12,7 @@ import { askText } from "../ui/primitives";
 import { insertText, insertBlock } from "../editor/format";
 import { clearPreviewCache } from "../editor/widgets";
 
+import { t } from "./i18n";
 export const API_VERSION = "1.1.0";
 
 export interface NoteZPlugin {
@@ -138,7 +139,7 @@ async function activate(id: string, plugin: NoteZPlugin) {
   } catch (e) {
     entry.error = String(e);
     console.error(`plugin ${id} failed to load`, e);
-    notify(`Plugin “${id}” failed: ${e}`, "error");
+    notify(t("Plugin “{id}” failed: {error}", { id, error: e }), "error");
   }
   setLoaded((l) => [...l.filter((x) => x.id !== id), entry]);
 }
@@ -168,7 +169,7 @@ async function loadVaultPlugin(id: string) {
     await activate(id, plugin);
   } catch (e) {
     setLoaded((l) => [...l.filter((x) => x.id !== id), { id, disposers: [], error: String(e) }]);
-    notify(`Plugin “${id}” failed: ${e}`, "error");
+    notify(t("Plugin “{id}” failed: {error}", { id, error: e }), "error");
   }
 }
 

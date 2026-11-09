@@ -8,6 +8,7 @@ import { prefs, state } from "../core/store";
 import { formatDate } from "../plugins/templates";
 import { linkTo } from "../ui/fileMenu";
 
+import { t } from "../core/i18n";
 const IMAGE = /\.(png|jpe?g|gif|svg|webp|bmp|avif)$/i;
 
 /** Vault folder for new attachments of `note` (prefs.attachmentMode). */
@@ -69,7 +70,7 @@ export async function saveFiles(files: File[]): Promise<string[]> {
         : await ipc.saveAttachment(f.name && f.name !== "image.png" ? f.name : pastedName(note, ext), await bytesB64(f), dir);
       links.push(linkFor(saved, !!note?.endsWith(".typ")));
     } catch (e) {
-      notify(`Could not add ${f.name || "file"}: ${e}`, "error");
+      notify(t("Could not add {x}: {error}", { x: f.name || "file", error: e }), "error");
     }
   }
   return links;

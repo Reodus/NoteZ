@@ -20,8 +20,9 @@ import { root } from "../core/store";
 import { saveFiles } from "./attachments";
 import { getLiveOpts, hydrateImages, hydrateMath, inlineHtml } from "./livepreview";
 import { WRAP_PAIRS } from "./autopair";
-import { ltrRanges, rtlLine, RTL } from "./bidi";
+import { ltrRanges, RTL, rtlLine, tableDir } from "./bidi";
 
+import { t } from "../core/i18n";
 type Align = "" | "left" | "center" | "right";
 
 interface Model {
@@ -108,24 +109,26 @@ function tableAt(state: EditorState, pos: number): { from: number; to: number } 
 interface Live {
   view: EditorView;
   src: string;
+  /** Direction forced by an enclosing `:::` block. */
+  dir: "rtl" | "ltr" | null;
 }
 const live = new WeakMap<HTMLElement, Live>();
 /** The cell whose own input is being written (don't overwrite its text). */
 let writingCell: HTMLElement | null = null;
 
 export class TableWidget extends WidgetType {
-  constructor(readonly src: string) {
+  constructor(readonly src: string, readonly dir: "rtl" | "ltr" | null = null) {
     super();
   }
   eq(o: TableWidget) {
-    return o.src === this.src;
+    return o.src === this.src && o.dir === this.dir;
   }
   get estimatedHeight() {
     return 16 + 38 * Math.max(1, this.src.split("\n").length - 1);
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
-    live.set(wrap, { view, src: this.src });
+    live.set(wrap, { view, src: this.src, dir: this.dir });
     wire(wrap);
     render(wrap, parse(this.src));
     return wrap;
@@ -135,7 +138,11 @@ export class TableWidget extends WidgetType {
     if (!st) return false;
     st.view = view;
     st.src = this.src;
+    st.dir = this.dir;
     const m = parse(this.src);
+    // Typing can change the direction (e.g. the first Persian words).
+    const dir = tableDir(this.src, this.dir);
+    dom.querySelectorAll<HTMLElement>(".nz-table-box, table").forEach((e) => (e.dir = dir));
     const table = dom.querySelector("table");
     const sameShape =
       table && table.rows.length === m.rows.length + 1 && (table.rows[0]?.cells.length ?? -1) === m.header.length;
@@ -177,17 +184,12 @@ function paint(cell: HTMLElement) {
   hydrateMath(cell);
 }
 
-function tableDir(src: string): "rtl" | "ltr" {
-  const prose = src.replace(/!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)|<[^>]+>|\[\^[^\]]*\]/g, "");
-  const strong = /[֐-ࣿיִ-﷿ﹰ-﻿]|[A-Za-zÀ-ɏ]/.exec(prose);
-  return strong && /[^A-Za-zÀ-ɏ]/.test(strong[0]) ? "rtl" : "ltr";
-}
 
 function render(wrap: HTMLElement, m: Model) {
   const st = live.get(wrap)!;
   wrap.className = /!\[/.test(st.src) ? "cm-nz-lp-table nz-edit-table figure" : "cm-nz-lp-table nz-edit-table";
   wrap.textContent = "";
-  const dir = tableDir(st.src);
+  const dir = tableDir(st.src, st.dir);
   const box = el("div", "nz-table-box");
   box.dir = dir;
   const scroll = el("div", "nz-table-scroll");
@@ -218,10 +220,10 @@ function render(wrap: HTMLElement, m: Model) {
   table.append(thead, tbody);
   scroll.append(table);
   const addRow = el("button", "nz-add-row");
-  addRow.title = "Add row";
+  addRow.title = t("Add row");
   addRow.textContent = "+";
   const addCol = el("button", "nz-add-col");
-  addCol.title = "Add column";
+  addCol.title = t("Add column");
   addCol.textContent = "+";
   addRow.addEventListener("mousedown", (e) => {
     e.preventDefault();
@@ -989,7 +991,7 @@ function wire(wrap: HTMLElement) {
       ...(sr
         ? ([
             {
-              label: "Clear cells",
+              label: t("Clear cells"),
               run: () =>
                 editKeepSel(wrap, (m) => {
                   const all = [m.header, ...m.rows];
@@ -999,27 +1001,27 @@ function wire(wrap: HTMLElement) {
             "-",
           ] as (MenuItem | "-")[])
         : []),
-      { label: "Insert row above", run: () => edit(wrap, (m) => (r > 0 ? (m.rows.splice(body, 0, m.header.map(() => "")), { r, c }) : null)) },
-      { label: "Insert row below", run: () => edit(wrap, (m) => (m.rows.splice(body + 1, 0, m.header.map(() => "")), { r: r + 1, c })) },
-      { label: "Insert column before", run: () => edit(wrap, (m) => (insertCol(m, c), { r, c })) },
-      { label: "Insert column after", run: () => edit(wrap, (m) => (insertCol(m, c + 1), { r, c: c + 1 })) },
+      { label: t("Insert row above"), run: () => edit(wrap, (m) => (r > 0 ? (m.rows.splice(body, 0, m.header.map(() => "")), { r, c }) : null)) },
+      { label: t("Insert row below"), run: () => edit(wrap, (m) => (m.rows.splice(body + 1, 0, m.header.map(() => "")), { r: r + 1, c })) },
+      { label: t("Insert column before"), run: () => edit(wrap, (m) => (insertCol(m, c), { r, c })) },
+      { label: t("Insert column after"), run: () => edit(wrap, (m) => (insertCol(m, c + 1), { r, c: c + 1 })) },
       "-",
-      { label: "Move row up", run: () => edit(wrap, (m) => (body > 0 ? ([m.rows[body - 1], m.rows[body]] = [m.rows[body], m.rows[body - 1]], { r: r - 1, c }) : null)) },
-      { label: "Move row down", run: () => edit(wrap, (m) => (body >= 0 && body < m.rows.length - 1 ? ([m.rows[body + 1], m.rows[body]] = [m.rows[body], m.rows[body + 1]], { r: r + 1, c }) : null)) },
-      { label: "Move column before", run: () => edit(wrap, (m) => (c > 0 ? (swapCols(m, c, c - 1), { r, c: c - 1 }) : null)) },
-      { label: "Move column after", run: () => edit(wrap, (m) => (c < m.header.length - 1 ? (swapCols(m, c, c + 1), { r, c: c + 1 }) : null)) },
+      { label: t("Move row up"), run: () => edit(wrap, (m) => (body > 0 ? ([m.rows[body - 1], m.rows[body]] = [m.rows[body], m.rows[body - 1]], { r: r - 1, c }) : null)) },
+      { label: t("Move row down"), run: () => edit(wrap, (m) => (body >= 0 && body < m.rows.length - 1 ? ([m.rows[body + 1], m.rows[body]] = [m.rows[body], m.rows[body + 1]], { r: r + 1, c }) : null)) },
+      { label: t("Move column before"), run: () => edit(wrap, (m) => (c > 0 ? (swapCols(m, c, c - 1), { r, c: c - 1 }) : null)) },
+      { label: t("Move column after"), run: () => edit(wrap, (m) => (c < m.header.length - 1 ? (swapCols(m, c, c + 1), { r, c: c + 1 }) : null)) },
       "-",
-      { label: "Align column: start", hint: m0.aligns[c] === "left" ? "✓" : "", run: () => edit(wrap, (m) => void (m.aligns[c] = "left")) },
-      { label: "Align column: center", hint: m0.aligns[c] === "center" ? "✓" : "", run: () => edit(wrap, (m) => void (m.aligns[c] = "center")) },
-      { label: "Align column: end", hint: m0.aligns[c] === "right" ? "✓" : "", run: () => edit(wrap, (m) => void (m.aligns[c] = "right")) },
-      { label: "Sort by this column (A→Z)", run: () => edit(wrap, (m) => void m.rows.sort((a, b) => cmp(a[c], b[c]))) },
-      { label: "Sort by this column (Z→A)", run: () => edit(wrap, (m) => void m.rows.sort((a, b) => cmp(b[c], a[c]))) },
+      { label: t("Align column: start"), hint: m0.aligns[c] === "left" ? "✓" : "", run: () => edit(wrap, (m) => void (m.aligns[c] = "left")) },
+      { label: t("Align column: center"), hint: m0.aligns[c] === "center" ? "✓" : "", run: () => edit(wrap, (m) => void (m.aligns[c] = "center")) },
+      { label: t("Align column: end"), hint: m0.aligns[c] === "right" ? "✓" : "", run: () => edit(wrap, (m) => void (m.aligns[c] = "right")) },
+      { label: t("Sort by this column (A→Z)"), run: () => edit(wrap, (m) => void m.rows.sort((a, b) => cmp(a[c], b[c]))) },
+      { label: t("Sort by this column (Z→A)"), run: () => edit(wrap, (m) => void m.rows.sort((a, b) => cmp(b[c], a[c]))) },
       "-",
-      { label: "Format table", run: () => edit(wrap, () => null) },
-      { label: "Edit as Markdown", run: () => editRaw(wrap) },
+      { label: t("Format table"), run: () => edit(wrap, () => null) },
+      { label: t("Edit as Markdown"), run: () => editRaw(wrap) },
       "-",
       {
-        label: nRowsSel > 1 ? `Delete ${nRowsSel} rows` : "Delete row",
+        label: nRowsSel > 1 ? t("Delete {nRowsSel} rows", { nRowsSel }) : t("Delete row"),
         danger: true,
         run: () => {
           setCellSel(null);
@@ -1027,7 +1029,7 @@ function wire(wrap: HTMLElement) {
         },
       },
       {
-        label: nColsSel > 1 ? `Delete ${nColsSel} columns` : "Delete column",
+        label: nColsSel > 1 ? t("Delete {nColsSel} columns", { nColsSel }) : t("Delete column"),
         danger: true,
         run: () => {
           setCellSel(null);
@@ -1038,7 +1040,7 @@ function wire(wrap: HTMLElement) {
           } else deleteTable(wrap);
         },
       },
-      { label: "Delete table", danger: true, run: () => deleteTable(wrap) },
+      { label: t("Delete table"), danger: true, run: () => deleteTable(wrap) },
     ];
     openMenu(e, items);
   });
@@ -1143,26 +1145,26 @@ function imageMenu(wrap: HTMLElement, cell: HTMLElement, idx: number): (MenuItem
   const md = span.text;
   return [
     {
-      label: "Open image",
+      label: t("Open image"),
       run: async () => {
         const o = getLiveOpts();
         const abs = await o?.resolveAsset?.(o.notePath() ?? "", imageTarget(md));
         if (abs) void openPath(abs);
       },
     },
-    { label: "Copy image link", run: () => void navigator.clipboard.writeText(unesc(md)) },
+    { label: t("Copy image link"), run: () => void navigator.clipboard.writeText(unesc(md)) },
     {
-      label: "Resize…",
+      label: t("Resize…"),
       hint: imageWidth(md) ? `${imageWidth(md)}px` : "",
       run: async () => {
-        const w = await askText("Image width in pixels (empty = original size)", imageWidth(md) ?? "", "e.g. 300");
+        const w = await askText(t("Image width in pixels (empty = original size)"), imageWidth(md) ?? "", "e.g. 300");
         if (w === null || (w.trim() && !/^\d+(px)?$/.test(w.trim()))) return;
         replaceImage(wrap, cell, idx, withWidth(md, w));
       },
     },
-    { label: "Edit source", run: () => editAtImage(cell, idx) },
+    { label: t("Edit source"), run: () => editAtImage(cell, idx) },
     "-",
-    { label: "Remove image", danger: true, run: () => removeImage(wrap, cell, idx) },
+    { label: t("Remove image"), danger: true, run: () => removeImage(wrap, cell, idx) },
   ];
 }
 

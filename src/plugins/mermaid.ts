@@ -3,6 +3,7 @@
 import type { BuiltinPlugin } from "../core/plugins";
 import { fontStack } from "../core/fonts";
 
+import { t } from "../core/i18n";
 let mermaidPromise: Promise<typeof import("mermaid").default> | null = null;
 let counter = 0;
 
@@ -38,8 +39,8 @@ function typstString(s: string) {
 
 export const mermaidPlugin: BuiltinPlugin = {
   id: "core.mermaid",
-  name: "Mermaid diagrams",
-  description: "Sequence diagrams, Gantt charts, class diagrams… in ```mermaid blocks.",
+  name: t("Mermaid diagrams"),
+  description: t("Sequence diagrams, Gantt charts, class diagrams… in ```mermaid blocks."),
   onload(api) {
     api.blocks.register({
       lang: "mermaid",

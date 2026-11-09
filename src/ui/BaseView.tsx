@@ -16,6 +16,7 @@ import { openNote, prefs, root, state, tree } from "../core/store";
 import { askText, openMenuAt, MenuItem } from "./primitives";
 import { parseDocument } from "yaml";
 
+import { t, tn } from "../core/i18n";
 export interface BaseViewProps {
   kind: "base" | "query";
   src: string;
@@ -103,7 +104,7 @@ export default function BaseView(props: BaseViewProps) {
     try {
       write(f());
     } catch (e) {
-      notify(`The base's YAML can't be edited: ${e}`, "error");
+      notify(t("The base's YAML can't be edited: {error}", { error: e }), "error");
     }
   };
   const pick = (i: number) => {
@@ -144,17 +145,17 @@ export default function BaseView(props: BaseViewProps) {
     openMenuAt(at.x, at.y, [
       ...props_.slice(0, 30).map((p) => item(`note.${p}`)),
       "-",
-      { label: "File", items: FILE_COLUMNS.map(item), run: () => {} },
-      ...(formulas().length ? [{ label: "Formulas", items: formulas().map(item), run: () => {} } as MenuItem] : []),
+      { label: t("File"), items: FILE_COLUMNS.map(item), run: () => {} },
+      ...(formulas().length ? [{ label: t("Formulas"), items: formulas().map(item), run: () => {} } as MenuItem] : []),
       "-",
-      { label: "Add a formula…", icon: <Plus size={14} />, run: () => void addFormula() },
+      { label: t("Add a formula…"), icon: <Plus size={14} />, run: () => void addFormula() },
     ]);
   };
 
   const addFormula = async () => {
-    const name = await askText("Formula name", "", "e.g. per_page");
+    const name = await askText(t("Formula name"), "", "e.g. per_page");
     if (!name) return;
-    const expr = await askText(`Formula “${name}”`, "", "e.g. price / pages");
+    const expr = await askText(t("Formula “{name}”", { name }), "", "e.g. price / pages");
     if (!expr) return;
     const id = name.trim().replace(/\s+/g, "_");
     safe(() => {
@@ -174,13 +175,13 @@ export default function BaseView(props: BaseViewProps) {
         { label: `${colName(id)} ↓`, hint: s?.property === id && s.direction === "DESC" ? "✓" : undefined, run: () => setSort(id, "DESC") },
       ]),
       "-",
-      { label: "No sorting", run: () => setSort(null) },
+      { label: t("No sorting"), run: () => setSort(null) },
     ]);
   };
 
   const groupMenu = (e: MouseEvent) =>
     openMenuAt(rect(e).x, rect(e).y, [
-      { label: "No grouping", hint: r()?.group_by ? undefined : "✓", run: () => safe(() => setViewOption(props.src, cur(), "groupBy", null)) },
+      { label: t("No grouping"), hint: r()?.group_by ? undefined : "✓", run: () => safe(() => setViewOption(props.src, cur(), "groupBy", null)) },
       "-",
       ...columnIds().filter((id) => id !== "file.name").map((id): MenuItem => ({
         label: colName(id),
@@ -192,7 +193,7 @@ export default function BaseView(props: BaseViewProps) {
   const filterEdit = async () => {
     const curF = r()?.options?.filters;
     const list: string[] = typeof curF === "string" ? [curF] : Array.isArray(curF?.and) ? curF.and.filter((x: unknown) => typeof x === "string") : [];
-    const text = await askText("Filter this view (an expression; combine with && and ||)", list.map((x) => (list.length > 1 && /\|\|/.test(x) ? `(${x})` : x)).join(" && "), 'e.g. status != "done" && rating > 3');
+    const text = await askText(t("Filter this view (an expression; combine with && and ||)"), list.map((x) => (list.length > 1 && /\|\|/.test(x) ? `(${x})` : x)).join(" && "), 'e.g. status != "done" && rating > 3');
     if (text === null) return;
     safe(() => setViewOption(props.src, cur(), "filters", text.trim() ? text.trim() : null));
   };
@@ -201,13 +202,13 @@ export default function BaseView(props: BaseViewProps) {
     e.preventDefault();
     const name = r()?.views[i]?.name ?? "";
     openMenuAt(e.clientX, e.clientY, [
-      { label: "Rename…", icon: <Pencil size={14} />, run: async () => {
-        const n = await askText("Rename view", name);
+      { label: t("Rename…"), icon: <Pencil size={14} />, run: async () => {
+        const n = await askText(t("Rename view"), name);
         if (n) safe(() => setViewOption(props.src, i, "name", n));
       } },
-      { label: "Duplicate", icon: <Copy size={14} />, run: () => safe(() => addView(props.src, r()?.views[i]?.type ?? "table", `${name} copy`, i)) },
-      { label: "Delete view", icon: <Trash2 size={14} />, danger: true, run: () => {
-        if ((r()?.views.length ?? 0) <= 1) return notify("A base needs at least one view.", "error");
+      { label: t("Duplicate"), icon: <Copy size={14} />, run: () => safe(() => addView(props.src, r()?.views[i]?.type ?? "table", `${name} copy`, i)) },
+      { label: t("Delete view"), icon: <Trash2 size={14} />, danger: true, run: () => {
+        if ((r()?.views.length ?? 0) <= 1) return notify(t("A base needs at least one view."), "error");
         pick(0);
         safe(() => removeView(props.src, i));
       } },
@@ -259,7 +260,7 @@ export default function BaseView(props: BaseViewProps) {
         <span
           class="base-cell"
           classList={{ editable: canEdit(), num: typeof p.value === "number" }}
-          title={canEdit() ? "Double-click to edit" : undefined}
+          title={canEdit() ? t("Double-click to edit") : undefined}
           onDblClick={() => canEdit() && typeof p.value !== "boolean" && setEditing({ row: p.path, col: p.col.id })}
         >
           <Value v={p.value} path={p.path} first={p.first} onToggle={canEdit() ? (b) => void setNoteProperty(p.path, p.col.id.replace(/^note\./, ""), b) : undefined} />
@@ -290,7 +291,7 @@ export default function BaseView(props: BaseViewProps) {
     }
     const s = String(typeof v === "number" ? cellText(v) : v);
     if (typeof v === "string" && /^https?:\/\//.test(v)) return <a class="base-link" href={v} target="_blank" rel="noreferrer">{v}</a>;
-    return <span dir="auto">{s}</span>;
+  return <span dir="auto">{s}</span>;
   }
 
   // ---------------------------------------------------------------- layouts
@@ -429,7 +430,7 @@ export default function BaseView(props: BaseViewProps) {
       await setNoteProperty(path, prop()!.replace(/^note\./, ""), value);
     };
     return (
-      <Show when={prop()} fallback={<div class="base-hint">A board needs a group: choose <b>Group</b> above (e.g. status).</div>}>
+      <Show when={prop()} fallback={<div class="base-hint">{t("A board needs a group: choose")} <b>{t("Group")}</b> {t("above (e.g. status).")}</div>}>
         <div class="base-board">
           <For each={groupsOf()}>
             {(g) => (
@@ -440,7 +441,7 @@ export default function BaseView(props: BaseViewProps) {
                 onDragLeave={() => setOver(null)}
                 onDrop={(e) => void drop(e, g.name ?? "")}
               >
-                <div class="base-column-head" dir="auto">{g.name || "No value"} <span class="base-count">{g.rows.length}</span></div>
+                <div class="base-column-head" dir="auto">{g.name || t("No value")} <span class="base-count">{g.rows.length}</span></div>
                 <For each={g.rows}>{(row) => <Card row={row} drag={movable()} />}</For>
               </div>
             )}
@@ -475,7 +476,7 @@ export default function BaseView(props: BaseViewProps) {
         {(row) => (
           <div class="base-lines-note">
             <a class="base-link base-lines-title" onClick={() => void openNote(row.path)} dir="auto">{cellText(row.cells[0]) || stem(row.path)}</a>
-            <Show when={row.lines?.length} fallback={<div class="base-hint">the note matches</div>}>
+            <Show when={row.lines?.length} fallback={<div class="base-hint">{t("the note matches")}</div>}>
               <For each={row.lines}>
                 {([line, text]) => {
                   const task = /^\s*(?:[-*+]|\d+[.)])\s+\[([ xX])\]/.exec(text);
@@ -505,7 +506,7 @@ export default function BaseView(props: BaseViewProps) {
     if (t === "cards") return <CardsLayout />;
     if (t === "list") return <ListLayout />;
     if (t === "board") return <BoardLayout />;
-    return <TableLayout />;
+  return <TableLayout />;
   };
 
   return (
@@ -521,16 +522,16 @@ export default function BaseView(props: BaseViewProps) {
               )}
             </For>
             <Show when={editable()}>
-              <button class="base-add" title="Add a view" onClick={newView}><Plus size={14} /></button>
+              <button class="base-add" title={t("Add a view")} onClick={newView}><Plus size={14} /></button>
             </Show>
           </div>
           <Show when={editable()}>
             <div class="base-tools">
-              <button title="Layout" onClick={layoutMenu}>{LAYOUTS.find(([t]) => t === r()!.type)?.[2]() ?? <Table2 size={14} />}</button>
-              <button title="Columns" onClick={(e) => void columnsMenu(e)}><Columns2 size={14} /></button>
-              <button title="Sort" classList={{ on: sortOf().length > 0 }} onClick={sortMenu}><ArrowUpDown size={14} /></button>
-              <button title="Group" classList={{ on: !!r()!.group_by }} onClick={groupMenu}><Group size={14} /></button>
-              <button title="Filter this view" classList={{ on: !!r()!.options?.filters }} onClick={() => void filterEdit()}><Filter size={14} /></button>
+              <button title={t("Layout")} onClick={layoutMenu}>{LAYOUTS.find(([t]) => t === r()!.type)?.[2]() ?? <Table2 size={14} />}</button>
+              <button title={t("Columns")} onClick={(e) => void columnsMenu(e)}><Columns2 size={14} /></button>
+              <button title={t("Sort")} classList={{ on: sortOf().length > 0 }} onClick={sortMenu}><ArrowUpDown size={14} /></button>
+              <button title={t("Group")} classList={{ on: !!r()!.group_by }} onClick={groupMenu}><Group size={14} /></button>
+              <button title={t("Filter this view")} classList={{ on: !!r()!.options?.filters }} onClick={() => void filterEdit()}><Filter size={14} /></button>
             </div>
           </Show>
         </div>
@@ -539,18 +540,18 @@ export default function BaseView(props: BaseViewProps) {
         <div class="base-errors"><AlertTriangle size={14} /> {error()}</div>
       </Show>
       <Show when={r()}>
-        <Show when={r()!.rows.length} fallback={<div class="base-hint">No results.</div>}>
+        <Show when={r()!.rows.length} fallback={<div class="base-hint">{t("No results.")}</div>}>
           <div class="base-body">{body()}</div>
         </Show>
         <div class="base-foot">
-          <span>{r()!.rows.length < r()!.total ? `${r()!.rows.length} of ${r()!.total}` : `${r()!.total}`} result{r()!.total === 1 ? "" : "s"}</span>
+          <span>{r()!.rows.length < r()!.total ? t("{shown} of {n} results", { shown: r()!.rows.length, n: r()!.total }) : tn(r()!.total, "{n} result", "{n} results")}</span>
           <Show when={r()!.errors.length}>
             <span class="base-warn" title={r()!.errors.join("\n")}><AlertTriangle size={12} /> {r()!.errors[0]}{r()!.errors.length > 1 ? ` (+${r()!.errors.length - 1})` : ""}</span>
           </Show>
         </div>
       </Show>
       <Show when={!last()}>
-        <div class="base-hint">Loading…</div>
+        <div class="base-hint">{t("Loading…")}</div>
       </Show>
     </div>
   );
@@ -589,7 +590,7 @@ export function BaseFile(props: { path: string }) {
       <div class="base-file-head">
         <span class="base-file-title" dir="auto"><FileText size={15} /> {stem(props.path)}</span>
         <span class="grow" />
-        <button class="btn small" classList={{ active: showSrc() }} onClick={() => setShowSrc(!showSrc())}>{showSrc() ? "Hide source" : "Edit source"}</button>
+        <button class="btn small" classList={{ active: showSrc() }} onClick={() => setShowSrc(!showSrc())}>{showSrc() ? t("Hide source") : t("Edit source")}</button>
       </div>
       <Show when={showSrc()}>
         <div class="base-source">
@@ -601,9 +602,9 @@ export function BaseFile(props: { path: string }) {
               }
             }} />
           <div class="row gap">
-            <button class="btn primary small" disabled={draft() === src()} onClick={() => void save(draft())}><Check size={13} /> Apply (Ctrl+S)</button>
-            <button class="btn small" disabled={draft() === src()} onClick={() => setDraft(src() ?? "")}>Revert</button>
-            <span class="field-hint">See Help → Databases for the syntax.</span>
+            <button class="btn primary small" disabled={draft() === src()} onClick={() => void save(draft())}><Check size={13} /> {t("Apply (Ctrl+S)")}</button>
+            <button class="btn small" disabled={draft() === src()} onClick={() => setDraft(src() ?? "")}>{t("Revert")}</button>
+            <span class="field-hint">{t("See Help → Databases for the syntax.")}</span>
           </div>
         </div>
       </Show>
@@ -636,7 +637,7 @@ export function mountBaseEmbed(el: HTMLElement, target: string, host: string | n
         <div class="base-embed-head">
           <a class="base-link" onClick={() => path() && void openNote(path()!)}><Table2 size={13} /> {stem(name)}{view ? ` › ${view}` : ""}</a>
         </div>
-        <Show when={path()} fallback={<div class="base-hint">{name} was not found.</div>}>
+        <Show when={path()} fallback={<div class="base-hint">{t("{name} was not found.", { name })}</div>}>
           <Show when={src() !== undefined}>
             <BaseView kind="base" src={src()!} thisPath={host ?? path()} view={view?.trim() || undefined} embedded />
           </Show>

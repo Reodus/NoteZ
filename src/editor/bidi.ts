@@ -17,52 +17,17 @@
 // instead of the guess.
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, DecorationSet, Direction, EditorView, ViewPlugin, ViewUpdate } from "@codemirror/view";
-import { parseAttrs } from "./format";
+import { RTL, rtlLine, explicitDirs } from "./dirrules";
+
+export { RTL, isRtlLang, rtlLine, explicitDirAt, tableDir } from "./dirrules";
 
 const autoDir = Decoration.line({ attributes: { dir: "auto" } });
 const rtlDir = Decoration.line({ attributes: { dir: "rtl" } });
 const ltrDir = Decoration.line({ attributes: { dir: "ltr" } });
 const ltrRun = Decoration.mark({ bidiIsolate: Direction.LTR, class: "cm-nz-ltr-run", attributes: { dir: "ltr" } });
 
-/** Strong right-to-left characters (same ranges as core/src/render/script.rs). */
-export const RTL = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
-
-const RTL_LANGS = new Set(["ar", "fa", "ur", "ps", "sd", "ug", "ku", "ckb", "syr", "dv", "nqo", "ks", "bal", "prs", "pnb", "arc", "sam", "mzn", "glk", "lrc", "azb"]);
-/** Is `lang` (an ISO 639 code, optionally with a region) right-to-left? */
-export const isRtlLang = (lang: string) => RTL_LANGS.has(lang.split(/[-_]/)[0].toLowerCase());
 const LATIN = /[A-Za-z0-9_]/;
 const RUN = /[A-Za-z0-9_][A-Za-z0-9_ .,:;'"!?+\-*/=<>@#$%&|~^\\(){}[\]]*/g;
-
-/** Direction of the first strong character of `text`, if any. */
-function firstStrong(text: string): "rtl" | "ltr" | null {
-  for (const c of text) {
-    if (RTL.test(c)) return "rtl";
-    if (/\p{L}/u.test(c)) return "ltr";
-  }
-  return null;
-}
-
-/** Is the line right-to-left (see the rule at the top)? */
-export function rtlLine(text: string): boolean {
-  const first = firstStrong(text);
-  if (first !== "ltr") return first === "rtl";
-  let rtl = 0;
-  let ltr = 0;
-  let prev: "rtl" | "ltr" | null = null;
-  for (const c of text) {
-    if (/\s/.test(c)) {
-      prev = null;
-      continue;
-    }
-    const d = RTL.test(c) ? "rtl" : /\p{L}/u.test(c) ? "ltr" : null;
-    if (d && d !== prev) {
-      if (d === "rtl") rtl++;
-      else ltr++;
-      prev = d;
-    }
-  }
-  return rtl >= ltr;
-}
 
 /** [from, to) offsets of Latin runs whose trailing neutrals belong to them. */
 export function runsNeedingIsolation(text: string): [number, number][] {
@@ -111,40 +76,12 @@ interface Decos {
   runs: DecorationSet;
 }
 
-const DIV_OPEN = /^\s*:::\s*(\{.*\}|\S.*)\s*$/;
-const DIV_CLOSE = /^\s*:::\s*$/;
-
-/** Explicit `dir` of the `:::` blocks enclosing each line, from line 1 up to `last`. */
-function explicitDirs(view: EditorView, last: number): ("rtl" | "ltr" | null)[] {
-  const doc = view.state.doc;
-  const out: ("rtl" | "ltr" | null)[] = [null];
-  const stack: ("rtl" | "ltr" | null)[] = [];
-  let inFence = false;
-  for (let i = 1; i <= last; i++) {
-    const text = doc.line(i).text;
-    const cur = stack.length ? stack[stack.length - 1] : null;
-    out.push(cur);
-    if (/^\s*(```|~~~)/.test(text)) inFence = !inFence;
-    if (inFence) continue;
-    if (DIV_CLOSE.test(text)) stack.pop();
-    else {
-      const m = DIV_OPEN.exec(text);
-      if (m) {
-        const a = parseAttrs(m[1]);
-        const d = a.dir === "rtl" || a.dir === "ltr" ? a.dir : a.lang ? (isRtlLang(a.lang) ? "rtl" : "ltr") : cur;
-        stack.push(d);
-      }
-    }
-  }
-  return out;
-}
-
 function build(view: EditorView): Decos {
   const lines = new RangeSetBuilder<Decoration>();
   const runs = new RangeSetBuilder<Decoration>();
   const doc = view.state.doc;
   const ranges = view.visibleRanges;
-  const dirs = ranges.length ? explicitDirs(view, doc.lineAt(ranges[ranges.length - 1].to).number) : [];
+  const dirs = ranges.length ? explicitDirs(doc, doc.lineAt(ranges[ranges.length - 1].to).number) : [];
   for (const { from, to } of ranges) {
     for (let pos = from; pos <= to; ) {
       const line = doc.lineAt(pos);

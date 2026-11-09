@@ -9,10 +9,12 @@ import { fileSrc } from "../core/native";
 import { coverField } from "./cover";
 import { parseAttrs } from "./format";
 import { canRender, previewsEnabled } from "./widgets";
+import { explicitDirAt } from "./bidi";
 import { TableWidget, rawTableField } from "./tables";
 import { PropertiesWidget } from "./properties";
 import { holdDecorations, released } from "./pointer";
 
+import { t } from "../core/i18n";
 export interface LiveOptions {
   /** Open a link target (note name, path or URL). */
   openLink: (target: string) => void;
@@ -243,7 +245,7 @@ class PdfWidget extends WidgetType {
     const bar = document.createElement("span");
     bar.className = "cm-nz-lp-pdf-bar";
     bar.textContent = `📄 ${this.src.split("/").pop()}${this.page ? ` · page ${this.page}` : ""}`;
-    bar.title = "Click to edit the embed";
+    bar.title = t("Click to edit the embed");
     editOnClick(bar, view, (from) => from + 3);
     const frame = document.createElement("iframe");
     if (this.width) wrap.style.width = `${this.width}px`;
@@ -484,7 +486,7 @@ function blockDecorations(state: EditorState): DecorationSet {
         // Tables stay tables while editing (cells are edited in place), unless
         // "Edit as Markdown" asked for the source.
         if (state.field(rawTableField, false) !== from) {
-          decos.push(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to)), block: true }).range(from, to));
+          decos.push(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to), explicitDirAt(doc, doc.lineAt(from).number)), block: true }).range(from, to));
         }
         return false;
       }
@@ -614,7 +616,7 @@ function build(view: EditorView): DecorationSet {
       const cm = /^\s*<!--\s*(pagebreak|toc)\s*-->\s*$/i.exec(text);
       if (cm) {
         const pb = cm[1].toLowerCase() === "pagebreak";
-        add(line.from, line.to, Decoration.replace({ widget: new ChipWidget(pb ? "Page break" : "Table of contents", pb ? "pagebreak" : "toc") }));
+        add(line.from, line.to, Decoration.replace({ widget: new ChipWidget(pb ? t("Page break") : t("Table of contents"), pb ? "pagebreak" : "toc") }));
         continue;
       }
       if (/^\s*<center>/i.test(text)) decos.push(Decoration.line({ attributes: { style: "text-align:center" } }).range(line.from));

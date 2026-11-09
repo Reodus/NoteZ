@@ -651,9 +651,26 @@ pub fn prelude(theme: &Theme, meta: &Meta) -> String {
     let cfill = cs.background.as_deref().and_then(color).unwrap_or_else(|| "luma(245)".into());
     let cstroke = cs.border.as_deref().and_then(color).map(|c| format!("0.5pt + {c}")).unwrap_or_else(|| "none".into());
     let calign = cs.align.as_deref().and_then(align).unwrap_or("left");
+    let cgap = leading(&cs).unwrap_or_else(|| "0.5em".into());
+    // Code blocks are laid out line by line, so a long line wraps under its
+    // own indentation (plus two characters) instead of at column 0, and never
+    // breaks right after its indent (which looked like an empty line). Long
+    // lines may also break after punctuation, and runs of 48+ characters
+    // anywhere, instead of running out of the box. The break points are
+    // zero-width spaces marked as PDF artifacts: copied text doesn't get them.
     o.push_str(&format!(
-        "#show raw.where(block: true): it => block(width: 100%, fill: {cfill}, stroke: {cstroke}, inset: 10pt, radius: 4pt{}, align({calign}, it))\n",
-        block_space(&cs)
+        r#"#show raw.where(block: true): it => block(width: 100%, fill: {cfill}, stroke: {cstroke}, inset: 10pt, radius: 4pt{space}, align({calign}, {{
+  set par(justify: false, leading: {cgap}, first-line-indent: 0pt, spacing: {cgap})
+  show regex("[^\s.,(\[{{=:/_]{{48,}}"): m => m.text.clusters().join(pdf.artifact(sym.zws))
+  show regex("[.,(\[{{=:/_]"): c => c + pdf.artifact(sym.zws)
+  for l in it.lines {{
+    let rest = l.text.trim(at: start)
+    let n = l.text.len() - rest.len()
+    context block(spacing: {cgap}, width: 100%, par(hanging-indent: measure(raw(l.text.slice(0, n))).width + 2em, if rest == "" {{ sym.zws }} else {{ l }}))
+  }}
+}}))
+"#,
+        space = block_space(&cs)
     ));
     if cs.underline == Some(true) {
         o.push_str("#show raw: underline\n");

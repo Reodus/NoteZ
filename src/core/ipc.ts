@@ -351,6 +351,13 @@ export const ipc = {
     invoke<PreviewResult>("render_preview", { path, text, blocks, known }),
   exportPdf: (path: string, text: string, blocks: RenderedBlock[], output: string) =>
     invoke<void>("export_pdf", { path, text, blocks, output }),
+  /** Word / HTML / portable Markdown; resolve to warnings worth showing. */
+  exportHtml: (path: string, text: string, blocks: RenderedBlock[], output: string) =>
+    invoke<string[]>("export_html", { path, text, blocks, output }),
+  exportDocx: (path: string, text: string, blocks: RenderedBlock[], output: string) =>
+    invoke<string[]>("export_docx", { path, text, blocks, output }),
+  exportMarkdown: (path: string, text: string, blocks: RenderedBlock[], output: string) =>
+    invoke<string[]>("export_markdown", { path, text, blocks, output }),
   generatedTypst: (path: string, text: string, blocks: RenderedBlock[]) =>
     invoke<string>("generated_typst", { path, text, blocks }),
   renderBlock: (lang: string, code: string) => invoke<string>("render_block", { lang, code }),

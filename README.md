@@ -20,6 +20,15 @@ annotations, styled spans, layout blocks, math, charts, frontmatter).
   [docs/LANGUAGES.md](docs/LANGUAGES.md).
 - **Beautiful PDF** — Markdown and `.typ` notes are typeset by embedded Typst,
   with a live PDF preview next to the editor.
+- **English or Persian interface** — the whole window in Persian (right to
+  left, Persian digits) or English; your notes keep their own language
+  ([docs/LANGUAGES.md](docs/LANGUAGES.md#the-interface-language)).
+- **Updates itself** — new releases are downloaded from GitHub and installed
+  on restart (AppImage, .deb, .rpm, Windows installer); see
+  [the guide](docs/GUIDE.md#updates).
+- **Export to Word, HTML and Markdown** — `.docx` with real styles, footnotes
+  and right-to-left tables; one self-contained `.html`; or portable Markdown
+  with standard links and copied attachments ([docs/EXPORT.md](docs/EXPORT.md)).
 - **Word-like styling** — a ribbon toolbar (fonts, sizes, colors, alignment,
   direction) and Word-style paragraph styles (Title, Heading 1–6, …) with
   fonts, sizes, colors, spacing and numbering, saved as document themes.

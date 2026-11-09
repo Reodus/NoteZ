@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, watch, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import * as updates from "./updater.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -330,6 +331,13 @@ ipcMain.on("capture-submit", (_e, text) => {
 });
 ipcMain.on("capture-cancel", () => captureWin?.close());
 ipcMain.handle("capture-target", () => captureTarget);
+
+// ------------------------------------------------------------- updates
+
+ipcMain.handle("update-state", wrap(async () => updates.getState()));
+ipcMain.handle("update-check", wrap(async () => updates.check()));
+ipcMain.handle("update-download", wrap(async () => updates.download()));
+ipcMain.handle("update-install", wrap(async () => updates.install(() => (quitting = true))));
 // Secrets (sync passwords and passphrase), encrypted with the system keychain
 // (Keychain, DPAPI, libsecret/KWallet) in <userData>/secrets.json.
 const secretsFile = () => path.join(app.getPath("userData"), "secrets.json");

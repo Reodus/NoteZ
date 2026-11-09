@@ -52,6 +52,15 @@ contextBridge.exposeInMainWorld("notezNative", {
     ipcRenderer.on("context-menu", h);
     return () => ipcRenderer.removeListener("context-menu", h);
   },
+  updateState: () => call("update-state"),
+  updateCheck: () => call("update-check"),
+  updateDownload: () => call("update-download"),
+  updateInstall: () => call("update-install"),
+  onUpdateState: (cb) => {
+    const h = (_e, st) => cb(st);
+    ipcRenderer.on("update-state", h);
+    return () => ipcRenderer.removeListener("update-state", h);
+  },
   onVaultFs: (cb) => {
     const h = (_e, paths) => cb(paths);
     ipcRenderer.on("vault-fs", h);

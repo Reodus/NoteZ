@@ -19,6 +19,7 @@ import { openMenu, Popover } from "./primitives";
 import { Logo } from "./Logo";
 import { chooseVault } from "./Welcome";
 
+import { t } from "../core/i18n";
 // Folders start collapsed; which ones are open is remembered per vault.
 const [expanded, setExpandedRaw] = createSignal<Set<string>>(new Set());
 const expandKey = () => `notez.tree.${root() ?? ""}`;
@@ -194,9 +195,9 @@ function FilesPane() {
         each={tree().filter(visible)}
         fallback={
           <div class="empty-hint">
-            <p>This vault is empty.</p>
+            <p>{t("This vault is empty.")}</p>
             <button class="btn" onClick={() => newNoteIn("")}>
-              <FilePlus size={15} /> Create a note
+              <FilePlus size={15} /> {t("Create a note")}
             </button>
           </div>
         }
@@ -210,16 +211,16 @@ function FilesPane() {
 export default function Sidebar() {
   const vaultName = () => root()?.split(/[\\/]/).filter(Boolean).pop() ?? "";
   const panes = () => [
-    { id: "files", title: "Files", icon: <Files size={17} /> },
-    { id: "search", title: "Search (Ctrl+Shift+F)", icon: <Search size={17} /> },
-    { id: "tags", title: "Tags", icon: <Hash size={17} /> },
-    { id: "bookmarks", title: "Bookmarks", icon: <Bookmark size={17} /> },
+    { id: "files", title: t("Files"), icon: <Files size={17} /> },
+    { id: "search", title: t("Search (Ctrl+Shift+F)"), icon: <Search size={17} /> },
+    { id: "tags", title: t("Tags"), icon: <Hash size={17} /> },
+    { id: "bookmarks", title: t("Bookmarks"), icon: <Bookmark size={17} /> },
   ];
   return (
     <aside class="sidebar" style={{ width: `${prefs.sidebarWidth}px` }}>
       <div
         class="resizer end"
-        title="Drag to resize · double-click to reset"
+        title={t("Drag to resize · double-click to reset")}
         onPointerDown={(e) =>
           startResize(e, e.currentTarget.parentElement!, 1, (w) => setPrefs("sidebarWidth", Math.max(200, Math.min(520, w))))
         }
@@ -239,7 +240,7 @@ export default function Sidebar() {
         >
           {(close) => (
             <div class="menu">
-              <div class="menu-title">Vaults</div>
+              <div class="menu-title">{t("Vaults")}</div>
               <For each={prefs.recentVaults.filter((v) => v !== root())}>
                 {(v) => (
                   <button class="menu-item" onClick={() => (close(), import("../core/store").then((s) => s.openVault(v)))}>
@@ -250,12 +251,12 @@ export default function Sidebar() {
               </For>
               <button class="menu-item" onClick={() => (close(), chooseVault())}>
                 <span class="menu-icon"><FolderInput size={15} /></span>
-                <span class="menu-label">Open another vault…</span>
+                <span class="menu-label">{t("Open another vault…")}</span>
               </button>
               <div class="menu-sep" />
               <button class="menu-item" onClick={() => (close(), closeVault())}>
                 <span class="menu-icon"><Logo size={15} /></span>
-                <span class="menu-label">Back to start screen</span>
+                <span class="menu-label">{t("Back to start screen")}</span>
               </button>
             </div>
           )}
@@ -270,19 +271,19 @@ export default function Sidebar() {
             </button>
           )}
         </For>
-        <button class="tab-icon" classList={{ active: graphOpen() }} title="Graph view (Ctrl+G)" onClick={() => setGraphOpen(!graphOpen())}>
+        <button class="tab-icon" classList={{ active: graphOpen() }} title={t("Graph view (Ctrl+G)")} onClick={() => setGraphOpen(!graphOpen())}>
           <Waypoints size={17} />
         </button>
         <div class="spacer" />
         <Show when={sidebarTab() === "files"}>
-          <button class="icon-btn" title="New note (Ctrl+N)" onClick={() => newNoteIn(newNoteDir())}><FilePlus size={16} /></button>
-          <button class="icon-btn" title="New folder" onClick={() => newFolderIn("")}><FolderPlus size={16} /></button>
-          <button class="icon-btn" title="Collapse all" onClick={() => {
+          <button class="icon-btn" title={t("New note (Ctrl+N)")} onClick={() => newNoteIn(newNoteDir())}><FilePlus size={16} /></button>
+          <button class="icon-btn" title={t("New folder")} onClick={() => newFolderIn("")}><FolderPlus size={16} /></button>
+          <button class="icon-btn" title={t("Collapse all")} onClick={() => {
             setExpanded(new Set());
           }}><ChevronsDownUp size={16} /></button>
         </Show>
         <Show when={sidebarTab() === "bookmarks"}>
-          <button class="icon-btn" title="New bookmark group" onClick={() => newBookmarkGroup()}><FolderPlus size={16} /></button>
+          <button class="icon-btn" title={t("New bookmark group")} onClick={() => newBookmarkGroup()}><FolderPlus size={16} /></button>
         </Show>
       </div>
 
@@ -302,22 +303,22 @@ export default function Sidebar() {
       </div>
 
       <div class="sidebar-foot">
-        <button class="icon-btn" title="Settings (Ctrl+,)" onClick={() => setDialog({ kind: "settings" })}>
+        <button class="icon-btn" title={t("Settings (Ctrl+,)")} onClick={() => setDialog({ kind: "settings" })}>
           <Settings size={17} />
         </button>
         <div class="spacer" />
-        <div class="theme-switch" title="Appearance">
-          <button classList={{ active: prefs.themeMode === "light" }} onClick={() => setPrefs("themeMode", "light")} title="Light"><Sun size={14} /></button>
-          <button classList={{ active: prefs.themeMode === "system" }} onClick={() => setPrefs("themeMode", "system")} title="System"><Monitor size={14} /></button>
-          <button classList={{ active: prefs.themeMode === "dark" }} onClick={() => setPrefs("themeMode", "dark")} title="Dark"><Moon size={14} /></button>
+        <div class="theme-switch" title={t("Appearance")}>
+          <button classList={{ active: prefs.themeMode === "light" }} onClick={() => setPrefs("themeMode", "light")} title={t("Light")}><Sun size={14} /></button>
+          <button classList={{ active: prefs.themeMode === "system" }} onClick={() => setPrefs("themeMode", "system")} title={t("System")}><Monitor size={14} /></button>
+          <button classList={{ active: prefs.themeMode === "dark" }} onClick={() => setPrefs("themeMode", "dark")} title={t("Dark")}><Moon size={14} /></button>
         </div>
       </div>
     </aside>
   );
 }
 
-app.commands.register({ id: "search.focus", title: "Search in vault", key: "Mod-Shift-f", run: () => setSidebarTab("search") });
-app.commands.register({ id: "search.replace", title: "Replace in vault", key: "Mod-Shift-h", run: () => openReplace() });
-app.commands.register({ id: "tags.show", title: "Show tags", run: () => setSidebarTab("tags") });
-app.commands.register({ id: "bookmarks.show", title: "Show bookmarks", run: () => setSidebarTab("bookmarks") });
+app.commands.register({ id: "search.focus", title: t("Search in vault"), key: "Mod-Shift-f", run: () => setSidebarTab("search") });
+app.commands.register({ id: "search.replace", title: t("Replace in vault"), key: "Mod-Shift-h", run: () => openReplace() });
+app.commands.register({ id: "tags.show", title: t("Show tags"), run: () => setSidebarTab("tags") });
+app.commands.register({ id: "bookmarks.show", title: t("Show bookmarks"), run: () => setSidebarTab("bookmarks") });
 export { searchFor };

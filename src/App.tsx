@@ -1,4 +1,5 @@
 import { createEffect, onCleanup, onMount, Show, Switch, Match } from "solid-js";
+import { initUpdates } from "./core/updates";
 import { Copy, Minimize2, PanelLeft } from "lucide-solid";
 import { app, notify } from "./core/app";
 import {
@@ -37,6 +38,7 @@ import { isNotePath } from "./core/ipc";
 import GraphView, { graphOpen } from "./ui/GraphView";
 import "./styles/app.css";
 
+import { t } from "./core/i18n";
 const DEFAULT_ACCENT = "#6d5efc";
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -48,17 +50,17 @@ function hexToRgb(hex: string): [number, number, number] {
 function TypstSource(props: { source: string; onClose: () => void }) {
   return (
     <Modal
-      title="Generated Typst"
-      subtitle="This is exactly what the PDF engine compiles. Useful for learning Typst or debugging."
+      title={t("Generated Typst")}
+      subtitle={t("This is exactly what the PDF engine compiles. Useful for learning Typst or debugging.")}
       width="860px"
       onClose={props.onClose}
       footer={
         <>
           <div class="spacer" />
-          <button class="btn" onClick={() => navigator.clipboard.writeText(props.source).then(() => notify("Copied", "success"))}>
-            <Copy size={15} /> Copy
+          <button class="btn" onClick={() => navigator.clipboard.writeText(props.source).then(() => notify(t("Copied"), "success"))}>
+            <Copy size={15} /> {t("Copy")}
           </button>
-          <button class="btn primary" onClick={props.onClose}>Close</button>
+          <button class="btn primary" onClick={props.onClose}>{t("Close")}</button>
         </>
       }
     >
@@ -71,13 +73,13 @@ function EmptyState() {
   return (
     <div class="empty-state">
       <Logo size={64} />
-      <h2>No note open</h2>
+      <h2>{t("No note open")}</h2>
       <div class="empty-keys">
-        <span><kbd>Ctrl</kbd> + <kbd>N</kbd> New note</span>
-        <span><kbd>Ctrl</kbd> + <kbd>P</kbd> Quick open</span>
-        <span><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> Commands</span>
+        <span><kbd>Ctrl</kbd> + <kbd>N</kbd> {t("New note")}</span>
+        <span><kbd>Ctrl</kbd> + <kbd>P</kbd> {t("Quick open")}</span>
+        <span><kbd>Ctrl</kbd> + <kbd>{t("Shift")}</kbd> + <kbd>P</kbd> {t("Commands")}</span>
       </div>
-      <button class="btn primary" onClick={() => app.commands.run("note.new")}>Create a note</button>
+      <button class="btn primary" onClick={() => app.commands.run("note.new")}>{t("Create a note")}</button>
     </div>
   );
 }
@@ -119,6 +121,7 @@ export default function App() {
   onMount(async () => {
     window.addEventListener("keydown", onKey);
     window.addEventListener("beforeunload", onUnload);
+    initUpdates();
     await loadBuiltins([corePlugin, readingTimePlugin, mermaidPlugin, outlinePlugin, backlinksPlugin, pdfExportPlugin, diagramsPlugin, templatesPlugin, dailyNotesPlugin]);
     const args = await ipc.startupArgs().catch(() => [] as string[]);
     const vault = args[0] ?? prefs.lastVault;
@@ -131,7 +134,7 @@ export default function App() {
   createEffect(() => {
     const accel = prefs.captureShortcut;
     void setCaptureShortcut(accel, root() ? captureNote() : "").then((ok) => {
-      if (!ok) notify(`The quick capture shortcut ${accel} is used by another app. Choose another in Settings → Daily notes & capture.`, "error");
+      if (!ok) notify(t("The quick capture shortcut {accel} is used by another app. Choose another in Settings → Daily notes & capture.", { accel }), "error");
     });
   });
   onCleanup(() => {
@@ -189,7 +192,7 @@ export default function App() {
               <StatusBar />
             </Show>
             <Show when={focusMode()}>
-              <button class="focus-exit" title="Exit focus mode (Esc)" onClick={() => setFocusMode(false)}>
+              <button class="focus-exit" title={t("Exit focus mode (Esc)")} onClick={() => setFocusMode(false)}>
                 <Minimize2 size={15} />
               </button>
             </Show>

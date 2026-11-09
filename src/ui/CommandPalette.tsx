@@ -5,6 +5,7 @@ import { app } from "../core/app";
 import { notesList, openNote, setDialog, createNote, PickItem, newNoteDir, prefs } from "../core/store";
 import { stem, dirname } from "../core/ipc";
 
+import { t } from "../core/i18n";
 /** Subsequence fuzzy score (higher is better), -1 if no match. */
 export function fuzzy(query: string, text: string): number {
   const q = query.toLowerCase();
@@ -72,7 +73,7 @@ export default function CommandPalette(props: { mode: "files" | "commands" | "pi
       .slice(0, 60)
       .map((x) => x.it);
     if (!cmdMode && query && !scored.some((i) => i.label.toLowerCase() === query.toLowerCase())) {
-      scored.push({ id: "__new", label: `Create “${query}”`, icon: "new", run: () => createNote(newNoteDir(), query, prefs.defaultNoteType) });
+      scored.push({ id: "__new", label: t("Create “{query}”", { query }), icon: "new", run: () => createNote(newNoteDir(), query, prefs.defaultNoteType) });
     }
     return scored;
   });
@@ -94,7 +95,7 @@ export default function CommandPalette(props: { mode: "files" | "commands" | "pi
             class="palette-input"
             dir="auto"
             value={q()}
-            placeholder={props.pick?.placeholder ?? "Search notes… (type > for commands)"}
+            placeholder={props.pick?.placeholder ?? t("Search notes… (type > for commands)")}
             ref={(el) => setTimeout(() => el.focus())}
             onInput={(e) => (setQ(e.currentTarget.value), setSel(0))}
             onKeyDown={(e) => {
@@ -105,7 +106,7 @@ export default function CommandPalette(props: { mode: "files" | "commands" | "pi
             }}
           />
           <div class="palette-list">
-            <For each={items()} fallback={<div class="pane-empty">No matches</div>}>
+            <For each={items()} fallback={<div class="pane-empty">{t("No matches")}</div>}>
               {(it, i) => (
                 <div
                   class="palette-item"
@@ -133,5 +134,5 @@ export default function CommandPalette(props: { mode: "files" | "commands" | "pi
   );
 }
 
-app.commands.register({ id: "palette.files", title: "Quick open note", key: "Mod-p", palette: false, run: () => setDialog({ kind: "palette", mode: "files" }) });
-app.commands.register({ id: "palette.commands", title: "Command palette", key: "Mod-Shift-p", palette: false, run: () => setDialog({ kind: "palette", mode: "commands" }) });
+app.commands.register({ id: "palette.files", title: t("Quick open note"), key: "Mod-p", palette: false, run: () => setDialog({ kind: "palette", mode: "files" }) });
+app.commands.register({ id: "palette.commands", title: t("Command palette"), key: "Mod-Shift-p", palette: false, run: () => setDialog({ kind: "palette", mode: "commands" }) });

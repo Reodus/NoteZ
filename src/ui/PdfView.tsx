@@ -10,6 +10,7 @@ import { ipc, basename, stem } from "../core/ipc";
 import { app, notify } from "../core/app";
 import { allFiles, openNote, pdfJump, prefs } from "../core/store";
 
+import { t } from "../core/i18n";
 // ------------------------------------------------------------------ model
 
 export type AnnKind = "highlight" | "note" | "area";
@@ -107,7 +108,7 @@ export default function PdfView(props: { path: string; url: string }) {
     const path = props.path;
     const list = anns();
     saveTimer = window.setTimeout(() => {
-      void ipc.write(store(path), JSON.stringify({ version: 1, pdf: path, annotations: list }, null, 1)).catch((e) => notify(`Annotations not saved: ${e}`, "error"));
+      void ipc.write(store(path), JSON.stringify({ version: 1, pdf: path, annotations: list }, null, 1)).catch((e) => notify(t("Annotations not saved: {error}", { error: e }), "error"));
     }, 300);
   };
   const update = (f: (l: Annotation[]) => Annotation[]) => {
@@ -446,7 +447,7 @@ export default function PdfView(props: { path: string; url: string }) {
 
   const copy = (text: string, what: string) => {
     void navigator.clipboard.writeText(text);
-    notify(`Copied ${what}`, "success");
+    notify(t("Copied {what}", { what }), "success");
   };
   const copyLink = (a: Annotation) => copy(annotationLink(props.path, a), "the link");
   const copyQuote = (a: Annotation) => {
@@ -457,7 +458,7 @@ export default function PdfView(props: { path: string; url: string }) {
   /** An area as a PNG on the clipboard (from the rendered page). */
   const copyImage = async (a: Annotation) => {
     const canvas = pageDiv(a.page)?.querySelector("canvas");
-    if (!canvas) return notify("Scroll to the page first.", "error");
+    if (!canvas) return notify(t("Scroll to the page first."), "error");
     const [x0, y0, x1, y1] = a.rects[0];
     const w = Math.max(1, Math.round((x1 - x0) * canvas.width)), h = Math.max(1, Math.round((y1 - y0) * canvas.height));
     const out = document.createElement("canvas");
@@ -467,7 +468,7 @@ export default function PdfView(props: { path: string; url: string }) {
     const blob = await new Promise<Blob | null>((r) => out.toBlob(r, "image/png"));
     if (!blob) return;
     await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-    notify("Copied the area as an image — paste it into a note.", "success");
+    notify(t("Copied the area as an image — paste it into a note."), "success");
   };
 
   const sorted = createMemo(() => [...anns()].sort((a, b) => a.page - b.page || a.rects[0][1] - b.rects[0][1] || a.rects[0][0] - b.rects[0][0]));
@@ -488,35 +489,35 @@ export default function PdfView(props: { path: string; url: string }) {
   return (
     <div class="nz-pdf">
       <div class="nz-pdf-bar">
-        <Tool t="select" title="Select text (V)"><MousePointer2 size={15} /></Tool>
-        <Tool t="highlight" title="Highlight text (H)"><Highlighter size={15} /></Tool>
-        <Tool t="note" title="Add a note (N)"><StickyNote size={15} /></Tool>
-        <Tool t="area" title="Select an area (A)"><Square size={15} /></Tool>
+        <Tool t="select" title={t("Select text (V)")}><MousePointer2 size={15} /></Tool>
+        <Tool t="highlight" title={t("Highlight text (H)")}><Highlighter size={15} /></Tool>
+        <Tool t="note" title={t("Add a note (N)")}><StickyNote size={15} /></Tool>
+        <Tool t="area" title={t("Select an area (A)")}><Square size={15} /></Tool>
         <Swatches value={color()} onPick={setColor} />
         <span class="fv-sep" />
         <span class="nz-pdf-page">
           <input class="input" value={page()} onChange={(e) => goTo(Number(e.currentTarget.value))} /> / {pages() || "…"}
         </span>
         <span class="fv-sep" />
-        <button class="icon-btn" title="Zoom out" onClick={() => zoom(1 / 1.15)}><ZoomOut size={15} /></button>
-        <button class="fv-zoom" title="Fit width" onClick={() => zoom("page-width")}>{Math.round(scale() * 100)}%</button>
-        <button class="icon-btn" title="Zoom in" onClick={() => zoom(1.15)}><ZoomIn size={15} /></button>
+        <button class="icon-btn" title={t("Zoom out")} onClick={() => zoom(1 / 1.15)}><ZoomOut size={15} /></button>
+        <button class="fv-zoom" title={t("Fit width")} onClick={() => zoom("page-width")}>{Math.round(scale() * 100)}%</button>
+        <button class="icon-btn" title={t("Zoom in")} onClick={() => zoom(1.15)}><ZoomIn size={15} /></button>
         <span class="spacer" />
-        <button class="icon-btn" classList={{ active: finding() }} title="Find (Ctrl+F)" onClick={() => setFinding(!finding())}><Search size={15} /></button>
-        <button class="icon-btn" classList={{ active: panel() }} title="Annotations" onClick={() => setPanel(!panel())}><PanelRight size={15} /></button>
+        <button class="icon-btn" classList={{ active: finding() }} title={t("Find (Ctrl+F)")} onClick={() => setFinding(!finding())}><Search size={15} /></button>
+        <button class="icon-btn" classList={{ active: panel() }} title={t("Annotations")} onClick={() => setPanel(!panel())}><PanelRight size={15} /></button>
       </div>
       <Show when={finding()}>
         <div class="nz-pdf-find">
-          <input class="input" placeholder="Find in PDF" value={query()} dir="auto"
+          <input class="input" placeholder={t("Find in PDF")} value={query()} dir="auto"
             onInput={(e) => (setQuery(e.currentTarget.value), find())}
             onKeyDown={(e) => {
               if (e.key === "Enter") find(true, e.shiftKey);
               if (e.key === "Escape") setFinding(false);
             }} />
           <span class="field-hint">{findInfo()}</span>
-          <button class="icon-btn" title="Previous (Shift+Enter)" onClick={() => find(true, true)}><ChevronUp size={15} /></button>
-          <button class="icon-btn" title="Next (Enter)" onClick={() => find(true)}><ChevronDown size={15} /></button>
-          <button class="icon-btn" title="Close" onClick={() => setFinding(false)}><X size={15} /></button>
+          <button class="icon-btn" title={t("Previous (Shift+Enter)")} onClick={() => find(true, true)}><ChevronUp size={15} /></button>
+          <button class="icon-btn" title={t("Next (Enter)")} onClick={() => find(true)}><ChevronDown size={15} /></button>
+          <button class="icon-btn" title={t("Close")} onClick={() => setFinding(false)}><X size={15} /></button>
         </div>
       </Show>
       <div class="nz-pdf-main">
@@ -530,14 +531,14 @@ export default function PdfView(props: { path: string; url: string }) {
             <div ref={viewerEl} class="pdfViewer" />
           </div>
           <Show when={error()}>
-            <div class="pane-empty">This PDF can't be shown: {error()}</div>
+            <div class="pane-empty">{t("This PDF can't be shown: {error}", { error: error() })}</div>
           </Show>
         </div>
         <Show when={panel()}>
           <aside class="nz-pdf-panel">
-            <div class="nz-pdf-panel-head">Annotations <span class="base-count">{anns().length}</span></div>
+            <div class="nz-pdf-panel-head">{t("Annotations")} <span class="base-count">{anns().length}</span></div>
             <Show when={anns().length} fallback={
-              <p class="field-hint">Select text and pick a colour to highlight it. <b>N</b> adds a note, <b>A</b> selects an area. Each annotation has a link you can paste into notes.</p>
+              <p class="field-hint">{t("Select text and pick a colour to highlight it.")} <b>N</b> {t("adds a note,")} <b>A</b> {t("selects an area. Each annotation has a link you can paste into notes.")}</p>
             }>
               <For each={sorted()}>
                 {(a) => (
@@ -545,8 +546,8 @@ export default function PdfView(props: { path: string; url: string }) {
                     <div class="nz-ann-head">
                       <span class="nz-ann-kind">{a.kind === "note" ? <StickyNote size={12} /> : a.kind === "area" ? <Square size={12} /> : <Highlighter size={12} />} p. {a.page}</span>
                       <span class="grow" />
-                      <button class="icon-btn tiny" title="Copy link" onClick={(e) => (e.stopPropagation(), copyLink(a))}><Link2 size={13} /></button>
-                      <button class="icon-btn tiny" title="Copy as quote" onClick={(e) => (e.stopPropagation(), copyQuote(a))}><Quote size={13} /></button>
+                      <button class="icon-btn tiny" title={t("Copy link")} onClick={(e) => (e.stopPropagation(), copyLink(a))}><Link2 size={13} /></button>
+                      <button class="icon-btn tiny" title={t("Copy as quote")} onClick={(e) => (e.stopPropagation(), copyQuote(a))}><Quote size={13} /></button>
                     </div>
                     <Show when={a.text}><div class="nz-ann-text" dir="auto">{a.text}</div></Show>
                     <Show when={a.comment}><div class="nz-ann-comment" dir="auto">{a.comment}</div></Show>
@@ -562,7 +563,7 @@ export default function PdfView(props: { path: string; url: string }) {
               </For>
             </Show>
             <Show when={(links() ?? []).some((l) => !l.annotation)}>
-              <div class="nz-pdf-panel-head">Linked from</div>
+              <div class="nz-pdf-panel-head">{t("Linked from")}</div>
               <For each={(links() ?? []).filter((l) => !l.annotation)}>
                 {(l) => (
                   <a class="nz-ann-backlink base-link" title={l.text} onClick={() => void openNote(l.note, { line: l.line })}>
@@ -593,8 +594,8 @@ export default function PdfView(props: { path: string; url: string }) {
                       const a = addHighlight(s());
                       setSelected(a.id);
                       setPop({ ...p(), sel: undefined, ann: a.id });
-                    }}>Highlight + comment</button>
-                    <button class="btn small" onClick={() => (copy(s().text, "the text"), setPop(null))}>Copy</button>
+                    }}>{t("Highlight + comment")}</button>
+                    <button class="btn small" onClick={() => (copy(s().text, "the text"), setPop(null))}>{t("Copy")}</button>
                   </div>
                 )}
               </Show>
@@ -604,14 +605,14 @@ export default function PdfView(props: { path: string; url: string }) {
                     <div class="row gap">
                       <Swatches value={a().color} onPick={(c) => patch(a().id, { color: c })} />
                       <span class="grow" />
-                      <button class="icon-btn" title="Copy link" onClick={() => copyLink(a())}><Link2 size={14} /></button>
-                      <button class="icon-btn" title="Copy as quote" onClick={() => copyQuote(a())}><Quote size={14} /></button>
+                      <button class="icon-btn" title={t("Copy link")} onClick={() => copyLink(a())}><Link2 size={14} /></button>
+                      <button class="icon-btn" title={t("Copy as quote")} onClick={() => copyQuote(a())}><Quote size={14} /></button>
                       <Show when={a().kind === "area"}>
-                        <button class="icon-btn" title="Copy as image" onClick={() => void copyImage(a())}><ImageIcon size={14} /></button>
+                        <button class="icon-btn" title={t("Copy as image")} onClick={() => void copyImage(a())}><ImageIcon size={14} /></button>
                       </Show>
-                      <button class="icon-btn danger" title="Delete (Del)" onClick={() => remove(a().id)}><Trash2 size={14} /></button>
+                      <button class="icon-btn danger" title={t("Delete (Del)")} onClick={() => remove(a().id)}><Trash2 size={14} /></button>
                     </div>
-                    <textarea class="input" rows={3} placeholder="Comment…" dir="auto" value={a().comment ?? ""}
+                    <textarea class="input" rows={3} placeholder={t("Comment…")} dir="auto" value={a().comment ?? ""}
                       ref={(el) => a().kind === "note" && !a().comment && setTimeout(() => el.focus())}
                       onInput={(e) => patch(a().id, { comment: e.currentTarget.value })}
                       onKeyDown={(e) => {

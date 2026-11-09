@@ -9,6 +9,7 @@ import { basename, dirname, fileKind } from "../core/ipc";
 import { fileRev, root } from "../core/store";
 import PdfView from "./PdfView";
 
+import { t } from "../core/i18n";
 /** `![[name]]` (Obsidian style); the full path when the name isn't unique is left to the user. */
 export const embedLink = (path: string) => `![[${basename(path)}]]`;
 
@@ -56,7 +57,7 @@ export default function FileView(props: { path: string }) {
 
   const copyLink = () => {
     void navigator.clipboard.writeText(embedLink(props.path));
-    notify(`Copied ${embedLink(props.path)}`, "success");
+    notify(t("Copied {x}", { x: embedLink(props.path) }), "success");
   };
 
   return (
@@ -71,19 +72,19 @@ export default function FileView(props: { path: string }) {
         </span>
         <div class="spacer" />
         <Show when={kind() === "image"}>
-          <button class="icon-btn" title="Zoom out" onClick={() => zoomBy(1 / 1.25)}><ZoomOut size={16} /></button>
-          <button class="fv-zoom" title="Toggle fit / actual size" onClick={() => setZoom(zoom() === "fit" ? 1 : "fit")}>
-            {zoom() === "fit" ? "Fit" : `${Math.round(scale() * 100)}%`}
+          <button class="icon-btn" title={t("Zoom out")} onClick={() => zoomBy(1 / 1.25)}><ZoomOut size={16} /></button>
+          <button class="fv-zoom" title={t("Toggle fit / actual size")} onClick={() => setZoom(zoom() === "fit" ? 1 : "fit")}>
+            {zoom() === "fit" ? t("Fit") : `${Math.round(scale() * 100)}%`}
           </button>
-          <button class="icon-btn" title="Zoom in" onClick={() => zoomBy(1.25)}><ZoomIn size={16} /></button>
-          <button class="icon-btn" title="Fit to window" onClick={() => setZoom("fit")}><Maximize size={15} /></button>
+          <button class="icon-btn" title={t("Zoom in")} onClick={() => zoomBy(1.25)}><ZoomIn size={16} /></button>
+          <button class="icon-btn" title={t("Fit to window")} onClick={() => setZoom("fit")}><Maximize size={15} /></button>
           <span class="fv-sep" />
         </Show>
-        <button class="icon-btn" title="Copy embed link" onClick={copyLink}><Link2 size={16} /></button>
-        <button class="icon-btn" title="Show in system file manager" onClick={() => void showInFolder(abs())}><FolderOpen size={16} /></button>
-        <button class="icon-btn" title="Open in default app" onClick={() => void openPath(abs()).catch((e) => notify(String(e), "error"))}><ExternalLink size={16} /></button>
+        <button class="icon-btn" title={t("Copy embed link")} onClick={copyLink}><Link2 size={16} /></button>
+        <button class="icon-btn" title={t("Show in system file manager")} onClick={() => void showInFolder(abs())}><FolderOpen size={16} /></button>
+        <button class="icon-btn" title={t("Open in default app")} onClick={() => void openPath(abs()).catch((e) => notify(String(e), "error"))}><ExternalLink size={16} /></button>
       </div>
-      <Show when={!missing()} fallback={<div class="pane-empty">This file no longer exists.</div>}>
+      <Show when={!missing()} fallback={<div class="pane-empty">{t("This file no longer exists.")}</div>}>
         <Show
           when={kind() === "image"}
           fallback={<Show when={`${props.path}\n${url()}`} keyed>{(_k: string) => <PdfView path={props.path} url={url()} />}</Show>}

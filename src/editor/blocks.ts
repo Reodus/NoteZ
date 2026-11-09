@@ -10,6 +10,7 @@ import { prefs, saveAll, state } from "../core/store";
 import { ensureBlockId, linkName, newBlockId, previewHtml } from "../core/blocks";
 import { hydrateImages } from "./livepreview";
 
+import { t } from "../core/i18n";
 // ---------------------------------------------------------------- flash
 
 const flashEffect = StateEffect.define<{ from: number; to: number } | null>();
@@ -121,7 +122,7 @@ export async function blockRefCompletion(ctx: CompletionContext): Promise<Comple
   }));
   return {
     from: m.from,
-    options: options.length ? options : [{ label: query ? "No block matches" : "Type to search blocks", apply: () => {} }],
+    options: options.length ? options : [{ label: query ? t("No block matches") : t("Type to search blocks"), apply: () => {} }],
     filter: false,
   };
 }
@@ -135,7 +136,7 @@ async function fillPreview(el: HTMLElement, from: string, link: string) {
   const sec = await ipc.noteSection(from, target).catch(() => null);
   if (!sec) {
     el.classList.add("missing");
-    el.textContent = /^(https?:)/.test(target) ? target : `No note “${target.split("#")[0] || target}”`;
+    el.textContent = /^(https?:)/.test(target) ? target : t("No note “{name}”", { name: target.split("#")[0] || target });
     return;
   }
   const head = document.createElement("div");

@@ -246,7 +246,7 @@ pub fn resolve_image(vault: Option<&Path>, note_dir: &str, url: &str) -> Option<
 /// Markdown that `![[url]]` embeds: a note (without its frontmatter), a
 /// heading's section or a `^block`. `this` is the embedding note's text
 /// (for `![[#^id]]`).
-fn embedded_note(vault: Option<&Path>, note_dir: &str, this: &str, url: &str) -> Option<String> {
+pub(crate) fn embedded_note(vault: Option<&Path>, note_dir: &str, this: &str, url: &str) -> Option<String> {
     let url = percent_decode(url.trim());
     let (name, sub) = match url.split_once('#') {
         Some((n, s)) => (n.trim(), Some(s.trim())),
@@ -430,14 +430,16 @@ mod tests {
     /// (scripts/test-asm.ts), so both color the same tokens.
     #[test]
     fn assembly_highlighting() {
-        use typst::layout::{Frame, FrameItem};
-        fn walk(f: &Frame, out: &mut Vec<(String, String)>) {
-            for (_, item) in f.items() {
+        use typst::layout::{Frame, FrameItem, Point};
+        /// Text items with their color and baseline (absolute y, in pt).
+        fn walk(f: &Frame, at: Point, out: &mut Vec<(String, String, i64)>) {
+            for (pos, item) in f.items() {
+                let p = at + *pos;
                 match item {
-                    FrameItem::Group(g) => walk(&g.frame, out),
+                    FrameItem::Group(g) => walk(&g.frame, p + Point::new(g.transform.tx, g.transform.ty), out),
                     FrameItem::Text(t) => {
                         if let typst::visualize::Paint::Solid(c) = &t.fill {
-                            out.push((t.text.to_string(), c.to_hex().to_string()));
+                            out.push((t.text.to_string(), c.to_hex().to_string(), p.y.to_pt().round() as i64));
                         }
                     }
                     _ => {}
@@ -452,9 +454,21 @@ mod tests {
             let mut world = world::NoteWorld::new(world::dev_packages_dir());
             world.prepare(&built.main_path, built.source.clone(), vec![]).unwrap();
             let doc = typst::compile::<typst_layout::PagedDocument>(&world).output.expect("compiles");
-            let mut runs = vec![];
+            let mut pieces = vec![];
             for page in doc.pages() {
-                walk(&page.frame, &mut runs);
+                walk(&page.frame, Point::zero(), &mut pieces);
+            }
+            // Code lines may break after punctuation, which splits a token
+            // into several text items (`_` `start`): join neighbours of one
+            // color on the same line.
+            let mut runs: Vec<(String, String)> = vec![];
+            let mut last_y = None;
+            for (t, c, y) in pieces {
+                match runs.last_mut() {
+                    Some((lt, lc)) if *lc == c && last_y == Some(y) => lt.push_str(&t),
+                    _ => runs.push((t, c)),
+                }
+                last_y = Some(y);
             }
             let mut pos = 0;
             for (word, kind) in expect {
@@ -472,7 +486,7 @@ mod tests {
                 // in order: each word is looked for after the previous one
                 let at = runs[pos..]
                     .iter()
-                    .position(|(t, _)| *t == word || t.trim() == word || t.split_whitespace().any(|w| w == word))
+                    .position(|(t, _)| *t == word || t.split_whitespace().any(|w| w == word || w.trim_matches('"').trim_end_matches(':') == word))
                     .unwrap_or_else(|| panic!("{lang}: {word:?} not found after run {pos} in {runs:?}"));
                 pos += at + 1;
                 let got = runs[pos - 1].1.as_str();
@@ -681,6 +695,93 @@ mod tests {
     fn normalize_paths() {
         assert_eq!(normalize("a/./b/../c.png").as_deref(), Some("a/c.png"));
         assert_eq!(normalize("../x"), None);
+    }
+
+    /// Long code lines wrap inside the code box (a friend's screenshot: an
+    /// Android snippet ran out of the box, broke right after its indent so a
+    /// line looked empty, and continued at column 0).
+    #[test]
+    fn long_code_lines_wrap_inside_the_box() {
+        use typst::layout::{Frame, FrameItem, Point};
+        fn walk(f: &Frame, at: Point, out: &mut Vec<(String, f64, f64, f64)>) {
+            for (pos, item) in f.items() {
+                let p = at + *pos;
+                match item {
+                    FrameItem::Group(g) => walk(&g.frame, p + Point::new(g.transform.tx, g.transform.ty), out),
+                    FrameItem::Text(t) => out.push((t.text.to_string(), p.x.to_pt(), (p.x + t.width()).to_pt(), p.y.to_pt())),
+                    _ => {}
+                }
+            }
+        }
+        let code = "public NetworkCapabilities getNetworkCapabilities(Network network) {\n  enforceAccessPermission();\n  return getNetworkCapabilitiesInternal(getNetworkAgentInfoForNetwork(network));\n}\nprivate void enforceAccessPermission() {\n    mContext.enforceCallingOrSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE, \"ConnectivityService\");\n    String s = \"aVeryLongTokenWithoutAnyPunctuationAtAllThatJustKeepsGoingAndGoingAndGoingForeverMore\";\n}";
+        let note = format!("---\nlang: fa\npage:\n  paper: a5\n  margin: 2cm\n---\nمتن فارسی قبل از کد.\n\n```java\n{code}\n```\n");
+        let built = build(None, "Code.md", &note, &md::Rendered::new());
+        let mut world = world::NoteWorld::new(world::dev_packages_dir());
+        world.prepare(&built.main_path, built.source.clone(), vec![]).unwrap();
+        let doc = typst::compile::<typst_layout::PagedDocument>(&world).output.expect("compiles");
+        let page = &doc.pages()[0];
+        let right = page.frame.width().to_pt() - 2.0 * 72.0 / 2.54; // 2cm margin
+        let mut items = vec![];
+        walk(&page.frame, Point::zero(), &mut items);
+        let code_items: Vec<_> = items.iter().filter(|(t, ..)| !t.contains("فارسی") && !t.trim().chars().all(|c| c.is_ascii_digit())).collect();
+        for (t, _, end, _) in &code_items {
+            assert!(*end <= right + 0.5, "`{t}` ends at {end:.1}pt, past the text area ({right:.1}pt)");
+        }
+        // No visual line of the block is only whitespace.
+        let mut lines: std::collections::BTreeMap<i64, String> = Default::default();
+        for (t, _, _, y) in &code_items {
+            lines.entry(y.round() as i64).or_default().push_str(t);
+        }
+        for (y, text) in &lines {
+            assert!(!text.trim().is_empty(), "blank line at y={y} in the code block: {lines:?}");
+        }
+        // Continuations are indented past the line they continue.
+        let x_of = |w: &str| code_items.iter().find(|(t, ..)| t.contains(w)).map(|(_, x, ..)| *x).unwrap();
+        assert!(x_of("getNetworkAgentInfoForNetwork") > x_of("return"), "wrapped line starts left of its own code");
+    }
+
+    /// A table's column order in the PDF follows the same rule as the
+    /// editor's table widget: an enclosing `::: {dir}` / `{lang}` block, else
+    /// the paragraph rule over all cell text. The cases in dir_cases.json are
+    /// shared with the editor's test (scripts/test-dir.ts). Checked on the
+    /// laid-out page, under both a left-to-right and a right-to-left base.
+    #[test]
+    fn table_direction() {
+        use typst::layout::{Frame, FrameItem, Point};
+        fn walk(f: &Frame, at: Point, out: &mut Vec<(String, f64)>) {
+            for (pos, item) in f.items() {
+                let p = at + *pos;
+                match item {
+                    FrameItem::Group(g) => walk(&g.frame, p + Point::new(g.transform.tx, g.transform.ty), out),
+                    FrameItem::Text(t) => out.push((t.text.to_string(), p.x.to_pt())),
+                    _ => {}
+                }
+            }
+        }
+        let strip = regex::Regex::new(r"!\[\[[^\]]*\]\]|\]\([^)]*\)|\]\{[^}]*\}|[\[\]]").unwrap();
+        let cases: Vec<(String, String)> = serde_json::from_str(include_str!("dir_cases.json")).unwrap();
+        for (md, want) in cases {
+            let header = md.lines().find(|l| l.trim_start().starts_with('|')).unwrap();
+            let cells: Vec<String> = header
+                .trim()
+                .trim_matches('|')
+                .split('|')
+                .map(|c| strip.replace_all(c, "").split_whitespace().next().unwrap_or("").to_string())
+                .collect();
+            let (first, last) = (cells.first().unwrap(), cells.last().unwrap());
+            for base in ["en", "fa"] {
+                let note = format!("---\nlang: {base}\n---\n\n{md}\n");
+                let built = build(None, "Dir.md", &note, &md::Rendered::new());
+                let mut world = world::NoteWorld::new(world::dev_packages_dir());
+                world.prepare(&built.main_path, built.source.clone(), vec![]).unwrap();
+                let doc = typst::compile::<typst_layout::PagedDocument>(&world).output.expect("compiles");
+                let mut runs = vec![];
+                walk(&doc.pages()[0].frame, Point::zero(), &mut runs);
+                let x = |w: &str| runs.iter().find(|(t, _)| t.contains(w)).map(|(_, x)| *x).unwrap_or_else(|| panic!("`{w}` not on the page: {runs:?}"));
+                let got = if x(first) > x(last) { "rtl" } else { "ltr" };
+                assert_eq!(got, want, "base {base}:\n{md}");
+            }
+        }
     }
 }
 
