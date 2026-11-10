@@ -75,14 +75,28 @@ function mathSpans(text: string, code: [number, number][]): [number, number][] {
   return out;
 }
 
+/** Image sources (`![caption](path)`, `![[file|300]]`) outside code spans:
+ * Markdown syntax, so they read left to right even with a Persian caption
+ * (otherwise `![`, `](` and the path scatter across the line). */
+function imageSpans(text: string, code: [number, number][]): [number, number][] {
+  const out: [number, number][] = [];
+  for (const m of text.matchAll(/!\[\[[^\]\n]+\]\]|!\[[^\]\n]*\]\([^)\n]*\)/g)) {
+    const a = m.index!, b = a + m[0].length;
+    if (!code.some(([c, d]) => a < d && b > c)) out.push([a, b]);
+  }
+  return out;
+}
+
 /**
- * Ranges of a right-to-left line shown left-to-right: inline code spans and
+ * Ranges of a right-to-left line shown left-to-right: inline code spans, image sources and
  * formulas as a whole (backticks, leading `__` and trailing `()` included — `__libc_malloc()`
  * would otherwise show as `libc_malloc()__`), then the Latin runs outside them.
  */
 export function ltrRanges(text: string): [number, number][] {
   const code = codeSpans(text);
-  const whole = [...code, ...mathSpans(text, code)];
+  const images = imageSpans(text, code);
+  const math = mathSpans(text, code).filter(([a, b]) => !images.some(([c, d]) => a < d && b > c));
+  const whole = [...code, ...images, ...math];
   const runs = runsNeedingIsolation(text).filter(([a, b]) => !whole.some(([c, d]) => a < d && b > c));
   return [...whole, ...runs].sort((x, y) => x[0] - y[0]);
 }
