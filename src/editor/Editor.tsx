@@ -27,7 +27,7 @@ import { typst } from "./typst-lang";
 import { styling, themeCss } from "./styling";
 import { blockPreviews } from "./widgets";
 import { livePreview } from "./livepreview";
-import { mathAutoPair, wrapSelection } from "./autopair";
+import { mathAutoPair, mathPairBackspace, wrapSelection } from "./autopair";
 import { richPaste } from "./paste";
 import { pointerHold } from "./pointer";
 import { slashCompletion, slashIconRender, slashKeymap, slashGhost } from "./slash";
@@ -253,6 +253,7 @@ export default function Editor() {
         indentOnInput(),
         bracketMatching(),
         mathAutoPair,
+        Prec.high(mathPairBackspace),
         EditorView.lineWrapping,
         autocompletion({ override: [wikilinkCompletion, blockRefCompletion, slashCompletion, ...COMPLETION_SOURCES], icons: false, addToOptions: [slashIconRender], maxRenderedOptions: 80 }),
         slashKeymap,
