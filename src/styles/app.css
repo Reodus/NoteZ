@@ -3890,7 +3890,7 @@ html.no-anim *::after {
   min-width: 0;
 }
 
-.cm-nz-ltr-run {
+.cm-nz-ltr-run, .cm-nz-rtl-run {
   unicode-bidi: isolate;
 }
 /* JetBrains Mono's contextual alternates misplace "__" (drawn a cell to the

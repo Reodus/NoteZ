@@ -117,6 +117,23 @@ function mathBlockLines(doc: EditorView["state"]["doc"], last: number): Set<numb
   return out;
 }
 
+/** The caption inside image sources (`![caption|300](…)`, `![[file|caption]]`)
+ * that reads right to left: isolated on its own, so its words keep their
+ * order and the brackets around it aren't mirrored. */
+export function rtlCaptions(text: string): [number, number][] {
+  const out: [number, number][] = [];
+  for (const m of text.matchAll(/!\[\[([^\]\n]+)\]\]|!\[([^\]\n]*)\]\([^)\n]*\)/g)) {
+    const wiki = m[1] !== undefined;
+    const inner = (wiki ? m[1] : m[2]).replace(/\|\s*\d+(\.\d+)?\s*$/, "");
+    if (!RTL.test(inner) || !rtlLine(inner)) continue;
+    const a = m.index! + (wiki ? 3 : 2);
+    out.push([a, a + inner.length]);
+  }
+  return out;
+}
+
+const rtlRun = Decoration.mark({ bidiIsolate: Direction.RTL, class: "cm-nz-rtl-run", attributes: { dir: "rtl" } });
+
 interface Decos {
   lines: DecorationSet;
   runs: DecorationSet;
@@ -136,7 +153,11 @@ function build(view: EditorView): Decos {
       const forced = math.has(line.number) ? "ltr" : dirs[line.number];
       const rtl = forced ? forced === "rtl" : RTL.test(line.text) && rtlLine(line.text);
       lines.add(line.from, line.from, rtl ? rtlDir : forced === "ltr" ? ltrDir : autoDir);
-      if (rtl) for (const [a, b] of ltrRanges(line.text)) runs.add(line.from + a, line.from + b, ltrRun);
+      const marks: [number, number, Decoration][] = rtl ? ltrRanges(line.text).map(([a, b]) => [a, b, ltrRun]) : [];
+      if (RTL.test(line.text)) for (const [a, b] of rtlCaptions(line.text)) marks.push([a, b, rtlRun]);
+      // Outer ranges first when two start together.
+      marks.sort((x, y) => x[0] - y[0] || y[1] - x[1]);
+      for (const [a, b, d] of marks) if (b > a) runs.add(line.from + a, line.from + b, d);
       pos = line.to + 1;
     }
   }
