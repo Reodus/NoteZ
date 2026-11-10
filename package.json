@@ -11,6 +11,7 @@
     "build": "vite build && npm run fonts && npm run core",
     "start": "electron .",
     "dist": "npm run build && electron-builder --linux",
+    "dist:rpm": "npm run build && electron-builder --linux rpm",
     "dist:win": "npm run build && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
     "fonts": "node scripts/fonts.mjs",
@@ -79,6 +80,12 @@
       }
     ],
     "asar": true,
+    "rpm": {
+      "fpm": [
+        "--rpm-compression-level",
+        "6"
+      ]
+    },
     "linux": {
       "target": [
         "deb",
