@@ -3,23 +3,23 @@ import { startResize } from "./resize";
 import {
   Files, Search, FilePlus, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, FileText, FileCode2,
   FolderInput, Settings, Sun, Moon, Monitor, ArrowLeftRight, ChevronsDownUp, Waypoints, File, FileImage, FileType2,
-  Hash, Bookmark,
+  Hash, Bookmark, Table2,
 } from "lucide-solid";
 import { noteIcon } from "../core/meta";
 import { SearchPane, TagsPane, BookmarksPane, newBookmarkGroup, searchFor, openReplace } from "./SidebarPanes";
 import { fileMenu, newNoteIn, newFolderIn } from "./fileMenu";
 import { graphOpen, setGraphOpen } from "./GraphView";
 import { app } from "../core/app";
-import { Entry, stem, fileKind } from "../core/ipc";
+import { Entry, stem, fileKind, dirname } from "../core/ipc";
 import {
   tree, root, state, openNote, moveEntry,
   sidebarTab, setSidebarTab, setDialog, prefs, setPrefs, closeVault, newNoteDir,
 } from "../core/store";
-import { openMenu, Popover } from "./primitives";
+import { openMenu, openMenuAt, Popover } from "./primitives";
 import { Logo } from "./Logo";
 import { chooseVault } from "./Welcome";
 
-import { t } from "../core/i18n";
+import { t, uiRtl } from "../core/i18n";
 // Folders start collapsed; which ones are open is remembered per vault.
 const [expanded, setExpandedRaw] = createSignal<Set<string>>(new Set());
 const expandKey = () => `notez.tree.${root() ?? ""}`;
@@ -102,29 +102,116 @@ function FileIcon(props: { path: string }) {
       <Match when={k() === "note"}><FileText size={15} class="ti" /></Match>
       <Match when={k() === "image"}><FileImage size={15} class="ti image" /></Match>
       <Match when={k() === "pdf"}><FileType2 size={15} class="ti pdf" /></Match>
+      <Match when={k() === "base"}><Table2 size={15} class="ti base" /></Match>
     </Switch>
   );
 }
 
-function TreeNode(props: { entry: Entry; depth: number }) {
-  const e = () => props.entry;
-  const [dragOver, setDragOver] = createSignal(false);
-  const open = () => expanded().has(e().path);
-  const pad = () => ({ "padding-inline-start": `${10 + props.depth * 14 + (e().is_dir ? 0 : 20)}px` });
+// Drag & drop: the folder a dragged entry would land in ("" = vault root).
+// Dropping on a note means "next to it", so its folder lights up.
+const [dropDir, setDropDir] = createSignal<string | null>(null);
+const DRAG_TYPE = "text/notez-path";
+const isOurDrag = (ev: DragEvent) => !!ev.dataTransfer?.types.includes(DRAG_TYPE);
 
-  const dropProps = (target: string) => ({
+function dropProps(target: () => string) {
+  return {
     onDragOver: (ev: DragEvent) => {
-      ev.preventDefault();
-      setDragOver(true);
-    },
-    onDragLeave: () => setDragOver(false),
-    onDrop: (ev: DragEvent) => {
+      if (!isOurDrag(ev)) return;
       ev.preventDefault();
       ev.stopPropagation();
-      setDragOver(false);
-      const from = ev.dataTransfer?.getData("text/notez-path");
-      if (from) moveEntry(from, target);
+      setDropDir(target());
     },
+    onDrop: (ev: DragEvent) => {
+      if (!isOurDrag(ev)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      setDropDir(null);
+      const from = ev.dataTransfer?.getData(DRAG_TYPE);
+      if (from) void moveEntry(from, target());
+    },
+  };
+}
+const dragProps = (path: () => string) => ({
+  draggable: true,
+  onDragStart: (ev: DragEvent) => ev.dataTransfer?.setData(DRAG_TYPE, path()),
+  onDragEnd: () => setDropDir(null),
+});
+
+// Keyboard: one row is the tab stop (roving tabindex); arrows move between rows.
+const [focusPath, setFocusPath] = createSignal<string | null>(null);
+let treeEl: HTMLDivElement | undefined;
+const rows = () => [...(treeEl?.querySelectorAll<HTMLElement>(".tree-item") ?? [])];
+function syncTabStop() {
+  const all = rows();
+  const want = all.find((r) => r.dataset.path === focusPath()) ?? all.find((r) => r.dataset.path === state.active) ?? all[0];
+  for (const r of all) r.tabIndex = r === want ? 0 : -1;
+}
+createRoot(() => createEffect(on([tree, expanded, () => state.active, focusPath, () => prefs.showAttachments, () => prefs.showAllFiles], () => queueMicrotask(syncTabStop))));
+
+function treeKeys(e: KeyboardEvent) {
+  const row = (e.target as HTMLElement).closest?.(".tree-item") as HTMLElement | null;
+  if (!row || e.altKey || e.ctrlKey || e.metaKey) return;
+  const all = rows();
+  const i = all.indexOf(row);
+  const path = row.dataset.path!;
+  const isDir = row.classList.contains("dir");
+  const fwd = uiRtl ? "ArrowLeft" : "ArrowRight";
+  const back = uiRtl ? "ArrowRight" : "ArrowLeft";
+  const focus = (r?: HTMLElement) => r && (r.focus(), r.scrollIntoView({ block: "nearest" }));
+  switch (e.key) {
+    case "ArrowDown": focus(all[i + 1]); break;
+    case "ArrowUp": focus(all[i - 1]); break;
+    case "Home": focus(all[0]); break;
+    case "End": focus(all[all.length - 1]); break;
+    case fwd:
+      if (!isDir) return;
+      if (!expanded().has(path)) toggleDir(path);
+      else focus(all[i + 1]?.dataset.path?.startsWith(path + "/") ? all[i + 1] : undefined);
+      break;
+    case back:
+      if (isDir && expanded().has(path)) toggleDir(path);
+      else focus(all.find((r) => r.dataset.path === path.slice(0, Math.max(0, path.lastIndexOf("/")))));
+      break;
+    case "Enter":
+    case " ":
+      isDir ? toggleDir(path) : void openNote(path);
+      break;
+    case "ContextMenu":
+    case "F10": {
+      if (e.key === "F10" && !e.shiftKey) return;
+      const r = row.getBoundingClientRect();
+      openMenuAt(r.left + 24, r.bottom, fileMenu(entryAt(path), "tree"));
+      break;
+    }
+    default:
+      return;
+  }
+  e.preventDefault();
+}
+
+/** The tree entry at `path`, if listed. */
+function entryAt(path: string): Entry | null {
+  const find = (es: Entry[]): Entry | null => {
+    for (const e of es) {
+      if (e.path === path) return e;
+      if (e.is_dir && path.startsWith(e.path + "/")) return find(e.children);
+    }
+    return null;
+  };
+  return find(tree());
+}
+
+function TreeNode(props: { entry: Entry; depth: number }) {
+  const e = () => props.entry;
+  const open = () => expanded().has(e().path);
+  const pad = () => ({ "padding-inline-start": `${10 + props.depth * 14 + (e().is_dir ? 0 : 20)}px` });
+  const common = () => ({
+    role: "treeitem" as const,
+    tabindex: -1,
+    "aria-level": props.depth + 1,
+    "data-path": e().path,
+    onFocus: () => setFocusPath(e().path),
+    onContextMenu: (ev: MouseEvent) => entryMenu(ev, e()),
   });
 
   return (
@@ -134,13 +221,13 @@ function TreeNode(props: { entry: Entry; depth: number }) {
         <div
           class="tree-item file"
           classList={{ active: state.active === e().path, open: state.tabs.includes(e().path) }}
+          aria-selected={state.active === e().path}
           style={pad()}
-          draggable={true}
-          onDragStart={(ev) => ev.dataTransfer?.setData("text/notez-path", e().path)}
+          {...common()}
+          {...dragProps(() => e().path)}
+          {...dropProps(() => dirname(e().path))}
           onClick={() => openNote(e().path)}
-          onContextMenu={(ev) => entryMenu(ev, e())}
           title={e().path}
-          data-path={e().path}
         >
           <FileIcon path={e().path} />
           <span class="tree-label" dir="auto">{fileKind(e().path) === "note" ? stem(e().name) : e().name.replace(/\.[^.]+$/, "")}</span>
@@ -152,14 +239,13 @@ function TreeNode(props: { entry: Entry; depth: number }) {
     >
       <div
         class="tree-item dir"
-        classList={{ "drag-over": dragOver() }}
+        classList={{ "drag-over": dropDir() === e().path }}
+        aria-expanded={open()}
         style={pad()}
-        draggable={true}
-        onDragStart={(ev) => ev.dataTransfer?.setData("text/notez-path", e().path)}
+        {...common()}
+        {...dragProps(() => e().path)}
+        {...dropProps(() => e().path)}
         onClick={() => toggleDir(e().path)}
-        onContextMenu={(ev) => entryMenu(ev, e())}
-        data-path={e().path}
-        {...dropProps(e().path)}
       >
         <ChevronRight size={13} class="ti chev" classList={{ open: open() }} />
         {open() ? <FolderOpen size={15} class="ti folder" /> : <Folder size={15} class="ti folder" />}
@@ -167,7 +253,7 @@ function TreeNode(props: { entry: Entry; depth: number }) {
         <span class="count">{e().children.filter(visible).length || ""}</span>
       </div>
       <Show when={open()}>
-        <div class="tree-children" style={{ "--guide": `${17 + props.depth * 14}px` }}>
+        <div class="tree-children" role="group" style={{ "--guide": `${17 + props.depth * 14}px` }}>
           <For each={e().children.filter(visible)}>{(c) => <TreeNode entry={c} depth={props.depth + 1} />}</For>
         </div>
       </Show>
@@ -176,19 +262,19 @@ function TreeNode(props: { entry: Entry; depth: number }) {
 }
 
 function FilesPane() {
-  const [rootOver, setRootOver] = createSignal(false);
   return (
     <div
       class="tree"
-      classList={{ "drag-over": rootOver() }}
+      role="tree"
+      aria-label={t("Files")}
+      ref={(el) => (treeEl = el)}
+      classList={{ "drag-over": dropDir() === "" }}
       onContextMenu={(e) => entryMenu(e, null)}
-      onDragOver={(e) => (e.preventDefault(), setRootOver(true))}
-      onDragLeave={() => setRootOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setRootOver(false);
-        const from = e.dataTransfer?.getData("text/notez-path");
-        if (from && from.includes("/")) moveEntry(from, "");
+      onKeyDown={treeKeys}
+      {...dropProps(() => "")}
+      onDragLeave={(e) => {
+        // Left the tree altogether (not just moved onto a child).
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropDir(null);
       }}
     >
       <For

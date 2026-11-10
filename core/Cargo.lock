@@ -1633,7 +1633,7 @@ dependencies = [
 
 [[package]]
 name = "notez-core"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "argon2",
  "base64 0.22.1",

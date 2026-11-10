@@ -11,6 +11,7 @@ import { app, notify } from "../core/app";
 import { allFiles, openNote, pdfJump, prefs } from "../core/store";
 
 import { t } from "../core/i18n";
+import { modalOpen } from "./primitives";
 // ------------------------------------------------------------------ model
 
 export type AnnKind = "highlight" | "note" | "area";
@@ -420,6 +421,8 @@ export default function PdfView(props: { path: string; url: string }) {
   // keyboard: Ctrl+F find, Delete removes the selected annotation, tools by letter
   const onKey = (e: KeyboardEvent) => {
     if (!container?.isConnected || container.offsetParent === null) return;
+    // A dialog or menu over the PDF has the keyboard (and Esc closes it, not the tool).
+    if (e.defaultPrevented || modalOpen()) return;
     const typing = (e.target as HTMLElement)?.closest?.("input, textarea, [contenteditable]");
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
       e.preventDefault();

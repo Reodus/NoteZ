@@ -4,6 +4,7 @@ import { FolderOpen, FolderPlus, Clock, X, FileText, Sparkles, Languages, PenToo
 import { prefs, setPrefs, openVault } from "../core/store";
 import { ipc } from "../core/ipc";
 import { notify } from "../core/app";
+import { ask } from "../core/native";
 
 /** First note of a new vault: shows mixed scripts, a chart and the Help docs. */
 const WELCOME_NOTE = `---
@@ -35,7 +36,7 @@ data:
 `;
 import { Logo } from "./Logo";
 
-import { t } from "../core/i18n";
+import { t, tn } from "../core/i18n";
 export async function chooseVault() {
   const picked = await pickFolder({ directory: true, title: t("Open vault folder") });
   if (typeof picked === "string") await openVault(picked);
@@ -46,6 +47,15 @@ async function createVault() {
   if (typeof picked !== "string") return;
   try {
     await ipc.openVault(picked);
+    // A folder that already has files is opened as it is, without a welcome note — say so first.
+    const entries = await ipc.tree().catch(() => []);
+    if (entries.length) {
+      const ok = await ask(
+        tn(entries.length, "This folder is not empty ({n} item). Open it as a vault as it is? No welcome note is added.", "This folder is not empty ({n} items). Open it as a vault as it is? No welcome note is added."),
+        { title: t("Create vault"), kind: "warning", okLabel: t("Open as vault"), cancelLabel: t("Cancel") },
+      );
+      if (!ok) return;
+    }
     const notes = await ipc.notes();
     if (!notes.length) {
       await ipc.write(
@@ -98,15 +108,17 @@ export default function Welcome() {
             </h3>
             <For each={prefs.recentVaults}>
               {(p) => (
-                <div class="recent-item" onClick={() => openVault(p)} title={p}>
-                  <FileText size={16} />
-                  <span class="recent-name" dir="auto">{name(p)}</span>
-                  <span class="recent-path">{p}</span>
+                <div class="recent-item">
+                  <button class="recent-open" onClick={() => openVault(p)} title={p}>
+                    <FileText size={16} />
+                    <span class="recent-name" dir="auto">{name(p)}</span>
+                    <span class="recent-path">{p}</span>
+                  </button>
                   <button
                     class="icon-btn small"
                     title={t("Remove from list")}
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    aria-label={t("Remove from list")}
+                    onClick={() => {
                       setPrefs("recentVaults", (r) => r.filter((x) => x !== p));
                     }}
                   >

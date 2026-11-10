@@ -75,10 +75,10 @@ import { dailyPath } from "../plugins/daily";
 import { ComboBox, Field, Modal, Segmented } from "./primitives";
 
 import { t, UI_LANGUAGES, setUiLanguage } from "../core/i18n";
+import { fmtKey as formatKey, modName } from "../core/keys";
 const ACCENTS = ["#6d5efc", "#2f6fde", "#0e9f8e", "#1f9d55", "#e8590c", "#d6336c", "#7c3aed", "#475569"];
 
-export const fmtKey = (k?: string) =>
-  k?.replace("Mod", "Ctrl").replace(/-/g, " + ").replace(/ (\w)$/, (m) => m.toUpperCase());
+export const fmtKey = (k?: string) => formatKey(k);
 
 /** "Mod-Shift-k" from a key event, or null for a lone modifier. */
 function keySpec(e: KeyboardEvent): string | null {
@@ -120,7 +120,7 @@ function FolderInput(props: { value: string; placeholder: string; onChange: (v: 
 
 /** Records a global shortcut in Electron accelerator syntax ("CommandOrControl+Shift+Space"). */
 function ShortcutInput(props: { value: string; onChange: (v: string) => void }) {
-  const show = (v: string) => v.replace("CommandOrControl", navigator.platform.startsWith("Mac") ? "Cmd" : "Ctrl").replace(/\+/g, " + ");
+  const show = (v: string) => v.replace("CommandOrControl", modName).replace(/\+/g, " + ");
   return (
     <input
       class="input"
@@ -152,7 +152,7 @@ function HotkeyRow(props: { id: string; title: string }) {
     <div class="key-row">
       <span>{props.title}</span>
       <span class="row gap-sm">
-        <Show when={conflict()}>{(c) => <span class="key-conflict" title={t("Also used by “{x}”", { x: c().title })}>conflict</span>}</Show>
+        <Show when={conflict()}>{(c) => <span class="key-conflict" title={t("Also used by “{x}”", { x: c().title })}>{t("conflict")}</span>}</Show>
         <button
           class="key-rec"
           classList={{ recording: rec(), custom: custom() }}
@@ -220,9 +220,11 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
 
   // Search: hide settings whose text does not match.
   let body!: HTMLDivElement;
+  const [noMatch, setNoMatch] = createSignal(false);
   createEffect(() => {
     const s = q().trim().toLowerCase();
     queueMicrotask(() => {
+      let found = false;
       for (const sec of body.querySelectorAll<HTMLElement>(".settings-section")) {
         let any = false;
         for (const item of sec.querySelectorAll<HTMLElement>(":scope > *:not(h3)")) {
@@ -231,7 +233,9 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
           any ||= hit;
         }
         sec.style.display = any ? "" : "none";
+        found ||= any;
       }
+      setNoMatch(!!s && !found);
     });
   });
 
@@ -249,8 +253,8 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
         <nav class="settings-nav">
           <div class="settings-search">
             <Search size={14} />
-            <input placeholder={t("Search settings")} value={q()} onInput={(e) => setQ(e.currentTarget.value)} />
-            <Show when={q()}><button class="icon-btn small" onClick={() => setQ("")}><X size={13} /></button></Show>
+            <input placeholder={t("Search settings")} aria-label={t("Search settings")} value={q()} onInput={(e) => setQ(e.currentTarget.value)} />
+            <Show when={q()}><button class="icon-btn small" title={t("Clear")} aria-label={t("Clear")} onClick={() => setQ("")}><X size={13} /></button></Show>
           </div>
           <For each={tabs}>
             {(t) => (
@@ -261,6 +265,9 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
           </For>
         </nav>
         <div class="settings-body" ref={body}>
+          <Show when={noMatch()}>
+            <div class="pane-empty settings-empty">{t("No settings match “{q}”.", { q: q().trim() })}</div>
+          </Show>
           <Section id="appearance">
             <Field label={t("Mode")}>
               <Segmented value={prefs.themeMode} onChange={(v) => setPrefs("themeMode", v)}
@@ -273,7 +280,7 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
                 <button class="btn small" classList={{ active: !prefs.accent }} onClick={() => setPrefs("accent", "")}>{t("Theme")}</button>
                 <For each={ACCENTS}>
                   {(c) => (
-                    <button class="accent-dot" classList={{ active: prefs.accent === c }} style={{ background: c }} onClick={() => setPrefs("accent", c)} />
+                    <button class="accent-dot" classList={{ active: prefs.accent === c }} style={{ background: c }} title={c} aria-label={c} aria-pressed={prefs.accent === c} onClick={() => setPrefs("accent", c)} />
                   )}
                 </For>
                 <input type="color" value={prefs.accent || "#6d5efc"} onInput={(e) => setPrefs("accent", e.currentTarget.value)} title={t("Custom")} />

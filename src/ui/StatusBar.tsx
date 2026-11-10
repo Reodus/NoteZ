@@ -4,7 +4,7 @@ import { runSync, syncConfigured, syncState } from "../core/safety";
 import { when } from "./HistoryDialog";
 import { app } from "../core/app";
 import { isNotePath } from "../core/ipc";
-import { state, cursor, isDirty, setRightTab, prefs, setPrefs, root, setDialog } from "../core/store";
+import { state, cursor, isDirty, setRightTab, prefs, setPrefs, root, setDialog, activeTheme } from "../core/store";
 import { ipc as ipc2 } from "../core/ipc";
 import { srsSettings } from "../core/srs";
 import { preview } from "../core/render";
@@ -73,7 +73,9 @@ export default function StatusBar() {
       </Show>
       <Show when={isNotePath(state.active)}>
         <span class="sb-item">{state.active!.endsWith(".typ") ? "Typst" : "Markdown"}</span>
-        <span class="sb-item">{t("Theme: {name}", { name: docThemeId() })}</span>
+        <span class="sb-item click" title={t("Document theme — click to change")} onClick={() => setDialog({ kind: "themes" })}>
+          {t("Theme: {name}", { name: activeTheme()?.name || docThemeId() })}
+        </span>
         <Show when={prefs.layout !== "editor"}>
           <span class="sb-item click" classList={{ err: errors() > 0 }} onClick={() => setRightTab("preview")}>
             <Show when={!preview().busy} fallback={<><Loader2 size={12} class="spin" /> {t("Typesetting")}</>}>

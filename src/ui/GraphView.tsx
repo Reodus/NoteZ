@@ -8,7 +8,7 @@ import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY
 import { Waypoints, X, Maximize2, Search, SlidersHorizontal, RotateCcw, FolderTree, FolderOpen, FileText, ChevronsDownUp, ChevronsUpDown, Crosshair } from "lucide-solid";
 import { basename, dirname, Entry, fileKind, ipc, stem } from "../core/ipc";
 import { isDark, notesList, openNote, root, state, prefs, setPrefs, tree } from "../core/store";
-import { openMenuAt } from "./primitives";
+import { modalOpen, openMenuAt } from "./primitives";
 import { revealInTree } from "./Sidebar";
 
 import { t } from "../core/i18n";
@@ -596,6 +596,7 @@ export default function GraphView() {
     redraw();
   };
   const onKey = (e: KeyboardEvent) => {
+    if (e.defaultPrevented || modalOpen()) return;
     if (e.key === "Escape" && !(e.target as HTMLElement).closest?.("input")) (panel() ? setPanel(false) : setGraphOpen(false));
   };
 

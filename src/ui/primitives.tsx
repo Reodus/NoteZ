@@ -1,36 +1,108 @@
-import { createSignal, For, JSX, onCleanup, onMount, Show, splitProps } from "solid-js";
+import { createEffect, createSignal, For, JSX, onCleanup, onMount, Show, splitProps } from "solid-js";
 import { Portal } from "solid-js/web";
 import { X } from "lucide-solid";
 import { app, dismissToast } from "../core/app";
 
-import { t } from "../core/i18n";
+import { t, t as tr, uiRtl } from "../core/i18n";
+// ----------------------------------------------------------------- Layers
+
+/**
+ * Dialogs, popovers, menus and dropdowns stack in the order they open; Esc
+ * closes only the top one. The listener runs in the bubbling phase, after
+ * the focused element: a control that uses Esc itself (the shortcut
+ * recorder, the editor) calls preventDefault and keeps its dialog open.
+ * Popovers and menus close on Esc in any case — they never own the key.
+ */
+const layers: { close: () => void; modal: boolean }[] = [];
+
+export function pushLayer(close: () => void, modal = false): () => void {
+  const layer = { close, modal };
+  layers.push(layer);
+  return () => {
+    const i = layers.indexOf(layer);
+    if (i >= 0) layers.splice(i, 1);
+  };
+}
+
+/** Whether a dialog is open (global shortcuts stay off while one is). */
+export const modalOpen = () => layers.some((l) => l.modal);
+
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !layers.length) return;
+  const top = layers[layers.length - 1];
+  if (top.modal && e.defaultPrevented) return;
+  e.preventDefault();
+  top.close();
+});
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
+
 // ------------------------------------------------------------------ Modal
+
+let modalSeq = 0;
 
 export function Modal(props: {
   title?: string;
   subtitle?: string;
+  /** Accessible name when there is no visible title. */
+  label?: string;
   width?: string;
   onClose: () => void;
   children: JSX.Element;
   footer?: JSX.Element;
   class?: string;
 }) {
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      props.onClose();
+  const id = `nz-modal-${++modalSeq}`;
+  let box!: HTMLDivElement;
+  // Focus goes back where it was when the dialog closes (usually the editor).
+  const before = document.activeElement as HTMLElement | null;
+  onCleanup(pushLayer(() => props.onClose(), true));
+  onMount(() => {
+    // Inputs that focus themselves (prompts, the palette) do it first.
+    setTimeout(() => {
+      if (box.isConnected && !box.contains(document.activeElement)) box.focus({ preventScroll: true });
+    });
+  });
+  onCleanup(() => {
+    if (before?.isConnected && (!document.activeElement || document.activeElement === document.body || box.contains(document.activeElement))) {
+      before.focus({ preventScroll: true });
+    }
+  });
+  // Tab and Shift+Tab cycle inside the dialog.
+  const trapTab = (e: KeyboardEvent) => {
+    if (e.key !== "Tab" || e.defaultPrevented) return;
+    const items = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+    if (!items.length) return e.preventDefault();
+    const first = items[0];
+    const last = items[items.length - 1];
+    const at = document.activeElement;
+    if (e.shiftKey && (at === first || at === box)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && at === last) {
+      e.preventDefault();
+      first.focus();
     }
   };
-  onMount(() => window.addEventListener("keydown", onKey, true));
-  onCleanup(() => window.removeEventListener("keydown", onKey, true));
   return (
     <Portal>
       <div class="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
-        <div class={`modal ${props.class ?? ""}`} style={{ width: props.width ?? "520px" }} role="dialog">
+        <div
+          ref={box}
+          class={`modal ${props.class ?? ""}`}
+          style={{ width: props.width ?? "520px" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={props.title ? id : undefined}
+          aria-label={props.title ? undefined : props.label}
+          tabindex="-1"
+          onKeyDown={trapTab}
+        >
           <Show when={props.title}>
             <header class="modal-head">
               <div>
-                <h2>{props.title}</h2>
+                <h2 id={id}>{props.title}</h2>
                 <Show when={props.subtitle}>
                   <p>{props.subtitle}</p>
                 </Show>
@@ -97,15 +169,11 @@ export function Popover(props: {
     if (within(panel, e.target) || btn.contains(e.target as Node)) return;
     setOpen(false);
   };
-  const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-  onMount(() => {
-    document.addEventListener("mousedown", onDoc);
-    window.addEventListener("keydown", onKey);
+  createEffect(() => {
+    if (open()) onCleanup(pushLayer(() => setOpen(false)));
   });
-  onCleanup(() => {
-    document.removeEventListener("mousedown", onDoc);
-    window.removeEventListener("keydown", onKey);
-  });
+  onMount(() => document.addEventListener("mousedown", onDoc));
+  onCleanup(() => document.removeEventListener("mousedown", onDoc));
 
   return (
     <>
@@ -114,6 +182,8 @@ export function Popover(props: {
         class={`pop-trigger ${props.class ?? ""}`}
         classList={{ open: open() }}
         title={props.title}
+        aria-haspopup="true"
+        aria-expanded={open()}
         disabled={props.disabled}
         onMouseDown={(e) => e.preventDefault()}
         onClick={toggle}
@@ -166,27 +236,57 @@ export interface MenuItem {
 }
 
 const [menu, setMenu] = createSignal<{ x: number; y: number; items: (MenuItem | "-")[] } | null>(null);
+/** Where focus was when the menu opened; it goes back there after Esc or a choice. */
+let menuBefore: HTMLElement | null = null;
 
 /** Open the context menu at a point (e.g. under a "more" button). */
 export function openMenuAt(x: number, y: number, items: (MenuItem | "-")[]) {
+  if (!menu()) menuBefore = document.activeElement as HTMLElement | null;
   setMenu({ x, y, items });
 }
 
 export function openMenu(e: MouseEvent, items: (MenuItem | "-")[]) {
   e.preventDefault();
   e.stopPropagation();
-  setMenu({ x: e.clientX, y: e.clientY, items });
+  openMenuAt(e.clientX, e.clientY, items);
+}
+
+/** Close the menu; `restore` puts focus back (not after a click elsewhere, which moves it itself). */
+function closeMenu(restore: boolean) {
+  if (!menu()) return;
+  setMenu(null);
+  const el = menuBefore;
+  menuBefore = null;
+  if (restore && el?.isConnected) el.focus({ preventScroll: true });
+}
+
+/** Arrow keys between the items of one menu level. */
+function menuNav(e: KeyboardEvent, list: Element, from: Element | null): boolean {
+  const items = [...list.querySelectorAll<HTMLButtonElement>(":scope > .menu-entry > .menu-item")];
+  if (!items.length) return false;
+  const i = from ? items.indexOf(from as HTMLButtonElement) : -1;
+  const go = (n: number) => items[(n + items.length) % items.length].focus();
+  switch (e.key) {
+    case "ArrowDown": go(i + 1); return true;
+    case "ArrowUp": go(i < 0 ? -1 : i - 1); return true;
+    case "Home": go(0); return true;
+    case "End": go(-1); return true;
+  }
+  return false;
 }
 
 export function MenuHost() {
-  const close = () => setMenu(null);
+  const onMouse = () => closeMenu(false);
   onMount(() => {
-    window.addEventListener("mousedown", close);
-    window.addEventListener("blur", close);
+    window.addEventListener("mousedown", onMouse);
+    window.addEventListener("blur", onMouse);
   });
   onCleanup(() => {
-    window.removeEventListener("mousedown", close);
-    window.removeEventListener("blur", close);
+    window.removeEventListener("mousedown", onMouse);
+    window.removeEventListener("blur", onMouse);
+  });
+  createEffect(() => {
+    if (menu()) onCleanup(pushLayer(() => closeMenu(true)));
   });
   return (
     <Show when={menu()}>
@@ -194,18 +294,25 @@ export function MenuHost() {
         <Portal>
           <div
             class="context-menu"
+            role="menu"
+            tabindex="-1"
             ref={(el) => {
-              // Keep inside the window, measured once laid out.
+              // Keep inside the window, measured once laid out; take the keyboard.
               requestAnimationFrame(() => {
                 const r = el.getBoundingClientRect();
                 if (r.right > window.innerWidth - 8) el.style.left = `${Math.max(8, window.innerWidth - r.width - 8)}px`;
                 if (r.bottom > window.innerHeight - 8) el.style.top = `${Math.max(8, window.innerHeight - r.height - 8)}px`;
+                el.focus({ preventScroll: true });
               });
             }}
             style={{ left: `${m().x}px`, top: `${m().y}px` }}
             onMouseDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              // Keys on the menu itself (nothing chosen yet): start at the top or bottom.
+              if (e.target === e.currentTarget && menuNav(e, e.currentTarget, null)) e.preventDefault();
+            }}
           >
-            <MenuList items={m().items} close={close} />
+            <MenuList items={m().items} close={() => closeMenu(true)} />
           </div>
         </Portal>
       )}
@@ -213,14 +320,24 @@ export function MenuHost() {
   );
 }
 
-function MenuList(props: { items: (MenuItem | "-")[]; close: () => void }) {
+function MenuList(props: { items: (MenuItem | "-")[]; close: () => void; onBack?: () => void }) {
   const [open, setOpen] = createSignal<number | null>(null);
   let hoverTimer = 0;
+  onCleanup(() => clearTimeout(hoverTimer));
+  // Into a submenu: towards the side it opens on.
+  const forward = uiRtl ? "ArrowLeft" : "ArrowRight";
+  const back = uiRtl ? "ArrowRight" : "ArrowLeft";
+  const openSub = (i: number, entry: Element, focus: boolean) => {
+    clearTimeout(hoverTimer);
+    setOpen(i);
+    if (focus)
+      requestAnimationFrame(() => entry.querySelector<HTMLButtonElement>(":scope > .context-menu > .menu-entry > .menu-item")?.focus());
+  };
   return (
     <For each={props.items}>
       {(it, i) =>
         it === "-" ? (
-          <div class="menu-sep" />
+          <div class="menu-sep" role="separator" />
         ) : (
           <div
             class="menu-entry"
@@ -231,8 +348,22 @@ function MenuList(props: { items: (MenuItem | "-")[]; close: () => void }) {
           >
             <button
               class="menu-item"
+              role="menuitem"
+              aria-haspopup={it.items ? "menu" : undefined}
+              aria-expanded={it.items ? open() === i() : undefined}
               classList={{ danger: it.danger, "has-sub": !!it.items, open: open() === i() }}
-              onClick={() => (it.items ? setOpen(i()) : (props.close(), it.run()))}
+              // detail 0 = Enter/Space: move into the submenu.
+              onClick={(e) => (it.items ? openSub(i(), e.currentTarget.parentElement!, e.detail === 0) : (props.close(), it.run()))}
+              onKeyDown={(e) => {
+                const btn = e.currentTarget;
+                if (menuNav(e, btn.closest(".context-menu")!, btn)) {
+                  if (open() !== null) setOpen(null);
+                } else if (e.key === forward && it.items) openSub(i(), btn.parentElement!, true);
+                else if (e.key === back && props.onBack) props.onBack();
+                else return;
+                e.preventDefault();
+                e.stopPropagation();
+              }}
             >
               <span class="menu-icon">{it.icon}</span>
               <span class="menu-label">{it.label}</span>
@@ -246,6 +377,7 @@ function MenuList(props: { items: (MenuItem | "-")[]; close: () => void }) {
             <Show when={it.items && open() === i()}>
               <div
                 class="context-menu submenu"
+                role="menu"
                 ref={(el) =>
                   requestAnimationFrame(() => {
                     // Flip to the other side / up when the submenu would leave the window.
@@ -255,7 +387,16 @@ function MenuList(props: { items: (MenuItem | "-")[]; close: () => void }) {
                   })
                 }
               >
-                <MenuList items={it.items!} close={props.close} />
+                <MenuList
+                  items={it.items!}
+                  close={props.close}
+                  onBack={() => {
+                    // Back out of the submenu onto the item that opened it.
+                    const owner = document.activeElement?.closest(".submenu")?.parentElement?.querySelector<HTMLButtonElement>(":scope > .menu-item");
+                    setOpen(null);
+                    owner?.focus();
+                  }}
+                />
               </div>
             </Show>
           </div>
@@ -287,7 +428,7 @@ export function PromptHost() {
   return (
     <Show when={promptReq()}>
       {(req) => (
-        <Modal onClose={() => close(null)} width="420px" class="prompt-modal">
+        <Modal onClose={() => close(null)} width="420px" class="prompt-modal" label={req().title}>
           <form
             class="prompt"
             onSubmit={(e) => {
@@ -313,7 +454,7 @@ export function PromptHost() {
             />
             <div class="row end">
               <button type="button" class="btn" onClick={() => close(null)}>{t("Cancel")}</button>
-              <button type="submit" class="btn primary">OK</button>
+              <button type="submit" class="btn primary">{t("OK")}</button>
             </div>
           </form>
         </Modal>
@@ -326,7 +467,7 @@ export function PromptHost() {
 
 export function Toasts() {
   return (
-    <div class="toasts">
+    <div class="toasts" role="status" aria-live="polite">
       <For each={app.toasts()}>
         {(t) => (
           <div class={`toast ${t.kind}`}>
@@ -334,7 +475,7 @@ export function Toasts() {
             <Show when={t.action}>
               <button class="btn small" onClick={() => (t.action!.run(), dismissToast(t.id))}>{t.action!.label}</button>
             </Show>
-            <button class="icon-btn small" onClick={() => dismissToast(t.id)}>
+            <button class="icon-btn small" title={tr("Dismiss")} aria-label={tr("Dismiss")} onClick={() => dismissToast(t.id)}>
               <X size={14} />
             </button>
           </div>
@@ -433,12 +574,27 @@ export function ComboBox(props: {
 }) {
   const [open, setOpen] = createSignal(false);
   const [q, setQ] = createSignal("");
+  // The option Enter takes: moved with the arrow keys, the first match while typing.
+  const [hi, setHi] = createSignal(-1);
   let wrap!: HTMLDivElement;
   const filtered = () => {
     const s = q().toLowerCase();
     return (s ? props.options.filter((o) => o.toLowerCase().includes(s)) : props.options).slice(0, 200);
   };
   let list: HTMLDivElement | undefined;
+  createEffect(() => {
+    if (open()) onCleanup(pushLayer(() => setOpen(false)));
+  });
+  createEffect(() => {
+    const i = hi();
+    if (open() && i >= 0) (list?.children[i] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+  });
+  /** Enter: an exact match, else the highlighted option, else the typed text. */
+  const choice = () => {
+    const text = q().trim();
+    const exact = props.options.find((o) => o.toLowerCase() === text.toLowerCase());
+    return exact ?? filtered()[hi()] ?? text;
+  };
   const [pos, setPos] = createSignal({ x: 0, y: 0, w: 0 });
   const onDoc = (e: MouseEvent) => !within(wrap, e.target) && !within(list, e.target) && setOpen(false);
   onMount(() => document.addEventListener("mousedown", onDoc));
@@ -447,6 +603,7 @@ export function ComboBox(props: {
     const r = wrap.getBoundingClientRect();
     setPos({ x: r.left, y: r.bottom + 4, w: r.width });
     setQ("");
+    setHi(props.options.slice(0, 200).indexOf(props.value));
     setOpen(true);
   };
   return (
@@ -455,17 +612,31 @@ export function ComboBox(props: {
         class="input"
         value={open() ? q() : props.value}
         placeholder={props.value || props.placeholder}
+        role="combobox"
+        aria-expanded={open()}
+        aria-autocomplete="list"
         onFocus={show}
         onBlur={() => setOpen(false)}
-        onInput={(e) => setQ(e.currentTarget.value)}
+        onInput={(e) => {
+          // Typing after Esc reopens the list (read the text before show() resets it).
+          const text = e.currentTarget.value;
+          if (!open()) show();
+          setQ(text);
+          setHi(text.trim() ? 0 : -1);
+        }}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            const v = filtered()[0] ?? q();
+          const n = filtered().length;
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            if (!open()) return show();
+            if (n) setHi((h) => (e.key === "ArrowDown" ? (h + 1) % n : h <= 0 ? n - 1 : h - 1));
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            const v = open() ? choice() : "";
             if (v) props.onChange(v);
             setOpen(false);
             e.currentTarget.blur();
           }
-          if (e.key === "Escape") setOpen(false);
         }}
       />
       <Show when={open()}>
@@ -473,6 +644,7 @@ export function ComboBox(props: {
         <Portal>
           <div
             class="combo-list"
+            role="listbox"
             ref={(el) => {
               list = el;
               markPortal(el, wrap);
@@ -486,11 +658,15 @@ export function ComboBox(props: {
             onMouseDown={(e) => e.preventDefault()}
           >
             <For each={filtered()} fallback={<div class="combo-empty">{t("No matches")}</div>}>
-              {(o) => (
+              {(o, i) => (
                 <button
                   type="button"
                   class="combo-item"
-                  classList={{ active: o === props.value }}
+                  role="option"
+                  aria-selected={o === props.value}
+                  tabindex="-1"
+                  classList={{ active: o === props.value, hi: hi() === i() }}
+                  onMouseMove={() => setHi(i())}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     props.onChange(o);

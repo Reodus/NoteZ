@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { FileText, FileCode2, TerminalSquare, CornerDownLeft } from "lucide-solid";
 import { app } from "../core/app";
@@ -6,6 +6,7 @@ import { notesList, openNote, setDialog, createNote, PickItem, newNoteDir, prefs
 import { stem, dirname } from "../core/ipc";
 
 import { t } from "../core/i18n";
+import { fmtKey } from "../core/keys";
 /** Subsequence fuzzy score (higher is better), -1 if no match. */
 export function fuzzy(query: string, text: string): number {
   const q = query.toLowerCase();
@@ -85,7 +86,17 @@ export default function CommandPalette(props: { mode: "files" | "commands" | "pi
     it.run();
   };
 
-  const fmtKey = (k?: string) => k?.replace("Mod", "Ctrl").replace(/-/g, "+").replace(/\+(\w)$/, (_, c) => "+" + c.toUpperCase());
+  // Keep the selected row in view while moving with the arrow keys.
+  let list!: HTMLDivElement;
+  createEffect(() => {
+    const i = sel();
+    items();
+    (list?.children[i] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+  });
+  const move = (d: number) => {
+    const n = items().length;
+    if (n) setSel((s) => (s + d + n) % n);
+  };
 
   return (
     <Portal>
@@ -94,39 +105,45 @@ export default function CommandPalette(props: { mode: "files" | "commands" | "pi
           <input
             class="palette-input"
             dir="auto"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="nz-palette-list"
+            aria-activedescendant={items().length ? `nz-palette-${sel()}` : undefined}
             value={q()}
             placeholder={props.pick?.placeholder ?? t("Search notes… (type > for commands)")}
             ref={(el) => setTimeout(() => el.focus())}
             onInput={(e) => (setQ(e.currentTarget.value), setSel(0))}
             onKeyDown={(e) => {
-              if (e.key === "ArrowDown") (e.preventDefault(), setSel((s) => Math.min(s + 1, items().length - 1)));
-              else if (e.key === "ArrowUp") (e.preventDefault(), setSel((s) => Math.max(s - 1, 0)));
+              if (e.key === "ArrowDown") (e.preventDefault(), move(1));
+              else if (e.key === "ArrowUp") (e.preventDefault(), move(-1));
               else if (e.key === "Enter") (e.preventDefault(), choose(sel()));
               else if (e.key === "Escape") props.onClose();
             }}
           />
-          <div class="palette-list">
+          <div class="palette-list" id="nz-palette-list" role="listbox" ref={list}>
             <For each={items()} fallback={<div class="pane-empty">{t("No matches")}</div>}>
               {(it, i) => (
                 <div
                   class="palette-item"
+                  id={`nz-palette-${i()}`}
+                  role="option"
+                  aria-selected={sel() === i()}
                   classList={{ active: sel() === i() }}
                   onMouseMove={() => setSel(i())}
                   onClick={() => choose(i())}
-                  ref={(el) => sel() === i() && el.scrollIntoView({ block: "nearest" })}
                 >
                   {it.icon === "cmd" ? <TerminalSquare size={16} /> : it.icon === "typ" ? <FileCode2 size={16} /> : <FileText size={16} />}
                   <span class="palette-label" dir="auto">{it.label}</span>
                   <Show when={it.detail}><span class="palette-detail">{it.detail}</span></Show>
-                  <Show when={it.key}><kbd>{fmtKey(it.key)}</kbd></Show>
+                  <Show when={it.key}><kbd>{fmtKey(it.key, "+")}</kbd></Show>
                 </div>
               )}
             </For>
           </div>
           <div class="palette-foot">
-            <span><kbd>↑↓</kbd> navigate</span>
-            <span><kbd><CornerDownLeft size={11} /></kbd> open</span>
-            <span><kbd>&gt;</kbd> commands</span>
+            <span><kbd>↑↓</kbd> {t("navigate")}</span>
+            <span><kbd><CornerDownLeft size={11} /></kbd> {q().startsWith(">") ? t("run") : t("open")}</span>
+            <Show when={!props.pick}><span><kbd>&gt;</kbd> {t("commands")}</span></Show>
           </div>
         </div>
       </div>

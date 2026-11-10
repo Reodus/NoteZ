@@ -14,7 +14,10 @@ import { fontList, FONT_SIZES } from "../core/fonts";
 import {
   toggleInline, inlineActive, InlineKind, setBlockStyle, setTitle, blockStyleAt, BlockStyle, blockAttr, setBlockAttr, applySpan, toggleList,
   insertLink, insertImage, insertTable, insertMath, insertPageBreak, insertFootnote, insertToc, isTypst, insertCallout,
+  spanAttrsAt, listKindAt,
 } from "../editor/format";
+import { Direction } from "@codemirror/view";
+import { platformKeys } from "../core/keys";
 import { CALLOUTS } from "../editor/livepreview";
 import { ColorGrid, ComboBox, Popover, SvgIcon } from "./primitives";
 import { NoteMenuButton } from "./NoteMenu";
@@ -108,8 +111,13 @@ export default function Toolbar() {
   };
   const alignNow = () => {
     const c = cellAlign();
-    return c !== null ? c || null : ctx().align;
+    const a = c !== null ? c || null : ctx().align;
+    return a === "start" ? null : a;
   };
+  // The side a paragraph starts on (left for LTR text, right for RTL).
+  const startSide = () => (ctx().rtl ? "right" : "left");
+  const sideActive = (side: "left" | "right") => alignNow() === side || (!alignNow() && startSide() === side);
+  const alignSide = (side: "left" | "right") => () => align(side === startSide() || alignNow() === side ? null : side)();
 
   // Recompute on cursor moves / edits.
   const ctx = createMemo(() => {
@@ -118,16 +126,29 @@ export default function Toolbar() {
     const content = state.active ? state.buffers[state.active]?.content : "";
     void content;
     const none = new Set<InlineKind>();
-    if (!v) return { style: "p" as BlockStyle, align: null as string | null, dir: null as string | null, marks: none };
+    if (!v)
+      return {
+        style: "p" as BlockStyle, align: null as string | null, dir: null as string | null, rtl: false, marks: none,
+        list: null as ReturnType<typeof listKindAt>, span: {} as ReturnType<typeof spanAttrsAt>,
+      };
     const pos = v.state.selection.main.head;
     const marks = new Set((["bold", "italic", "underline", "strike", "code"] as InlineKind[]).filter((k) => inlineActive(v.state, k)));
-    return { style: blockStyleAt(v.state, pos), align: blockAttr(v.state, pos, "align"), dir: blockAttr(v.state, pos, "dir"), marks };
+    return {
+      style: blockStyleAt(v.state, pos),
+      align: blockAttr(v.state, pos, "align"),
+      dir: blockAttr(v.state, pos, "dir"),
+      // The paragraph's actual direction (set, or detected from its text).
+      rtl: v.textDirectionAt(pos) === Direction.RTL,
+      marks,
+      list: listKindAt(v.state, pos),
+      span: spanAttrsAt(v.state, pos),
+    };
   });
 
   const theme = activeTheme;
+  /** The theme style of the paragraph at the cursor (body, h1…, quote). */
+  const styleHere = () => theme()?.styles[ctx().style === "p" ? "body" : ctx().style];
   const bodyPt = () => Number(/^([\d.]+)pt$/.exec(theme()?.styles.body?.size ?? "")?.[1] ?? 11);
-  const [fontVal, setFontVal] = createSignal("");
-  const [sizeVal, setSizeVal] = createSignal("");
   const [lastColor, setLastColor] = createSignal("#c0392b");
   const [lastHighlight, setLastHighlight] = createSignal("#fff3a3");
 
@@ -178,7 +199,7 @@ export default function Toolbar() {
                   <span class="style-sample" style={previewCss(theme()?.styles.title ?? { size: "20pt", weight: "bold" }, bodyPt())} dir="auto">
                     {t("Title")}
                   </span>
-                  <span class="style-key">Ctrl+Shift+T</span>
+                  <span class="style-key">{platformKeys("Ctrl+Shift+T")}</span>
                 </button>
                 <For each={Object.keys(STYLE_NAMES) as BlockStyle[]}>
                   {(s) => (
@@ -193,7 +214,7 @@ export default function Toolbar() {
                       <span class="style-sample" style={previewCss(theme()?.styles[s === "p" ? "body" : s], bodyPt())} dir="auto">
                         {STYLE_NAMES[s]}
                       </span>
-                      <span class="style-key">{s === "p" ? "Ctrl+0" : s === "quote" ? "" : `Ctrl+${s[1]}`}</span>
+                      <span class="style-key">{platformKeys(s === "p" ? "Ctrl+0" : s === "quote" ? "" : `Ctrl+${s[1]}`)}</span>
                     </button>
                   )}
                 </For>
@@ -212,25 +233,22 @@ export default function Toolbar() {
       id: "font",
       render: () => (
         <>
+          {/* The font and size of the text at the cursor; the theme's body font/size (greyed) when it has none of its own. */}
           <ComboBox
             class="font-combo"
-            value={fontVal()}
-            placeholder={t("Font")}
+            value={ctx().span.font ?? ""}
+            placeholder={styleHere()?.font || theme()?.styles.body?.font || t("Font")}
             options={fontList()}
             renderOption={(f) => <span style={{ "font-family": `"${f}", var(--font-ui)` }}>{f}</span>}
-            onChange={(f) => {
-              setFontVal(f);
-              run((v) => applySpan(v, { font: f }))();
-            }}
+            onChange={(f) => run((v) => applySpan(v, { font: f }))()}
           />
           <ComboBox
             class="size-combo"
-            value={sizeVal()}
-            placeholder={t("Size")}
+            value={ctx().span.size?.replace(/pt$/, "") ?? ""}
+            placeholder={styleHere()?.size?.replace(/pt$/, "") || String(bodyPt())}
             options={FONT_SIZES}
             onChange={(s) => {
               const size = /^\d+(\.\d+)?$/.test(s) ? `${s}pt` : s;
-              setSizeVal(size);
               run((v) => applySpan(v, { size }))();
             }}
           />
@@ -289,13 +307,12 @@ export default function Toolbar() {
       id: "align",
       render: () => (
         <>
-          <Btn title={t("Align start (default)")} active={!alignNow() || alignNow() === "start"} onClick={align(null)}>
-            {ctx().dir === "ltr" ? <AlignLeft size={16} /> : <AlignRight size={16} />}
-          </Btn>
-          <Btn title={t("Align left")} active={alignNow() === "left"} onClick={align("left")}><AlignLeft size={16} /></Btn>
-          <Btn title={t("Center")} active={alignNow() === "center"} onClick={align("center")}><AlignCenter size={16} /></Btn>
-          <Btn title={t("Align right")} active={alignNow() === "right"} onClick={align("right")}><AlignRight size={16} /></Btn>
-          <Btn title={cellAlign() !== null ? t("Justify (not available in tables)") : t("Justify")} disabled={cellAlign() !== null} active={alignNow() === "justify"} onClick={align("justify")}><AlignJustify size={16} /></Btn>
+          {/* No alignment = the paragraph's start side, so that button shows as on;
+              clicking the start side (or the active button) goes back to no alignment. */}
+          <Btn title={t("Align left")} active={sideActive("left")} onClick={alignSide("left")}><AlignLeft size={16} /></Btn>
+          <Btn title={t("Center")} active={alignNow() === "center"} onClick={align(alignNow() === "center" ? null : "center")}><AlignCenter size={16} /></Btn>
+          <Btn title={t("Align right")} active={sideActive("right")} onClick={alignSide("right")}><AlignRight size={16} /></Btn>
+          <Btn title={cellAlign() !== null ? t("Justify (not available in tables)") : t("Justify")} disabled={cellAlign() !== null} active={alignNow() === "justify"} onClick={align(alignNow() === "justify" ? null : "justify")}><AlignJustify size={16} /></Btn>
           <Show when={!isTypst()}>
             <Btn title={t("Right-to-left paragraph")} active={ctx().dir === "rtl"} onClick={run((v) => setBlockAttr(v, "dir", ctx().dir === "rtl" ? null : "rtl"))}><PilcrowLeft size={16} /></Btn>
             <Btn title={t("Left-to-right paragraph")} active={ctx().dir === "ltr"} onClick={run((v) => setBlockAttr(v, "dir", ctx().dir === "ltr" ? null : "ltr"))}><PilcrowRight size={16} /></Btn>
@@ -307,9 +324,9 @@ export default function Toolbar() {
       id: "lists",
       render: () => (
         <>
-          <Btn title={t("Bulleted list")} onClick={run((v) => toggleList(v, "bullet"))}><List size={16} /></Btn>
-          <Btn title={t("Numbered list")} onClick={run((v) => toggleList(v, "number"))}><ListOrdered size={16} /></Btn>
-          <Btn title={t("Checklist")} onClick={run((v) => toggleList(v, "task"))}><ListChecks size={16} /></Btn>
+          <Btn title={t("Bulleted list")} active={ctx().list === "bullet"} onClick={run((v) => toggleList(v, "bullet"))}><List size={16} /></Btn>
+          <Btn title={t("Numbered list")} active={ctx().list === "number"} onClick={run((v) => toggleList(v, "number"))}><ListOrdered size={16} /></Btn>
+          <Btn title={t("Checklist")} active={ctx().list === "task"} onClick={run((v) => toggleList(v, "task"))}><ListChecks size={16} /></Btn>
           <Popover class="tb-btn" title={t("Callout")} trigger={() => (<><MessageSquareQuote size={16} /><ChevronDown size={11} class="muted" /></>)}>
             {(close) => {
               const [fold, setFold] = createSignal<"" | "+" | "-">("");

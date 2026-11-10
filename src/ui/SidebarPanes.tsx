@@ -6,7 +6,7 @@ import {
 } from "lucide-solid";
 import { dirname, ipc, SearchHit, stem, FileChanges } from "../core/ipc";
 import { notify } from "../core/app";
-import { prefs, openNote, sidebarTab, setSidebarTab, saveAll, state, setDialog, reloadFromDisk } from "../core/store";
+import { prefs, openNote, sidebarTab, setSidebarTab, sidebarPaneRequest, saveAll, state, setDialog, reloadFromDisk } from "../core/store";
 import { tagTree, TagNode } from "../core/meta";
 import {
   bookmarks, Bookmark, bookmarkLabel, removeBookmark, addGroup, renameBookmark, moveBookmark, toggleBookmark,
@@ -98,7 +98,7 @@ export function SearchPane() {
     }, 180);
   }));
 
-  createEffect(() => sidebarTab() === "search" && setTimeout(() => input?.focus()));
+  createEffect(() => (sidebarPaneRequest(), sidebarTab() === "search" && setTimeout(() => input?.focus())));
 
   const grouped = () => {
     const m = new Map<string, SearchHit[]>();

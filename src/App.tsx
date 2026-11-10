@@ -29,7 +29,8 @@ import Settings from "./ui/Settings";
 import HelpView from "./ui/HelpView";
 import DiagramGallery from "./ui/DiagramGallery";
 import { StyleDialog, PageSetupDialog, ThemesDialog } from "./ui/StyleDialogs";
-import { MenuHost, Modal, PromptHost, Toasts } from "./ui/primitives";
+import { MenuHost, Modal, PromptHost, Toasts, modalOpen } from "./ui/primitives";
+import { modName } from "./core/keys";
 import { Logo } from "./ui/Logo";
 import Editor from "./editor/Editor";
 import FileView from "./ui/FileView";
@@ -75,9 +76,9 @@ function EmptyState() {
       <Logo size={64} />
       <h2>{t("No note open")}</h2>
       <div class="empty-keys">
-        <span><kbd>Ctrl</kbd> + <kbd>N</kbd> {t("New note")}</span>
-        <span><kbd>Ctrl</kbd> + <kbd>P</kbd> {t("Quick open")}</span>
-        <span><kbd>Ctrl</kbd> + <kbd>{t("Shift")}</kbd> + <kbd>P</kbd> {t("Commands")}</span>
+        <span><kbd>{modName}</kbd> + <kbd>N</kbd> {t("New note")}</span>
+        <span><kbd>{modName}</kbd> + <kbd>P</kbd> {t("Quick open")}</span>
+        <span><kbd>{modName}</kbd> + <kbd>{t("Shift")}</kbd> + <kbd>P</kbd> {t("Commands")}</span>
       </div>
       <button class="btn primary" onClick={() => app.commands.run("note.new")}>{t("Create a note")}</button>
     </div>
@@ -108,7 +109,7 @@ export default function App() {
   createEffect(() => void setSpellcheck(prefs.spellcheck, [...prefs.spellcheckLanguages]).catch(() => {}));
 
   const onKey = (e: KeyboardEvent) => {
-    if (e.defaultPrevented || dialog()) return;
+    if (e.defaultPrevented || dialog() || modalOpen()) return;
     if (e.key === "Escape" && focusMode()) {
       e.preventDefault();
       setFocusMode(false);
@@ -154,7 +155,8 @@ export default function App() {
             <button
               class="icon-btn sidebar-toggle"
               classList={{ active: sidebarOpen() }}
-              title={sidebarOpen() ? "Hide sidebar (Ctrl+\\)" : "Show sidebar (Ctrl+\\)"}
+              title={sidebarOpen() ? t("Hide sidebar (Ctrl+\\)") : t("Show sidebar (Ctrl+\\)")}
+              aria-expanded={sidebarOpen()}
               onClick={() => setSidebarOpen(!sidebarOpen())}
             >
               <PanelLeft size={17} />

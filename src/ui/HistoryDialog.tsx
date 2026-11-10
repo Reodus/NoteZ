@@ -208,7 +208,7 @@ function Snapshots() {
   );
   const [busy, setBusy] = createSignal(false);
   const take = async () => {
-    const label = await askText(t("Name this snapshot"), "", "e.g. Before reorganizing");
+    const label = await askText(t("Name this snapshot"), "", t("e.g. Before reorganizing"));
     if (label === null) return;
     setBusy(true);
     try {

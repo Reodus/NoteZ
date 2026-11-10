@@ -10,6 +10,7 @@
 // Adding a language: copy src/locales/fa.ts to src/locales/<code>.ts,
 // translate the values, and add it to LOCALES and UI_LANGUAGES below.
 import fa from "../locales/fa";
+import { platformKeys } from "./keys";
 
 export type UiLang = "en" | "fa";
 
@@ -59,7 +60,8 @@ export function num(n: number | string): string {
  * placeholders are filled from `vars`; numbers use the language's digits.
  */
 export function t(s: string, vars?: Record<string, unknown>): string {
-  const out = dict[s] ?? s;
+  // Shortcut hints are written with Ctrl; a Mac shows Cmd.
+  const out = platformKeys(dict[s] ?? s);
   if (!vars) return out;
   return out.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? (typeof vars[k] === "number" ? num(vars[k] as number) : String(vars[k] ?? "")) : m));
 }

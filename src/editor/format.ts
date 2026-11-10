@@ -227,6 +227,36 @@ export function applySpan(view: EditorView, changes: Record<string, string | nul
   view.focus();
 }
 
+/**
+ * Font and size of the styled span(s) around `pos` (`[text]{font=… size=…}`
+ * or Typst `#text(font: …, size: …)[…]`); empty when the text uses the
+ * theme's defaults. Inner spans win over outer ones.
+ */
+export function spanAttrsAt(state: EditorState, pos: number): { font?: string; size?: string } {
+  const line = state.doc.lineAt(pos);
+  const at = pos - line.from;
+  const out: { font?: string; size?: string } = {};
+  if (isTypst()) {
+    const re = /#text\(([^)]*)\)\[([^\]]*)\]/g;
+    for (let m; (m = re.exec(line.text)); ) {
+      if (at < m.index || at > m.index + m[0].length) continue;
+      const font = /font:\s*"([^"]*)"/.exec(m[1]);
+      const size = /size:\s*([\d.]+\w*)/.exec(m[1]);
+      if (font) out.font = font[1];
+      if (size) out.size = size[1];
+    }
+    return out;
+  }
+  const re = /\[([^\]]*)\]\{([^}]*)\}/g;
+  for (let m; (m = re.exec(line.text)); ) {
+    if (at < m.index || at > m.index + m[0].length) continue;
+    const a = parseAttrs(m[2]);
+    if (a.font) out.font = a.font;
+    if (a.size) out.size = a.size;
+  }
+  return out;
+}
+
 function applyTypstSpan(view: EditorView, changes: Record<string, string | null>) {
   const { state } = view;
   const r = state.selection.main;
@@ -324,6 +354,15 @@ export function setTitle(view: EditorView) {
 }
 
 // --------------------------------------------------- lists & paragraphs
+
+/** The kind of list item the line at `pos` is, if any. */
+export function listKindAt(state: EditorState, pos: number): "bullet" | "number" | "task" | null {
+  const text = state.doc.lineAt(pos).text;
+  if (/^\s*[-*+]\s(\[[ xX]\]|☐|☒)\s/.test(text)) return "task";
+  if (/^\s*\d+[.)]\s/.test(text) || (isTypst() && /^\s*\+\s/.test(text))) return "number";
+  if (/^\s*[-*+]\s/.test(text)) return "bullet";
+  return null;
+}
 
 export function toggleList(view: EditorView, kind: "bullet" | "number" | "task") {
   const typ = isTypst();

@@ -109,7 +109,7 @@ function Session(props: { deck: string | null; onDone: () => void }) {
   };
 
   const onKey = (e: KeyboardEvent) => {
-    if ((e.target as HTMLElement)?.closest?.("input, textarea")) return;
+    if (e.defaultPrevented || (e.target as HTMLElement)?.closest?.("input, textarea, .context-menu")) return;
     if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
       if (!shown()) setShown(true);

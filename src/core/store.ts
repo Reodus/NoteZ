@@ -648,7 +648,33 @@ export interface PickItem {
 export const [dialog, setDialog] = createSignal<Dialog>(null);
 /** Let the user choose one of `items` (a palette-style list). */
 export const pick = (placeholder: string, items: PickItem[]) => setDialog({ kind: "pick", placeholder, items });
-export const [sidebarTab, setSidebarTab] = createSignal<string>("files");
+const SIDEBAR_TAB_KEY = "notez.sidebarTab";
+const [sidebarTabRaw, setSidebarTabRaw] = createSignal<string>(
+  (() => {
+    try {
+      return localStorage.getItem(SIDEBAR_TAB_KEY) || "files";
+    } catch {
+      return "files";
+    }
+  })(),
+);
+const [paneRequest, setPaneRequest] = createSignal(0);
+/** The sidebar pane shown (files, search, tags, bookmarks); remembered between sessions. */
+export const sidebarTab = sidebarTabRaw;
+/** Bumped each time a pane is asked for, so it can focus its input again. */
+export const sidebarPaneRequest = paneRequest;
+/** Show a sidebar pane — opening the sidebar (and leaving focus mode) if it is hidden. */
+export function setSidebarTab(id: string) {
+  setSidebarTabRaw(id);
+  try {
+    localStorage.setItem(SIDEBAR_TAB_KEY, id);
+  } catch {
+    /* storage unavailable */
+  }
+  if (focusMode()) setFocusMode(false);
+  if (!prefs.sidebarOpen) setPrefs("sidebarOpen", true);
+  setPaneRequest((n) => n + 1);
+}
 export const [rightTab, setRightTab] = createSignal<string>("preview");
 export const sidebarOpen = () => prefs.sidebarOpen;
 export const setSidebarOpen = (v: boolean) => setPrefs("sidebarOpen", v);

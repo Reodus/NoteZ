@@ -1,5 +1,5 @@
 import { noteIcon } from "../core/meta";
-import { For, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { X, FileText, FileCode2, FileImage, FileType2, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2, Table2 } from "lucide-solid";
 import { state, setState, isDirty, closeTab, prefs, setPrefs, setFocusMode } from "../core/store";
 import { stem, basename, fileKind, isNotePath } from "../core/ipc";
@@ -10,19 +10,37 @@ import { NoteMenuButton } from "./NoteMenu";
 import { t } from "../core/i18n";
 export default function TabBar() {
   let dragFrom = -1;
+  // The tab a dragged tab is over: the dropped tab lands on its far side.
+  const [dropAt, setDropAt] = createSignal(-1);
   return (
     <div class="tabbar">
-      <div class="tabs">
+      <div class="tabs" role="tablist">
         <For each={state.tabs}>
           {(path, i) => (
             <div
               class="tab"
-              classList={{ active: state.active === path, dirty: isDirty(path) }}
+              classList={{
+                active: state.active === path,
+                dirty: isDirty(path),
+                "drop-before": dropAt() === i() && dragFrom > i(),
+                "drop-after": dropAt() === i() && dragFrom >= 0 && dragFrom < i(),
+              }}
+              role="tab"
+              aria-selected={state.active === path}
               title={path}
               draggable={true}
-              onDragStart={() => (dragFrom = i())}
-              onDragOver={(e) => e.preventDefault()}
+              onDragStart={(e) => {
+                dragFrom = i();
+                e.dataTransfer?.setData("text/notez-tab", path);
+              }}
+              onDragEnd={() => ((dragFrom = -1), setDropAt(-1))}
+              onDragOver={(e) => {
+                if (dragFrom < 0) return;
+                e.preventDefault();
+                setDropAt(i());
+              }}
               onDrop={() => {
+                setDropAt(-1);
                 if (dragFrom < 0 || dragFrom === i()) return;
                 const tabs = [...state.tabs];
                 const [moved] = tabs.splice(dragFrom, 1);
@@ -57,14 +75,18 @@ export default function TabBar() {
               <span class="tab-title" dir="auto">{fileKind(path) === "note" ? stem(path) : basename(path)}</span>
               <button
                 class="tab-close"
+                title={isDirty(path) ? t("Unsaved changes — close (saves first)") : t("Close")}
+                aria-label={t("Close")}
                 onClick={(e) => {
                   e.stopPropagation();
                   closeTab(path);
                 }}
               >
-                <Show when={isDirty(path)} fallback={<X size={13} />}>
+                {/* Dirty tabs show a dot; hovering the button turns it back into ×. */}
+                <Show when={isDirty(path)}>
                   <span class="dot" />
                 </Show>
+                <X size={13} class="tab-x" />
               </button>
             </div>
           )}
