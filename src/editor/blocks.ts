@@ -9,6 +9,7 @@ import { app } from "../core/app";
 import { prefs, saveAll, state } from "../core/store";
 import { ensureBlockId, linkName, newBlockId, previewHtml } from "../core/blocks";
 import { hydrateImages } from "./livepreview";
+import { footnotePeek } from "./footnotes";
 
 import { t } from "../core/i18n";
 // ---------------------------------------------------------------- flash
@@ -281,5 +282,5 @@ export const liveEmbeds: Extension = embedField;
 
 /** Block features for every Markdown note. */
 export function blockExtensions(): Extension {
-  return [flashField, blockIdPlugin, linkHover];
+  return [flashField, blockIdPlugin, linkHover, footnotePeek];
 }

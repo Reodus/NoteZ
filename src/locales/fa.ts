@@ -370,6 +370,7 @@ const fa: Record<string, string> = {
   "Fonts: Noto (every major script), Vazirmatn, New Computer Modern, Libertinus": "قلم‌ها: Noto (همهٔ خط‌های اصلی)، وزیرمتن، New Computer Modern، Libertinus",
   "Footer": "پاصفحه",
   "Footnote": "پانویس",
+  "Footnote {label} has no definition": "پانویس {label} تعریفی ندارد",
   "For page numbers and numbered headings.": "برای شمارهٔ صفحه و عنوان‌های شماره‌دار.",
   "Format": "قالب",
   "Format table": "مرتب کردن جدول",

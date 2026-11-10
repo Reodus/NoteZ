@@ -4439,6 +4439,23 @@ button.link:hover {
   100% { background: transparent; }
 }
 
+.editor .cm-tooltip:has(> .cm-nz-fn-peek) { border: none; background: transparent; box-shadow: none; }
+.cm-nz-fn-peek {
+  max-width: min(420px, 80vw);
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px 12px;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg, 0 8px 28px rgba(0, 0, 0, 0.18));
+  font-size: 13px;
+  line-height: 1.5;
+  unicode-bidi: plaintext;
+}
+.cm-nz-fn-peek .cm-nz-preview-head { margin-bottom: 4px; }
+.cm-nz-fn-peek.missing .cm-nz-preview-body { color: var(--fg-faint); font-style: italic; }
 .editor .cm-tooltip.cm-tooltip-hover:has(.cm-nz-link-preview) { border: none; background: transparent; box-shadow: none; }
 .cm-nz-link-preview {
   width: min(460px, 80vw);
