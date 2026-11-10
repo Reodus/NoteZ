@@ -390,9 +390,14 @@ export function toggleList(view: EditorView, kind: "bullet" | "number" | "task")
   view.focus();
 }
 
-/** Line numbers [first, last] of the paragraph at `pos` (stops at blank lines, fences, ::: lines). */
+/** A line holding only images/embeds (`![[a.png]]`, `![](b.png)`, `#image("c.png")`). */
+const MEDIA_LINE = /^\s*(?:(?:!\[\[[^\]\n]+\]\]|!\[[^\]\n]*\]\([^)\n]*\)|#image\([^\n]*\))\s*)+$/;
+
+/** Line numbers [first, last] of the paragraph at `pos` (stops at blank lines, fences, ::: lines).
+ * An image on its own line is a block of its own, even with text right above
+ * or below it, so centering an image doesn't center the text next to it. */
 function paragraphAt(state: EditorState, pos: number): [number, number] {
-  const isStop = (t: string) => !t.trim() || /^\s*(:::|```|~~~)/.test(t);
+  const isStop = (t: string) => !t.trim() || /^\s*(:::|```|~~~)/.test(t) || MEDIA_LINE.test(t);
   const cur = state.doc.lineAt(pos).number;
   let a = cur;
   let b = cur;
@@ -409,7 +414,11 @@ function wrapParagraph(view: EditorView, open: string, close: string) {
   const [, b] = paragraphAt(s, sel.to);
   const from = s.doc.line(a).from;
   const to = s.doc.line(b).to;
-  view.dispatch({ changes: [{ from, insert: open + "\n" }, { from: to, insert: "\n" + close }] });
+  // Keep the wrapper apart from text right above/below (an image under a
+  // paragraph), or Markdown reads the fence as part of that paragraph.
+  const gapBefore = a > 1 && s.doc.line(a - 1).text.trim() ? "\n" : "";
+  const gapAfter = b < s.doc.lines && s.doc.line(b + 1).text.trim() ? "\n" : "";
+  view.dispatch({ changes: [{ from, insert: gapBefore + open + "\n" }, { from: to, insert: "\n" + close + gapAfter }] });
 }
 
 // ----------------------------------------------- divs: align / direction
