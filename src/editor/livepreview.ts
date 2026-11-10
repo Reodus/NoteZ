@@ -7,7 +7,8 @@ import { BlockInfo, BlockType, Decoration, DecorationSet, EditorView, ViewPlugin
 import { syntaxTree } from "@codemirror/language";
 import { fileSrc } from "../core/native";
 import { coverField } from "./cover";
-import { parseAttrs } from "./format";
+import { blockAttr, parseAttrs, setBlockAttr } from "./format";
+import { pushLayer } from "../ui/primitives";
 import { canRender, previewsEnabled } from "./widgets";
 import { explicitDirAt } from "./bidi";
 import { TableWidget, rawTableField } from "./tables";
@@ -206,27 +207,164 @@ class MathBlockWidget extends WidgetType {
   }
 }
 
+/** `![caption|300](a.png)` → caption and width, as the PDF export reads them
+ * (a file name or empty alt is not a caption). */
+export function imageAlt(alt: string, url: string): { caption: string; width: string | null } {
+  const bar = alt.lastIndexOf("|");
+  const w = bar >= 0 ? alt.slice(bar + 1).trim() : "";
+  const width = bar >= 0 && /^\d+(\.\d+)?$/.test(w) ? w : null;
+  const text = (width ? alt.slice(0, bar) : alt).trim();
+  const isFile = !text || text === url || (text.includes(".") && !text.includes(" "));
+  return { caption: isFile ? "" : text, width };
+}
+
+const IMAGE_SRC = /^(?:!\[\[[^\]\n]+\]\]|!\[[^\]\n]*\]\([^)\n]*\))/;
+
+/** The source range of the image whose widget starts at `from`. */
+function imageRange(view: EditorView, from: number): { from: number; to: number } | null {
+  const m = IMAGE_SRC.exec(view.state.sliceDoc(from, Math.min(view.state.doc.length, from + 2000)));
+  return m ? { from, to: from + m[0].length } : null;
+}
+
+const ICONS: Record<string, string> = {
+  zoom: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
+  edit: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  left: '<path d="M21 5H3M15 12H3M17 19H3"/>',
+  center: '<path d="M21 5H3M17 12H7M19 19H5"/>',
+  right: '<path d="M21 5H3M21 12H9M21 19H7"/>',
+};
+
+function iconButton(icon: string, title: string, run: () => void): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = `cm-nz-img-btn ${icon}`;
+  b.title = title;
+  b.setAttribute("aria-label", title);
+  b.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[icon]}</svg>`;
+  b.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  b.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    run();
+  });
+  return b;
+}
+
+/** The image full size over the window; a click or Esc closes it. */
+function openLightbox(url: string, caption: string, view: EditorView) {
+  const box = document.createElement("div");
+  box.className = "nz-lightbox";
+  box.tabIndex = -1;
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-label", caption || t("Image"));
+  const img = document.createElement("img");
+  img.src = url;
+  img.alt = caption;
+  box.append(img);
+  if (caption) box.append(Object.assign(document.createElement("div"), { className: "nz-lightbox-caption", textContent: caption }));
+  let pop = () => {};
+  const close = () => {
+    pop();
+    box.remove();
+    view.focus();
+  };
+  pop = pushLayer(close, true);
+  box.addEventListener("click", close);
+  document.body.append(box);
+  box.focus();
+}
+
+/** An image in live preview: click to zoom; the bar on top edits the source
+ * or aligns the image. `mode` is "selected" when the selection is exactly the
+ * image, "preview" when shown under its revealed source. */
 class ImageWidget extends WidgetType {
-  constructor(readonly src: string, readonly alt: string, readonly width: string | null) {
+  constructor(
+    readonly src: string,
+    readonly caption: string,
+    readonly width: string | null,
+    readonly mode: "" | "selected" | "preview" = "",
+  ) {
     super();
   }
   eq(o: ImageWidget) {
-    return o.src === this.src && o.alt === this.alt && o.width === this.width;
+    return o.src === this.src && o.caption === this.caption && o.width === this.width && o.mode === this.mode;
   }
-  toDOM() {
-    const wrap = document.createElement("span");
-    wrap.className = "cm-nz-lp-image";
+  toDOM(view: EditorView) {
+    const outer = document.createElement("span");
+    outer.className = "cm-nz-lp-image" + (this.mode ? ` ${this.mode}` : "");
+    const wrap = this.mode === "preview" ? outer.appendChild(document.createElement("span")) : outer;
+    if (this.mode === "preview") wrap.className = "cm-nz-lp-image-inner";
+    const frame = document.createElement("span");
+    frame.className = "cm-nz-img-frame";
     const img = document.createElement("img");
-    img.alt = this.alt;
+    img.alt = this.caption;
     if (this.width) img.style.width = `${this.width}px`;
+    frame.append(img);
+    wrap.append(frame);
+    if (this.caption) wrap.append(Object.assign(document.createElement("span"), { className: "cm-nz-lp-caption", textContent: this.caption }));
+
+    const range = () => {
+      const from = view.posAtDOM(outer);
+      return this.mode === "preview" ? null : imageRange(view, from);
+    };
+    let url: string | null = null;
     const missing = () => {
-      wrap.textContent = `🖼 ${this.alt || this.src}`;
       wrap.classList.add("missing");
+      url = null;
+      // Keep the bar: the edit button fixes a wrong path.
+      img.replaceWith(document.createTextNode(`🖼 ${this.caption || this.src}`));
     };
     img.onerror = missing;
-    resolveImage(this.src).then((u) => (u ? (img.src = u) : missing()));
-    wrap.appendChild(img);
-    return wrap;
+    resolveImage(this.src).then((u) => (u ? ((url = u), (img.src = u)) : missing()));
+
+    if (this.mode !== "preview") {
+      const bar = document.createElement("span");
+      bar.className = "cm-nz-img-bar";
+      bar.contentEditable = "false";
+      const align = (a: string) => () => {
+        const r = range();
+        if (!r) return;
+        // Select the image itself so the alignment wraps only its line.
+        view.dispatch({ selection: { anchor: r.from, head: r.to } });
+        setBlockAttr(view, "align", blockAttr(view.state, r.from, "align") === a ? null : a);
+      };
+      const buttons = [
+        iconButton("zoom", t("Zoom"), () => url && openLightbox(url, this.caption, view)),
+        iconButton("edit", t("Edit image"), () => {
+          const r = range();
+          if (!r) return;
+          view.dispatch({ selection: { anchor: r.to }, scrollIntoView: true });
+          view.focus();
+        }),
+        iconButton("left", t("Align left"), align("left")),
+        iconButton("center", t("Center"), align("center")),
+        iconButton("right", t("Align right"), align("right")),
+      ];
+      bar.append(...buttons);
+      frame.append(bar);
+      // Show which alignment is on.
+      outer.addEventListener("mouseenter", () => {
+        const r = range();
+        const a = r ? blockAttr(view.state, r.from, "align") : null;
+        for (const b of buttons.slice(2)) b.classList.toggle("on", b.classList.contains(a ?? "-"));
+      });
+      img.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+      });
+      img.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (url) openLightbox(url, this.caption, view);
+      });
+      img.title = t("Click to zoom");
+    }
+    return outer;
+  }
+  ignoreEvent() {
+    return true;
   }
 }
 
@@ -563,6 +701,22 @@ function build(view: EditorView): DecorationSet {
     if (reveal) return;
     decos.push(deco.range(from, to));
   };
+  /** An image: rendered; selected as a whole (after an align button), it stays
+   * rendered with a ring; with the cursor in its source, the source shows and
+   * the image is previewed under it. */
+  const addImage = (from: number, to: number, src: string, caption: string, width: string | null) => {
+    if (!free(from, to)) return;
+    const exact = ranges.some((r) => r.from === from && r.to === to);
+    if (reveal && !exact) {
+      taken.push([from, to]);
+      decos.push(Decoration.widget({ widget: new ImageWidget(src, caption, width, "preview"), side: 1 }).range(to));
+      return;
+    }
+    const was = reveal;
+    reveal = false;
+    add(from, to, Decoration.replace({ widget: new ImageWidget(src, caption, width, exact ? "selected" : "") }));
+    reveal = was;
+  };
   const headingLines = new Set<number>();
   for (const r of ranges) {
     const a = doc.lineAt(r.from).number;
@@ -672,7 +826,7 @@ function build(view: EditorView): DecorationSet {
             const [file, frag = ""] = m[1].trim().split("#");
             if (IMAGE_EXT.test(m[1])) {
               const w = /^\d+$/.test(m[2] ?? "") ? m[2] : null;
-              add(s, e, Decoration.replace({ widget: new ImageWidget(m[1].trim(), "", w) }));
+              addImage(s, e, m[1].trim(), "", w);
             } else if (/\.pdf$/i.test(file)) {
               const page = /page=(\d+)/.exec(frag)?.[1] ?? null;
               const w = /^\d+$/.test(m[2] ?? "") ? m[2] : null;
@@ -823,12 +977,11 @@ function build(view: EditorView): DecorationSet {
             if (!src) return false;
             const raw = doc.sliceString(node.from, node.to);
             const alt = /^!\[([^\]]*)\]/.exec(raw)?.[1] ?? "";
-            const [label, width] = alt.split("|");
             const url = doc.sliceString(src.from, src.to).replace(/^<|>$/g, "");
             const [file, frag = ""] = url.split("#");
-            const w = /^\d+$/.test(width ?? "") ? width : null;
-            const widget = /\.pdf$/i.test(file) ? new PdfWidget(file, /page=(\d+)/.exec(frag)?.[1] ?? null, w, /height=(\d+)/.exec(frag)?.[1] ?? null) : new ImageWidget(url, label, w);
-            add(node.from, node.to, Decoration.replace({ widget }));
+            const { caption, width: w } = imageAlt(alt, url);
+            if (/\.pdf$/i.test(file)) add(node.from, node.to, Decoration.replace({ widget: new PdfWidget(file, /page=(\d+)/.exec(frag)?.[1] ?? null, w, /height=(\d+)/.exec(frag)?.[1] ?? null) }));
+            else addImage(node.from, node.to, url, caption, w);
             return false;
           }
           case "Link": {
