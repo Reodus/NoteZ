@@ -31,6 +31,139 @@ export const footnoteDefinitions: MarkdownConfig = {
   ],
 };
 
+// ------------------------------------------------------------ numbering
+
+const MARK = /\[\^([^\]\s]+)\](:?)/g;
+
+interface Mark {
+  label: string;
+  from: number;
+  to: number;
+  def: boolean;
+}
+
+/** Every `[^label]` marker outside code, in document order. */
+function scanMarks(doc: Text): Mark[] {
+  const out: Mark[] = [];
+  let fence = false;
+  for (let n = 1; n <= doc.lines; n++) {
+    const line = doc.line(n);
+    if (/^\s*(```|~~~)/.test(line.text)) {
+      fence = !fence;
+      continue;
+    }
+    if (fence) continue;
+    // Blank out inline code so markers inside `…` are skipped.
+    const text = line.text.replace(/`[^`]*`/g, (s) => " ".repeat(s.length));
+    for (const m of text.matchAll(MARK)) {
+      const def = m[2] === ":" && m.index === 0;
+      const from = line.from + m.index!;
+      out.push({ label: m[1], from, to: from + 3 + m[1].length, def });
+    }
+  }
+  return out;
+}
+
+const orderCache = new WeakMap<Text, Map<string, number>>();
+
+/** Footnote label → its number, in the order the references first appear
+ * (as the PDF and exports number them). Unreferenced labels are absent. */
+export function footnoteNumbers(doc: Text): Map<string, number> {
+  let map = orderCache.get(doc);
+  if (!map) {
+    map = new Map();
+    for (const m of scanMarks(doc)) if (!m.def && !map.has(m.label)) map.set(m.label, map.size + 1);
+    orderCache.set(doc, map);
+  }
+  return map;
+}
+
+const DEF = /^\[\^([^\]\s]+)\]:/;
+const INDENTED = /^( {2,}|\t)\S/;
+
+interface DefBlock {
+  label: string;
+  /** First and last line numbers (continuation lines included). */
+  first: number;
+  last: number;
+}
+
+/** Footnote definitions grouped into runs that stand together — separated
+ * only by blank lines — such as the list at the bottom of a note. */
+function definitionRuns(doc: Text): DefBlock[][] {
+  const runs: DefBlock[][] = [];
+  let run: DefBlock[] = [];
+  let fence = false;
+  for (let n = 1; n <= doc.lines; n++) {
+    const text = doc.line(n).text;
+    if (/^\s*(```|~~~)/.test(text)) fence = !fence;
+    const m = fence ? null : DEF.exec(text);
+    if (!m) {
+      if (text.trim() !== "" && run.length) (runs.push(run), (run = []));
+      continue;
+    }
+    let last = n;
+    for (let k = n + 1; k <= doc.lines; k++) {
+      const next = doc.line(k).text;
+      if (INDENTED.test(next)) last = k;
+      else if (next.trim() === "" && k < doc.lines && INDENTED.test(doc.line(k + 1).text)) continue;
+      else break;
+    }
+    run.push({ label: m[1], first: n, last });
+    n = last;
+  }
+  if (run.length) runs.push(run);
+  return runs;
+}
+
+/** Changes that put footnotes in reading order: numeric labels become their
+ * position (`[^1]`, `[^2]`, … top to bottom) and each group of definitions is
+ * sorted by number. Word labels keep their names; definitions no reference
+ * points to go after the referenced ones. `rename` maps old labels to new. */
+export function renumberChanges(doc: Text): { changes: { from: number; to: number; insert: string }[]; rename: Map<string, string> } {
+  const marks = scanMarks(doc);
+  const order = footnoteNumbers(doc);
+  const rename = new Map<string, string>();
+  for (const [label, n] of order) if (/^\d+$/.test(label)) rename.set(label, String(n));
+  let next = order.size;
+  const rank = new Map(order);
+  for (const m of marks) {
+    if (!m.def || rank.has(m.label)) continue;
+    rank.set(m.label, ++next);
+    if (/^\d+$/.test(m.label)) rename.set(m.label, String(next));
+  }
+  const relabel = (from: number, to: number) => {
+    let text = doc.sliceString(from, to);
+    for (const m of marks.filter((m) => m.from >= from && m.to <= to).reverse()) {
+      const label = rename.get(m.label);
+      if (label !== undefined) text = text.slice(0, m.from + 2 - from) + label + text.slice(m.to - 1 - from);
+    }
+    return text;
+  };
+
+  const changes: { from: number; to: number; insert: string }[] = [];
+  const sorted: [number, number][] = [];
+  for (const run of definitionRuns(doc)) {
+    if (run.length < 2) continue;
+    const want = [...run].sort((a, b) => (rank.get(a.label) ?? Infinity) - (rank.get(b.label) ?? Infinity));
+    if (want.every((b, i) => b === run[i])) continue;
+    const from = doc.line(run[0].first).from;
+    const to = doc.line(run[run.length - 1].last).to;
+    // Keep the run's spacing: blank lines between notes if it had them.
+    const gap = run.some((b, i) => i > 0 && b.first > run[i - 1].last + 1) ? "\n\n" : "\n";
+    const insert = want.map((b) => relabel(doc.line(b.first).from, doc.line(b.last).to)).join(gap);
+    changes.push({ from, to, insert });
+    sorted.push([from, to]);
+  }
+  for (const m of marks) {
+    const label = rename.get(m.label);
+    if (label === undefined || label === m.label) continue;
+    if (sorted.some(([a, b]) => m.from >= a && m.to <= b)) continue;
+    changes.push({ from: m.from + 2, to: m.to - 1, insert: label });
+  }
+  return { changes, rename };
+}
+
 // ------------------------------------------------------------ footnote peek
 
 /** A `[^label]` reference that isn't a definition, with the footnoted word in
@@ -86,7 +219,7 @@ function peekDom(view: EditorView, label: string): { dom: HTMLElement } {
   dom.className = "cm-nz-fn-peek";
   const head = document.createElement("div");
   head.className = "cm-nz-preview-head";
-  head.textContent = `${t("Footnote")} ${label}`;
+  head.textContent = `${t("Footnote")} ${footnoteNumbers(view.state.doc).get(label) ?? label}`;
   const body = document.createElement("div");
   body.className = "cm-nz-preview-body markdown";
   const text = footnoteText(view.state.doc, label);

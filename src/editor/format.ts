@@ -18,6 +18,7 @@ export { parseAttrs } from "./dirrules";
 import { parseAttrs } from "./dirrules";
 
 import { t } from "../core/i18n";
+import { renumberChanges } from "./footnotes";
 export function formatAttrs(a: Attrs): string {
   return Object.entries(a)
     .map(([k, v]) => (v === "" ? k : /[\s"{}]/.test(v) ? `${k}="${v.replace(/"/g, "")}"` : `${k}=${v}`))
@@ -605,14 +606,33 @@ export function insertFootnote(view: EditorView) {
   let n = 1;
   while (doc.includes(`[^${n}]`)) n++;
   const r = view.state.selection.main;
-  view.dispatch({
+  // Right under the existing notes if the note already ends with them.
+  const tail = doc.trimEnd();
+  const inNotes = /^(\[\^[^\]\s]+\]:|( {2,}|\t)\S)/.test(tail.slice(tail.lastIndexOf("\n") + 1));
+  const sep = (doc.endsWith("\n") ? "" : "\n") + (inNotes ? "" : "\n");
+  const insert = {
     changes: [
       { from: r.to, insert: `[^${n}]` },
-      { from: view.state.doc.length, insert: `${doc.endsWith("\n") ? "" : "\n"}\n[^${n}]: ` },
+      { from: view.state.doc.length, insert: `${sep}[^${n}]: ` },
     ],
-    selection: { anchor: view.state.doc.length + `[^${n}]`.length + (doc.endsWith("\n") ? 1 : 2) + `[^${n}]: `.length },
     scrollIntoView: true,
-  });
+  };
+  // A footnote added before others takes their number: renumber them all in
+  // reading order and sort the notes at the bottom, in the same transaction
+  // (one undo step). The caret goes to the new note's text.
+  const mid = view.state.update(insert).state.doc;
+  const { changes, rename } = renumberChanges(mid);
+  const end = view.state.update(insert).state.update({ changes }).state.doc;
+  const head = `[^${rename.get(String(n)) ?? n}]: `;
+  let anchor = end.length;
+  for (let i = end.lines; i >= 1; i--) {
+    const line = end.line(i);
+    if (line.text.startsWith(head)) {
+      anchor = line.from + head.length;
+      break;
+    }
+  }
+  view.dispatch(insert, { changes, sequential: true, selection: { anchor }, scrollIntoView: true });
   view.focus();
 }
 

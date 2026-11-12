@@ -16,6 +16,7 @@ import { PropertiesWidget } from "./properties";
 import { holdDecorations, released } from "./pointer";
 
 import { t } from "../core/i18n";
+import { footnoteNumbers } from "./footnotes";
 export interface LiveOptions {
   /** Open a link target (note name, path or URL). */
   openLink: (target: string) => void;
@@ -807,7 +808,9 @@ function build(view: EditorView): DecorationSet {
           (m, s) => {
             if (inCode(s)) return;
             const def = m[2] === ":" && s === line.from;
-            add(s, s + m[0].length, Decoration.replace({ widget: new FootnoteWidget(m[1], def) }));
+            // Shown by position in the note, as the PDF numbers it.
+            const n = footnoteNumbers(doc).get(m[1]);
+            add(s, s + m[0].length, Decoration.replace({ widget: new FootnoteWidget(n ? String(n) : m[1], def) }));
           },
         ],
         // %% comment %% (single line)

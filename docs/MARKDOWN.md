@@ -244,8 +244,11 @@ Typst was released in 2023.[^1] It is fast.[^speed]
 ```
 
 The label can be a number or a word. Definitions can go anywhere in the note,
-and the PDF numbers them in order. The `/` menu's **Footnote** item picks the
-next free number and adds the definition at the end.
+and the PDF numbers them in order. The editor shows the same numbers, by
+where each footnote is first referenced, whatever its label. The `/` menu's
+**Footnote** item adds the definition at the end, renumbers the numeric
+labels so they read 1, 2, 3, … top to bottom, and sorts the definitions at the
+bottom to match.
 
 **Side notes and review remarks** work well as callouts:
 
