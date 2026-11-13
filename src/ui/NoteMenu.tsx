@@ -1,8 +1,9 @@
-// The "⋯" menu of the open note (like Obsidian's view menu): export, PDF
+// The "⋯" menu of the open note (like Obsidian's view menu): an Export
+// submenu (PDF, Word, HTML…), PDF
 // page/theme setup and the file actions, so the formatting toolbar only
 // holds formatting.
 import { Show } from "solid-js";
-import { MoreVertical, FileCode, Palette, FileCog } from "lucide-solid";
+import { MoreVertical, FileCode, Palette, FileCog, FileDown } from "lucide-solid";
 import { app } from "../core/app";
 import { setDialog, state } from "../core/store";
 import { isNotePath } from "../core/ipc";
@@ -17,7 +18,8 @@ export function noteMenuItems(path: string): Item[] {
   const items: Item[] = [];
   if (isNotePath(path)) {
     if (app.commands.has("pdf.export")) {
-      items.push(...exportItems(path));
+      const ex = exportItems(path);
+      items.push(ex.length === 1 ? ex[0] : { label: t("Export"), icon: <FileDown size={15} />, run: () => {}, items: ex });
     }
     if (app.commands.has("pdf.typst")) {
       items.push({ label: t("View generated Typst"), icon: <FileCode size={15} />, run: () => app.commands.run("pdf.typst") });
@@ -30,7 +32,8 @@ export function noteMenuItems(path: string): Item[] {
     );
   }
   // The file menu has its own export entry; ours is at the top already.
-  const file = fileMenu(entryFor(path), "tab").filter((i) => i === "-" || (i.label !== "Export" && !i.label.startsWith("Export to ")));
+  const ex = new Set([t("Export"), ...exportItems(path).map((i) => i.label)]);
+  const file = fileMenu(entryFor(path), "tab").filter((i) => i === "-" || !ex.has(i.label));
   items.push(...file);
   // No leading / doubled separators.
   return items.filter((it, i, a) => it !== "-" || (i > 0 && a[i - 1] !== "-"));
