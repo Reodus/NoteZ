@@ -755,6 +755,30 @@ function build(view: EditorView): DecorationSet {
     }
   };
 
+  /** A list item's wrapped lines start under its text, not under its bullet:
+   * the indentation and marker sit in a fixed-width box, and the line hangs
+   * by that same width (in either direction, so RTL items line up too). */
+  const hangingIndent = (markFrom: number, markEnd: number, list: string | undefined, task: any) => {
+    const line = doc.lineAt(markFrom);
+    const lead = doc.sliceString(line.from, markFrom);
+    if (!/^[ \t]*$/.test(lead)) return; // inside a quote, or a second marker on the line
+    let end = markEnd;
+    let mark: number;
+    if (task) {
+      const tm = task.getChild?.("TaskMarker");
+      if (!tm || doc.lineAt(tm.from).number !== line.number) return;
+      end = tm.to + (doc.sliceString(tm.to, tm.to + 1) === " " ? 1 : 0);
+      mark = 1.8;
+    } else if (list === "OrderedList") {
+      mark = (markEnd - markFrom - 1) * 0.6 + 0.8;
+    } else mark = 1.5;
+    let cols = 0;
+    for (const ch of lead) cols += ch === "\t" ? state.tabSize - (cols % state.tabSize) : 1;
+    const w = `${+(cols * 0.5 + mark).toFixed(2)}em`;
+    decos.push(Decoration.line({ attributes: { style: `padding-inline-start:calc(${w} + 2px);text-indent:-${w}` } }).range(line.from));
+    decos.push(Decoration.mark({ class: "cm-nz-lp-prefix", attributes: { style: `width:${w}` } }).range(line.from, end));
+  };
+
   for (const { from, to } of view.visibleRanges) {
     // ----- regex-based syntax (NoteZ extensions, wikilinks, math, comments)
     let pos = Math.max(from, fmEnd + 1);
@@ -963,6 +987,7 @@ function build(view: EditorView): DecorationSet {
             if (doc.sliceString(end, end + 1) === " ") end++;
             if (task) add(node.from, end, HIDE);
             else if (list === "BulletList") add(node.from, end, Decoration.replace({ widget: new BulletWidget() }));
+            hangingIndent(node.from, end, list, task);
             return;
           }
           case "TaskMarker": {

@@ -2753,6 +2753,12 @@ input[type="range"] {
   font-weight: 700;
   text-align: center;
 }
+/* A list line's indentation + marker: a fixed-width box the line hangs by. */
+.cm-nz-lp-prefix {
+  display: inline-block;
+  text-indent: 0;
+  white-space: pre;
+}
 .cm-nz-lp-check {
   width: 1em;
   height: 1em;
