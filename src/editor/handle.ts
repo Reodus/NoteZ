@@ -249,9 +249,13 @@ class Handle {
     const el = (line.nodeType === 1 ? (line as HTMLElement) : line.parentElement)?.closest(".cm-line");
     const rtl = el ? getComputedStyle(el).direction === "rtl" : false;
     const content = view.contentDOM.getBoundingClientRect();
+    // A rendered list marker (bullet, checkbox) is a widget, whose position
+    // `coordsAtPos` can report on its inner side in a right-to-left line —
+    // which put the grip on the dot. Its own box is exact.
+    const marker = el?.querySelector<HTMLElement>(".cm-nz-lp-bullet, .cm-nz-lp-check")?.getBoundingClientRect();
     const x = rtl
-      ? Math.min(Math.max(at.right, ...lineRight(view, first.from + indent)) + 6, content.right + 4)
-      : Math.max(at.left - 24, content.left - 22);
+      ? Math.min(Math.max(at.right, marker?.right ?? 0, ...lineRight(view, first.from + indent)) + 6, content.right + 4)
+      : Math.max(Math.min(at.left, marker?.left ?? Infinity) - 24, content.left - 22);
     this.dom.style.left = `${x - dom.left}px`;
     this.dom.classList.add("visible");
   }
