@@ -22,6 +22,7 @@ export function readingFixture(vault) {
 export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) {
  const mode=process.env.NOTEZ_READING_MODE==='source'?'source':'live';
  await evaluate(`(async()=>{const {s}=window.test;s.setRightTab('core.outline.pane');await s.openNote('Reading.md');s.setPrefs('editorMode',${JSON.stringify(mode)})})()`);
+ if(process.env.NOTEZ_READING_FONT_SIZE)await evaluate(`window.test.s.setPrefs('editorFontSize',${Math.max(10,Math.min(40,Number(process.env.NOTEZ_READING_FONT_SIZE)||16))})`);
  for(const width of (process.env.NOTEZ_READING_WIDTHS?.split(",").map(Number)??[1280,900])) {
   await rpc('Emulation.setDeviceMetricsOverride',{width,height:850,deviceScaleFactor:width===900?1.25:1,mobile:false});
   await evaluate(`(()=>{const v=window.test.s.editorView();v.scrollDOM.scrollTop=0})()`);await sleep(800);
@@ -57,12 +58,24 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
   const lines=await evaluate(`(()=>{const d=window.test.s.editorView().state.doc;return Array.from({length:d.lines},(_,i)=>d.line(i+1)).filter(l=>l.text.length>250&&!l.text.includes('![[')).filter((_,i)=>i%7===0).slice(0,10).map(l=>l.number)})()`);
   let edits=0;
   for(const n of lines) {
-   await evaluate(`(()=>{const v=window.test.s.editorView();v.dispatch({effects:v.constructor.scrollIntoView(v.state.doc.line(${n}).from,{y:'center'})})})()`);await sleep(250);
-   const point=await evaluate(`(()=>{const v=window.test.s.editorView(),r=v.scrollDOM.getBoundingClientRect(),p=v.state.doc.line(${n}).from+20,c=v.coordsAtPos(p);return c&&c.top>r.top&&c.bottom<r.bottom?{x:c.left,y:(c.top+c.bottom)/2}:null})()`);
-   assert.ok(point,`line ${n} must be reachable for editing`);
+   // Scroll the exact character we will click, rather than the start of
+   // its logical line (a wrapped paragraph can be taller than the viewport).
+   const target=await evaluate(`window.test.s.editorView().state.doc.line(${n}).from+20`);
+   let point=null,lastGeometry=null;
+   const deadline=Date.now()+5000;
+   while(Date.now()<deadline){
+    await evaluate(`(()=>{const v=window.test.s.editorView();v.dispatch({effects:v.constructor.scrollIntoView(${target},{y:'center'})})})()`);
+    await sleep(100);
+    lastGeometry=await evaluate(`(()=>{const v=window.test.s.editorView(),r=v.scrollDOM.getBoundingClientRect(),c=v.coordsAtPos(${target});return {rect:r.toJSON(),coords:c,viewport:v.viewport,top:v.scrollDOM.scrollTop}})()`);
+    const {rect:r,coords:c}=lastGeometry;
+    if(c&&c.top>r.top&&c.bottom<r.bottom&&c.left>=r.left&&c.left<r.right){point={x:c.left,y:(c.top+c.bottom)/2};break;}
+   }
+   if(!point)writeFileSync(path.join(scratch,`editing-${width}-${n}.json`),JSON.stringify(lastGeometry,null,2));
+   assert.ok(point,`character ${target} on line ${n} must be reachable for editing: ${JSON.stringify(lastGeometry)}`);
    edits++;
    await rpc('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});
    await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});await sleep(100);
+   assert.equal(await evaluate(`window.test.s.editorView().state.doc.lineAt(window.test.s.editorView().state.selection.main.head).number`),n,'click must land in the requested paragraph');
    await rpc('Input.insertText',{text:' آزمون'});await sleep(100);
    const caret=await evaluate(`(()=>{const v=window.test.s.editorView(),c=v.coordsAtPos(v.state.selection.main.head),r=v.scrollDOM.getBoundingClientRect();return {visible:!!c&&c.top>=r.top&&c.bottom<=r.bottom,active:window.test.s.state.active}})()`);
    assert.equal(caret.active,'Reading.md');assert.ok(caret.visible,'typing must leave the caret visible');

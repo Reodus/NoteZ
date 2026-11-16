@@ -1,6 +1,6 @@
 [package]
 name = "notez-core"
-version = "1.0.2"
+version = "1.0.3"
 description = "NoteZ core (vault + Typst rendering)"
 authors = ["Amir Mohammad Jahangirzad"]
 license = "Apache-2.0"

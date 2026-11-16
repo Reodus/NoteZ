@@ -71,3 +71,9 @@ CI now includes the reading test on Windows as well as Linux/Xvfb. A locally pas
 ## 1.0.2 CI startup correction
 
 The Windows 1.0.1 reading job failed before exercising the editor: CDP attached while the initial application document was still loading, and `/src/core/store.ts` was imported from a context without the Vite origin. The harness now waits for a page target and for the expected application origin with a complete document before importing editor modules, including after the Persian-language reload. Only context-replacement errors during navigation are retried; actual module/application errors still fail. CI deliberately delays initial HTML by 1500ms to exercise this startup ordering. Failure diagnostics (stderr, exception details, screenshots and reading traces) are uploaded as artifacts on both platforms.
+
+## 1.0.3 reading-test click destination
+
+The Windows 1.0.2 job completed the 1280px wheel test, then failed the `line 74 must be reachable for editing` assertion. The harness scrolled the paragraph's start but tried to click 20 characters later after a fixed 250ms delay. It now scrolls that exact target character and waits up to five seconds for coordinates inside the editor. Failure still fails the test and records geometry; no paragraph is skipped. A further assertion checks the real click lands in the requested paragraph before typing. A narrow 900px run with `NOTEZ_READING_FONT_SIZE=22` passed 298 wheel steps and four click/type/undo cases, exercising paragraphs taller than the viewport.
+
+During local validation of this harness-only change, one complete run also failed a separate upward wheel assertion at line 80 before the edit checks (trace `/tmp/notez-ui-ikXPL5/reading-1280.json`). The wheel thresholds/checks are unchanged. This click-destination correction does not claim to resolve that intermittent wheel failure.
