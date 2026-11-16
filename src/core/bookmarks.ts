@@ -6,6 +6,7 @@ import { app } from "./app";
 import { ipc } from "./ipc";
 import { notify } from "./app";
 
+import { removeFromTree, moveInTree } from "./bookmarkTree";
 import { t } from "./i18n";
 export interface Bookmark {
   type: "file" | "folder" | "search" | "group";
@@ -56,14 +57,18 @@ function contains(list: Bookmark[], b: Bookmark): boolean {
 export const isBookmarked = (b: Bookmark) => contains(items(), b);
 
 /** Add a bookmark (to a group, by title), or remove it when already there. */
-export function toggleBookmark(b: Bookmark, group?: string) {
+export function toggleBookmark(b: Bookmark, group?: string | Bookmark) {
   if (isBookmarked(b)) return removeBookmark(b);
   const entry = { ...b, ctime: Date.now() };
   if (group) {
-    const list = items();
-    const g = list.find((x) => x.type === "group" && x.title === group);
-    if (g) return save(list.map((x) => (x === g ? { ...g, items: [...(g.items ?? []), entry] } : x)));
-    return save([...list, { type: "group", title: group, items: [entry], ctime: Date.now() }]);
+    let found = false;
+    const append = (list: Bookmark[]): Bookmark[] => list.map(x => {
+      if (x.type === "group" && (typeof group === "string" ? !found && x.title === group : x === group)) { found = true; return { ...x, items: [...(x.items ?? []), entry] }; }
+      return x.items ? { ...x, items: append(x.items) } : x;
+    });
+    const next = append(items());
+    if (found) return save(next);
+    if (typeof group === "string") return save([...next, { type: "group", title: group, items: [entry], ctime: Date.now() }]);
   }
   save([...items(), entry]);
 }
@@ -72,7 +77,7 @@ export function removeBookmark(b: Bookmark) {
   const strip = (list: Bookmark[]): Bookmark[] =>
     list.filter((x) => !same(x, b) || x.type === "group").map((x) => (x.items ? { ...x, items: strip(x.items) } : x));
   // A group is removed by identity (two groups may share a title).
-  save(b.type === "group" ? items().filter((x) => x !== b) : strip(items()));
+  save(b.type === "group" ? removeFromTree(items(), b) : strip(items()));
 }
 
 export function addGroup(title: string) {
@@ -89,29 +94,7 @@ export function renameBookmark(b: Bookmark, title: string) {
  * `into` is set, or to the end of the top level when `target` is null).
  */
 export function moveBookmark(b: Bookmark, target: Bookmark | null, into = false) {
-  if (b === target) return;
-  const remove = (list: Bookmark[]): Bookmark[] => list.filter((x) => x !== b).map((x) => (x.items ? { ...x, items: remove(x.items) } : x));
-  // Keep references stable for `target` lookups: remove first, then insert.
-  let list = remove(items());
-  const insert = (l: Bookmark[]): [Bookmark[], boolean] => {
-    const i = l.findIndex((x) => x === target || (target && x.type === target.type && x.title === target.title && same(x, target)));
-    if (i >= 0) {
-      if (into && l[i].type === "group") return [l.map((x, j) => (j === i ? { ...x, items: [...(x.items ?? []), b] } : x)), true];
-      return [[...l.slice(0, i), b, ...l.slice(i)], true];
-    }
-    for (let j = 0; j < l.length; j++) {
-      if (l[j].items) {
-        const [inner, ok] = insert(l[j].items!);
-        if (ok) return [l.map((x, k) => (k === j ? { ...x, items: inner } : x)), true];
-      }
-    }
-    return [l, false];
-  };
-  if (target) {
-    const [next, ok] = insert(list);
-    list = ok ? next : [...list, b];
-  } else list = [...list, b];
-  save(list);
+  save(moveInTree(items(), b, target, into));
 }
 
 /** Bookmarks pointing into `from` now point into `to` (after a rename). */

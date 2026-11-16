@@ -8,6 +8,14 @@ const call = async (channel, ...args) => {
 };
 
 contextBridge.exposeInMainWorld("notezNative", {
+  onSaveRequest: (cb) => {
+    const h = (_e, id) => Promise.resolve().then(cb).then(
+      () => ipcRenderer.send("save-result", id, true),
+      () => ipcRenderer.send("save-result", id, false),
+    );
+    ipcRenderer.on("save-request", h);
+    return () => ipcRenderer.removeListener("save-request", h);
+  },
   core: (cmd, args) => call("core", cmd, args),
   startupArgs: () => call("startup-args"),
   takeOpenedFiles: () => call("take-opened-files"),

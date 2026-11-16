@@ -15,6 +15,7 @@ export interface UserCssFile {
 }
 
 interface Native {
+  onSaveRequest?(cb: () => Promise<void>): () => void;
   core<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
   startupArgs(): Promise<string[]>;
   /** Files the OS asked to open before the UI was ready (macOS Finder/Dock). */
@@ -122,3 +123,6 @@ export function fileSrc(absPath: string): string {
   const p = absPath.replace(/\\/g, "/");
   return "notez-asset://local" + (p.startsWith("/") ? "" : "/") + p.split("/").map(encodeURIComponent).join("/");
 }
+
+/** Main-process close/quit barrier: rejection keeps the window open. */
+export const onSaveRequest = (cb: () => Promise<void>) => native.onSaveRequest?.(cb) ?? (() => {});

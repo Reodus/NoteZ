@@ -1633,7 +1633,7 @@ dependencies = [
 
 [[package]]
 name = "notez-core"
-version = "0.12.7"
+version = "1.0.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1650,6 +1650,7 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "sha2",
+ "tempfile",
  "typst",
  "typst-kit",
  "typst-layout",

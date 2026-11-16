@@ -1,6 +1,7 @@
 // Right-click menu in the editor (like Obsidian's): clipboard, formatting,
 // paragraph styles, callouts, inserts, link/image actions and — through the
 // Electron shell — spelling suggestions for a misspelled word.
+import { comments, addComment, showComments } from "../core/comments";
 import { isBookmarked, toggleBookmark } from "../core/bookmarks";
 import { EditorView } from "@codemirror/view";
 import { openMenu, MenuItem } from "../ui/primitives";
@@ -13,6 +14,9 @@ import {
   insertFenced, insertBlock, insertCallout, isTypst, BlockStyle,
 } from "./format";
 import { CALLOUTS } from "./livepreview";
+
+import { app } from "../core/app";
+const appCommentsEnabled = () => app.commands.has("comments.add");
 
 import { t } from "../core/i18n";
 type Item = MenuItem | "-";
@@ -130,6 +134,12 @@ function buildMenu(view: EditorView, pos: number, openLink: (t: string) => boole
     "-",
   );
 
+  if (appCommentsEnabled()) {
+    items.push({ label: t("Add comment"), hint: "Ctrl+Alt+M", run: () => void addComment() });
+    if ((comments[state.active ?? ""] ?? []).some(c => !c.orphaned && c.from.line <= view.state.doc.lineAt(pos).number && c.to.line >= view.state.doc.lineAt(pos).number))
+      items.push({ label: t("Show comments"), run: () => showComments() });
+    items.push("-");
+  }
   const fmt: Item[] = [
     { label: t("Bold"), hint: "Ctrl+B", run: () => toggleInline(view, "bold") },
     { label: t("Italic"), hint: "Ctrl+I", run: () => toggleInline(view, "italic") },

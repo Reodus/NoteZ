@@ -1,7 +1,8 @@
 //! PDF annotations: stored by the UI in `.notez/annotations/<pdf path>.json`
 //! (src/ui/PdfView.tsx). The core finds the notes that link into a PDF
 //! (`[[file.pdf#page=3&annotation=id]]`) and moves annotation files when a
-//! PDF or a folder is renamed.
+//! PDF or a folder is renamed. Note comments (`.notez/comments/`) move the
+//! same way.
 
 use crate::links::{scan_full, Resolver};
 use crate::vault::Index;
@@ -67,30 +68,36 @@ fn dir(root: &Path) -> PathBuf {
     root.join(".notez").join("annotations")
 }
 
-/// After renaming `from` → `to` (a PDF or a folder): move the annotation
-/// files along.
+/// Note comments (src/core/comments.ts): `.notez/comments/<note path>.json`.
+fn comments_dir(root: &Path) -> PathBuf {
+    root.join(".notez").join("comments")
+}
+
+/// After renaming `from` → `to` (a file or a folder): move the side files
+/// kept for it — PDF annotations and note comments — along.
 pub fn rename(root: &Path, from: &str, to: &str) {
-    let d = dir(root);
-    let one = |f: &str, t: &str| {
-        let (a, b) = (d.join(format!("{f}.json")), d.join(format!("{t}.json")));
-        if a.is_file() {
-            if let Some(p) = b.parent() {
-                let _ = fs::create_dir_all(p);
-            }
-            let _ = fs::rename(&a, &b);
-        }
-    };
-    if from.to_lowercase().ends_with(".pdf") {
-        one(from, to);
-        return;
+    for d in [dir(root), comments_dir(root)] {
+        move_side_files(&d, from, to);
     }
-    // a folder: its subtree in the annotations folder
-    let (a, b) = (d.join(from), d.join(to));
-    if a.is_dir() {
+}
+
+fn move_side_files(d: &Path, from: &str, to: &str) {
+    let mv = |a: PathBuf, b: PathBuf| {
         if let Some(p) = b.parent() {
             let _ = fs::create_dir_all(p);
         }
         let _ = fs::rename(&a, &b);
+    };
+    // a file: its `<path>.json`
+    let (a, b) = (d.join(format!("{from}.json")), d.join(format!("{to}.json")));
+    if a.is_file() {
+        mv(a, b);
+        return;
+    }
+    // a folder: its subtree
+    let (a, b) = (d.join(from), d.join(to));
+    if a.is_dir() {
+        mv(a, b);
     }
 }
 
@@ -125,6 +132,24 @@ mod tests {
         assert!(dir(&root).join("papers/Renamed.pdf.json").is_file());
         rename(&root, "papers", "library");
         assert!(dir(&root).join("library/Renamed.pdf.json").is_file());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn comments_follow_renames() {
+        let root = std::env::temp_dir().join(format!("nz-cmt-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let c = comments_dir(&root);
+        fs::create_dir_all(c.join("notes")).unwrap();
+        fs::write(c.join("notes/A.md.json"), "{}").unwrap();
+        rename(&root, "notes/A.md", "notes/B.md");
+        assert!(c.join("notes/B.md.json").is_file());
+        assert!(!c.join("notes/A.md.json").exists());
+        rename(&root, "notes", "archive/notes");
+        assert!(c.join("archive/notes/B.md.json").is_file());
+        // nothing to move: no error, nothing created
+        rename(&root, "x.md", "y.md");
+        assert!(!c.join("y.md.json").exists());
         let _ = fs::remove_dir_all(&root);
     }
 }

@@ -22,9 +22,14 @@ function PreviewPane() {
   const [width, setWidth] = createSignal(500);
   let scroller!: HTMLDivElement;
 
-  const ro = new ResizeObserver(([e]) => setWidth(e.contentRect.width));
+  let resizeFrame = 0;
+  const ro = new ResizeObserver(([e]) => {
+    const width = e.contentRect.width;
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => { resizeFrame = 0; setWidth(width); });
+  });
   createEffect(() => scroller && ro.observe(scroller));
-  onCleanup(() => ro.disconnect());
+  onCleanup(() => { ro.disconnect(); cancelAnimationFrame(resizeFrame); });
 
   // A4 is 595pt wide; Typst SVGs carry pt-based width. "Fit" fills the
   // pane but never grows past real size (100%), so a wide pane doesn't blow

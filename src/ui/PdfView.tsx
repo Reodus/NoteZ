@@ -1,3 +1,4 @@
+import { registerSaveParticipant } from "../core/saveParticipants";
 // PDF viewer (pdf.js) with annotations: highlights, notes and area
 // selections, kept in .notez/annotations/<pdf path>.json. A link to an
 // annotation is [[paper.pdf#page=3&annotation=id]]; opening it scrolls here.
@@ -102,15 +103,23 @@ export default function PdfView(props: { path: string; url: string }) {
   const [findInfo, setFindInfo] = createSignal("");
 
   // ------------------------------------------------------- persistence
-  let loadedFor = "";
   let saveTimer: number | undefined;
+  let pendingSave: { path: string; data: string } | null = null;
+  const flushAnnotations = async () => {
+    clearTimeout(saveTimer);
+    const pending = pendingSave;
+    if (!pending) return;
+    try {
+      await ipc.write(store(pending.path), pending.data);
+      if (pendingSave === pending) pendingSave = null;
+    } catch (e) { notify(t("Annotations not saved: {error}", { error: e }), "error"); throw e; }
+  };
+  const unregisterSave = registerSaveParticipant(flushAnnotations);
+  onCleanup(() => { void flushAnnotations().catch(() => {}); unregisterSave(); });
   const save = () => {
     clearTimeout(saveTimer);
-    const path = props.path;
-    const list = anns();
-    saveTimer = window.setTimeout(() => {
-      void ipc.write(store(path), JSON.stringify({ version: 1, pdf: path, annotations: list }, null, 1)).catch((e) => notify(t("Annotations not saved: {error}", { error: e }), "error"));
-    }, 300);
+    pendingSave = { path: props.path, data: JSON.stringify({ version: 1, pdf: props.path, annotations: anns() }, null, 1) };
+    saveTimer = window.setTimeout(() => void flushAnnotations().catch(() => {}), 300);
   };
   const update = (f: (l: Annotation[]) => Annotation[]) => {
     setAnns(f(anns()));
@@ -398,7 +407,6 @@ export default function PdfView(props: { path: string; url: string }) {
         else if (e.matchesCount?.total) setFindInfo(`${e.matchesCount.current} / ${e.matchesCount.total}`);
       });
       setAnns(await loadAnnotations(props.path));
-      loadedFor = props.path;
       doc = await pdfjs.getDocument({ url: props.url, cMapUrl: "/pdfjs/cmaps/", cMapPacked: true, standardFontDataUrl: "/pdfjs/standard_fonts/", isEvalSupported: false }).promise;
       viewer.setDocument(doc);
       linkService.setDocument(doc, null);
@@ -409,7 +417,6 @@ export default function PdfView(props: { path: string; url: string }) {
   onCleanup(() => {
     resizer?.disconnect();
     clearTimeout(saveTimer);
-    if (loadedFor) void ipc.write(store(loadedFor), JSON.stringify({ version: 1, pdf: loadedFor, annotations: anns() }, null, 1)).catch(() => {});
     try {
       viewer?.setDocument(null);
       void doc?.destroy();

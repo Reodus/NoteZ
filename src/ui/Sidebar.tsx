@@ -109,6 +109,7 @@ function FileIcon(props: { path: string }) {
 
 // Drag & drop: the folder a dragged entry would land in ("" = vault root).
 // Dropping on a note means "next to it", so its folder lights up.
+let draggedPath: string | null = null;
 const [dropDir, setDropDir] = createSignal<string | null>(null);
 const DRAG_TYPE = "text/notez-path";
 const isOurDrag = (ev: DragEvent) => !!ev.dataTransfer?.types.includes(DRAG_TYPE);
@@ -119,8 +120,12 @@ function dropProps(target: () => string) {
       if (!isOurDrag(ev)) return;
       ev.preventDefault();
       ev.stopPropagation();
-      setDropDir(target());
+      const dir = target();
+      const invalid = !!draggedPath && (dir === draggedPath || dir.startsWith(draggedPath + "/") || dir === dirname(draggedPath));
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = invalid ? "none" : "move";
+      setDropDir(invalid ? null : dir);
     },
+    onDragLeave: (ev: DragEvent) => { if (!(ev.currentTarget as HTMLElement).contains(ev.relatedTarget as Node | null)) setDropDir(null); },
     onDrop: (ev: DragEvent) => {
       if (!isOurDrag(ev)) return;
       ev.preventDefault();
@@ -133,8 +138,8 @@ function dropProps(target: () => string) {
 }
 const dragProps = (path: () => string) => ({
   draggable: true,
-  onDragStart: (ev: DragEvent) => ev.dataTransfer?.setData(DRAG_TYPE, path()),
-  onDragEnd: () => setDropDir(null),
+  onDragStart: (ev: DragEvent) => { ev.stopPropagation(); draggedPath = path(); ev.dataTransfer?.setData(DRAG_TYPE, path()); },
+  onDragEnd: () => { draggedPath = null; setDropDir(null); },
 });
 
 // Keyboard: one row is the tab stop (roving tabindex); arrows move between rows.
@@ -340,7 +345,7 @@ export default function Sidebar() {
                 <span class="menu-label">{t("Open another vault…")}</span>
               </button>
               <div class="menu-sep" />
-              <button class="menu-item" onClick={() => (close(), closeVault())}>
+              <button class="menu-item" onClick={() => (close(), void closeVault().catch(() => {}))}>
                 <span class="menu-icon"><Logo size={15} /></span>
                 <span class="menu-label">{t("Back to start screen")}</span>
               </button>

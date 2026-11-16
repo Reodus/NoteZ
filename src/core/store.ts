@@ -3,9 +3,11 @@ import { createSignal, createRoot, createEffect } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { EditorView } from "@codemirror/view";
 import { ask, onVaultFs, openPath, trashPath } from "./native";
+import { flushSaveParticipants } from "./saveParticipants";
+import { flushComments, renameComments } from "./comments";
 import { renameBookmarkPaths } from "./bookmarks";
 import { app, notify } from "./app";
-import { ipc, Entry, Theme, dirname, join, fileKind } from "./ipc";
+import { ipc, flushWrites, Entry, Theme, dirname, join, fileKind } from "./ipc";
 
 import { t, tn } from "./i18n";
 // ------------------------------------------------------------ preferences
@@ -113,6 +115,8 @@ export interface Prefs {
   /** Automatic snapshots kept. */
   snapshotKeep: number;
   // PDF & preview
+  /** Include open Markdown comments as render-only PDF margin notes. */
+  commentsInPdf: boolean;
   /** Where Export PDF suggests saving: "" = vault root, "./" = next to the note, else an absolute folder. */
   pdfFolder: string;
   openAfterExport: boolean;
@@ -193,6 +197,7 @@ const DEFAULT_PREFS: Prefs = {
   historyMaxVersions: 300,
   snapshotDaily: true,
   snapshotKeep: 14,
+  commentsInPdf: false,
   pdfFolder: "",
   openAfterExport: false,
   checkUpdates: true,
@@ -338,8 +343,8 @@ export async function openVault(path: string) {
   app.events.emit("vault:opened", { root: path });
 }
 
-export function closeVault() {
-  saveAll();
+export async function closeVault() {
+  await saveAll();
   setRoot(null);
   setState({ tabs: [], active: null, buffers: {} });
   setPrefs("lastVault", null);
@@ -405,7 +410,7 @@ export function updateContent(path: string, content: string) {
   setState("buffers", path, "content", content);
   app.events.emit("note:changed", { path, content });
   clearTimeout(saveTimers.get(path));
-  saveTimers.set(path, window.setTimeout(() => save(path), prefs.autosaveMs));
+  saveTimers.set(path, window.setTimeout(() => void save(path).catch(() => {}), prefs.autosaveMs));
 }
 
 export async function save(path: string) {
@@ -419,15 +424,22 @@ export async function save(path: string) {
     app.events.emit("note:saved", { path });
   } catch (e) {
     notify(t("Save failed: {error}", { error: e }), "error");
+    throw e;
   }
 }
 
 export async function saveAll() {
-  await Promise.all(Object.keys(state.buffers).map(save));
+  const results = await Promise.allSettled([flushSaveParticipants(), flushComments(), ...Object.keys(state.buffers).map(save)]);
+  const failure = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+  if (failure) throw failure.reason;
+  await flushWrites();
+  if (Object.keys(state.buffers).some(isDirty)) await saveAll();
 }
 
 export async function closeTab(path: string) {
-  await save(path);
+  await flushSaveParticipants();
+  await flushComments();
+  do { await save(path); } while (isDirty(path));
   setState(
     produce((s) => {
       const i = s.tabs.indexOf(path);
@@ -498,6 +510,7 @@ async function relocate(path: string, to: string) {
       }));
     }
     const changed = await ipc.rename(path, to, update);
+    renameComments(path, to);
     moveOpen(path, to);
     renameBookmarkPaths(path, to);
     // Rewritten notes that are open: take the new text (no unsaved edits — saveAll above).
@@ -541,11 +554,8 @@ export async function deleteEntry(path: string) {
     if (!ok) return;
   }
   try {
-    for (const t of state.tabs.filter((t) => t === path || t.startsWith(path + "/"))) {
-      clearTimeout(saveTimers.get(t));
-      setState("buffers", t, { content: "", saved: "" });
-      await closeTab(t);
-    }
+    await saveAll();
+    const closing = state.tabs.filter((t) => t === path || t.startsWith(path + "/"));
     let trashed = false;
     // History keeps the notes (Recover deleted notes), also from the trash.
     await ipc.historyKeep(path, "deleted").catch(() => {});
@@ -562,6 +572,7 @@ export async function deleteEntry(path: string) {
       }
     }
     if (!trashed) await ipc.remove(path);
+    for (const tab of closing) await closeTab(tab);
     await refreshTree();
   } catch (e) {
     notify(String(e), "error");

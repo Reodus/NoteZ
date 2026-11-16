@@ -358,7 +358,8 @@ export default function BaseView(props: BaseViewProps) {
       <div
         class="base-card"
         draggable={p.drag}
-        onDragStart={(e) => e.dataTransfer?.setData("text/x-notez-row", p.row.path)}
+        onDragStart={(e) => { e.stopPropagation(); e.dataTransfer?.setData("text/x-notez-row", p.row.path); }}
+        onDragEnd={() => setOver(null)}
       >
         <Show when={img()}><img class="base-cover" src={img()!} alt="" loading="lazy" /></Show>
         <div class="base-card-body">
@@ -418,6 +419,7 @@ export default function BaseView(props: BaseViewProps) {
     const prop = () => r()!.group_by;
     const movable = () => !!prop()?.startsWith("note.");
     const drop = async (e: DragEvent, g: string) => {
+      if (!e.dataTransfer?.types.includes("text/x-notez-row")) return;
       e.preventDefault();
       setOver(null);
       const path = e.dataTransfer?.getData("text/x-notez-row");
@@ -437,9 +439,9 @@ export default function BaseView(props: BaseViewProps) {
               <div
                 class="base-column"
                 classList={{ over: over() === g.name }}
-                onDragOver={(e) => movable() && (e.preventDefault(), setOver(g.name))}
-                onDragLeave={() => setOver(null)}
-                onDrop={(e) => void drop(e, g.name ?? "")}
+                onDragOver={(e) => movable() && e.dataTransfer?.types.includes("text/x-notez-row") && (e.preventDefault(), setOver(g.name))}
+                onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(null); }}
+                onDrop={(e) => void drop(e, g.name ?? "").catch(error => notify(String(error), "error"))}
               >
                 <div class="base-column-head" dir="auto">{g.name || t("No value")} <span class="base-count">{g.rows.length}</span></div>
                 <For each={g.rows}>{(row) => <Card row={row} drag={movable()} />}</For>

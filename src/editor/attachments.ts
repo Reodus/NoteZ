@@ -4,7 +4,9 @@ import { EditorView } from "@codemirror/view";
 import { pathForFile } from "../core/native";
 import { ipc } from "../core/ipc";
 import { notify } from "../core/app";
-import { prefs, state } from "../core/store";
+import { registerSaveParticipant } from "../core/saveParticipants";
+import { applyText } from "../core/blocks";
+import { prefs, state, root } from "../core/store";
 import { formatDate } from "../plugins/templates";
 import { linkTo } from "../ui/fileMenu";
 
@@ -77,13 +79,22 @@ export async function saveFiles(files: File[]): Promise<string[]> {
 }
 
 /** Store `files` in the vault and insert links at `pos`. */
-async function insertFiles(view: EditorView, files: File[], pos: number) {
-  const links = await saveFiles(files);
-  if (!links.length) return;
-  const insert = links.join("\n");
-  pos = Math.min(pos, view.state.doc.length);
-  view.dispatch({ changes: { from: pos, insert }, selection: { anchor: pos + insert.length }, scrollIntoView: true });
-  view.focus();
+function insertFiles(view: EditorView, files: File[], pos: number, to = pos) {
+  const note = state.active, vault = root();
+  if (!note) return;
+  const selected = view.state.sliceDoc(pos, to);
+  const operation = (async () => {
+    const links = await saveFiles(files);
+    if (!links.length || root() !== vault || !state.buffers[note]) return;
+    const current = state.buffers[note].content, insert = links.join("\n");
+    const at = Math.min(pos, current.length);
+    // Never delete unrelated edits made while the attachment was importing.
+    const end = current.slice(at, to) === selected ? to : at;
+    applyText(note, current.slice(0, at) + insert + current.slice(end));
+    if (state.active === note) view.focus();
+  })();
+  const unregister = registerSaveParticipant(() => operation);
+  void operation.finally(unregister).catch(e => notify(String(e), "error"));
 }
 
 export const attachmentDrop = EditorView.domEventHandlers({
@@ -92,8 +103,7 @@ export const attachmentDrop = EditorView.domEventHandlers({
     if (!files.length) return false;
     e.preventDefault();
     const { from, to } = view.state.selection.main;
-    if (to > from) view.dispatch({ changes: { from, to } });
-    void insertFiles(view, files, from);
+    insertFiles(view, files, from, to);
     return true;
   },
   drop(e, view) {
@@ -111,7 +121,7 @@ export const attachmentDrop = EditorView.domEventHandlers({
     if (!files.length) return false;
     e.preventDefault();
     const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.selection.main.head;
-    void insertFiles(view, files, pos);
+    insertFiles(view, files, pos);
     return true;
   },
 });

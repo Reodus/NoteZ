@@ -34,6 +34,7 @@ import { slashCompletion, slashIconRender, slashKeymap, slashGhost } from "./sla
 import { COMPLETION_SOURCES } from "./completions";
 import { tagExtension } from "./tags";
 import { blockExtensions, blockRefCompletion, liveEmbeds } from "./blocks";
+import { commentExtension, refreshComments } from "./comments";
 import { blockTools } from "./handle";
 import { revealInOpenNote } from "../core/blocks";
 import { searchFor } from "../ui/SidebarPanes";
@@ -48,6 +49,7 @@ const lineNumbersComp = new Compartment();
 const previewsComp = new Compartment();
 const pluginComp = new Compartment();
 const liveComp = new Compartment();
+const commentsComp = new Compartment();
 /** Settings → Editor: tab size, bracket pairing, spellcheck, Vim. */
 const prefsComp = new Compartment();
 const vimComp = new Compartment();
@@ -260,6 +262,7 @@ export default function Editor() {
         slashGhost,
         tagExtension((tag) => searchFor(`tag:${tag}`)),
         path.endsWith(".typ") ? [] : [blockExtensions(), blockTools()],
+        commentsComp.of(prefs.disabledBuiltins.includes("core.comments") ? [] : commentExtension(path)),
         Prec.high(formattingKeymap()),
         keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
         languageFor(path),
@@ -303,6 +306,8 @@ export default function Editor() {
     // Re-apply dynamic config that may have changed while the tab was hidden.
     view.dispatch({
       effects: [
+        refreshComments.of(),
+        commentsComp.reconfigure(prefs.disabledBuiltins.includes("core.comments") ? [] : commentExtension(path)),
         lineNumbersComp.reconfigure(prefs.lineNumbers ? lineNumbers() : []),
         previewsComp.reconfigure(blockPreviews(prefs.inlinePreviews, isDark())),
         liveComp.reconfigure(live(path)),
@@ -333,7 +338,7 @@ export default function Editor() {
     while (a < old.length && a < content.length && old[a] === content[a]) a++;
     let b = 0;
     while (b < old.length - a && b < content.length - a && old[old.length - 1 - b] === content[content.length - 1 - b]) b++;
-    view.dispatch({ changes: { from: a, to: old.length - b, insert: content.slice(a, content.length - b) } });
+    view.dispatch({ changes: { from: a, to: old.length - b, insert: content.slice(a, content.length - b) }, effects: refreshComments.of() });
   }));
 
   createEffect(on(() => state.active, (path) => show(path)));
@@ -355,6 +360,10 @@ export default function Editor() {
     const ext = await vimMode();
     view?.dispatch({ effects: vimComp.reconfigure(ext) });
   }));
+
+  createEffect(on(() => prefs.disabledBuiltins.includes("core.comments"), disabled => {
+    if (view && current) view.dispatch({ effects: commentsComp.reconfigure(disabled ? [] : commentExtension(current)) });
+  }, { defer: true }));
 
   createEffect(on(() => prefs.editorMode, () => {
     if (view && current) view.dispatch({ effects: liveComp.reconfigure(live(current)) });
@@ -411,7 +420,7 @@ export default function Editor() {
   });
 
   // Live preview follows typing.
-  createEffect(on(() => (state.active ? state.buffers[state.active]?.content : undefined), () => schedulePreview(), { defer: false }));
+  createEffect(on(() => [state.active ? state.buffers[state.active]?.content : undefined, prefs.commentsInPdf], () => schedulePreview(), { defer: false }));
 
   onCleanup(() => {
     if (view && current) states.set(current, view.state);

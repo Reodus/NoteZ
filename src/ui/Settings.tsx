@@ -210,6 +210,7 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
     { id: "history", label: t("History & snapshots"), icon: <History size={16} /> },
     { id: "sync", label: t("Sync"), icon: <RefreshCw size={16} /> },
     { id: "flashcards", label: t("Flashcards"), icon: <GraduationCap size={16} /> },
+    { id: "comments", label: t("Comments"), icon: <Type size={16} /> },
     { id: "pdf", label: t("PDF & preview"), icon: <FileDown size={16} /> },
     { id: "plugins", label: t("Plugins"), icon: <Puzzle size={16} /> },
     { id: "keys", label: t("Shortcuts"), icon: <Keyboard size={16} /> },
@@ -481,6 +482,10 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
             <Field label={t("Captured line")} hint={t("{{text}} = what you typed; {{date}}, {{time}}, {{date:FORMAT}} as in templates.")}>
               <input class="input" value={prefs.captureFormat} placeholder="- {{time}} {{text}}" onChange={(e) => setPrefs("captureFormat", e.currentTarget.value || "- {{time}} {{text}}")} />
             </Field>
+          </Section>
+          <Section id="comments">
+            <Check checked={prefs.commentsInPdf} onChange={(v) => setPrefs("commentsInPdf", v)}>{t("Show open comments in PDF margins")}</Check>
+            <p>{t("Typst comments are shown in the panel only.")}</p>
           </Section>
           <Section id="pdf">
             <Field label={t("Theme for new notes")} hint={t("The document theme written into new notes (see Help → PDF themes).")}>

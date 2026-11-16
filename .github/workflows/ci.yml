@@ -36,6 +36,20 @@ jobs:
       - name: Editor highlighting tests
         run: npm run test:asm
 
+      - name: Editor interaction regression tests
+        run: npm run test:dir && npm run test:comments && npm run test:stability
+
+      - name: Build core for Electron smoke tests
+        run: npm run fonts && npm run core
+
+      - name: Install Electron runtime
+        run: node node_modules/electron/install.js
+
+      - name: Electron smoke tests
+        run: |
+          xvfb-run -a npm run test:ui
+          NOTEZ_TEST_LANGUAGE=fa xvfb-run -a npm run test:ui
+
       - name: Test core
         run: cargo test --release --lib --manifest-path core/Cargo.toml
 

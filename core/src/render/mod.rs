@@ -21,7 +21,26 @@ pub const PACKAGES: &[(&str, &str)] = &[
     ("fletcher", "#import \"@preview/fletcher:0.5.8\" as fletcher: diagram, node, edge\n"),
     ("lilaq", "#import \"@preview/lilaq:0.6.0\" as lq\n"),
     ("mitex", "#import \"@preview/mitex:0.2.7\": mitex, mi\n"),
+    ("drafting", DRAFTING),
 ];
+
+/// Note comments as margin notes (`<!--nz:comment …-->`, md.rs): a small
+/// number in the text and the comment in the outside margin.
+const DRAFTING: &str = r##"#import "@preview/drafting:0.2.2": margin-note, set-page-properties
+#let nz-comment(n, body, replies, rtl-body: false) = {
+  let c = rgb("#c2410c")
+  box(super(text(fill: c, weight: "bold", str(n))))
+  // drafting measures and draws left-to-right; the note itself follows its text
+  box(text(dir: ltr, margin-note(side: if rtl-body { left } else { right }, stroke: c + 0.5pt, {
+    set text(size: 7.5pt, weight: "regular", style: "normal", fill: luma(25), dir: if rtl-body { rtl } else { ltr }, hyphenate: true)
+    set par(justify: false, first-line-indent: 0pt, leading: 0.45em, spacing: 0.45em)
+    set align(start)
+    text(fill: c, weight: "bold", str(n) + ". ")
+    body
+    for r in replies { linebreak(); text(fill: luma(90), sym.arrow.r.curve + " " + r) }
+  })))
+}
+"##;
 
 /// A Typst string literal.
 pub fn typst_str(s: &str) -> String {
@@ -353,6 +372,10 @@ pub fn build(vault: Option<&Path>, note_path: &str, text: &str, rendered: &md::R
     if fm.toc == Some(true) {
         head.push_str("#outline(depth: 3)\n#pagebreak(weak: true)\n");
     }
+    if out.packages.contains("drafting") {
+        // after the page setup: margin notes size themselves to the margins
+        head.push_str("#set-page-properties()\n");
+    }
     let head_lines = head.matches('\n').count();
     let checkpoints = out.checkpoints.iter().map(|&(g, s)| (g + head_lines, s + body_line)).collect();
     Built {
@@ -400,6 +423,38 @@ mod tests {
         let errs: Vec<_> = p.diagnostics.iter().filter(|d| d.severity == "error").map(|d| &d.message).collect();
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(p.pages.len(), 1);
+    }
+
+    /// `<!--nz:comment …-->` markers become margin notes (LTR and RTL).
+    #[test]
+    fn comments_as_margin_notes() {
+        use base64::Engine;
+        let mark = |n: u32, body: &str, replies: &[&str]| {
+            let j = serde_json::json!({ "n": n, "body": body, "replies": replies });
+            format!("<!--nz:comment {}-->", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(j.to_string()))
+        };
+        let text = format!(
+            "# Title {}\n\nA paragraph that needs work. {}\nSecond line.\n\nسلام دنیا {}\n\n{}\n- item\n",
+            mark(1, "Shorter title?", &[]),
+            mark(2, "Say *why* --> here \"quoted\"", &["Agreed", "Done"]),
+            mark(3, "یک نظر", &["پاسخ"]),
+            mark(4, "on a blank line", &[]),
+        );
+        let built = build(None, "C.md", &text, &md::Rendered::new());
+        assert!(built.source.contains("#set-page-properties()"), "{}", built.source);
+        assert!(built.source.contains("#nz-comment(2, \"Say *why* --> here \\\"quoted\\\"\", (\"Agreed\", \"Done\"))"), "{}", built.source);
+        assert!(built.source.contains("#nz-comment(3, \"یک نظر\", (\"پاسخ\",), rtl-body: true)"), "{}", built.source);
+        let mut world = world::NoteWorld::new(world::dev_packages_dir());
+        world.prepare(&built.main_path, built.source.clone(), vec![]).unwrap();
+        let p = compile::preview(&world, &built.map);
+        let errs: Vec<_> = p.diagnostics.iter().filter(|d| d.severity == "error").map(|d| &d.message).collect();
+        assert!(errs.is_empty(), "{errs:?}");
+        if let Ok(out) = std::env::var("NOTEZ_OUT") {
+            std::fs::write(out, compile::pdf(&world, &built.map).ok().expect("pdf")).unwrap();
+        }
+        // a broken payload is ignored
+        let plain = build(None, "C.md", "Text <!--nz:comment !!!-->\n", &md::Rendered::new());
+        assert!(!plain.source.contains("nz-comment("));
     }
 
     /// Only pages that changed are sent again; an edit on page 3 of 3

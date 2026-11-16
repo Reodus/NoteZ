@@ -1,5 +1,5 @@
 // Sidebar panes besides the file tree: search & replace, tags, bookmarks.
-import { createEffect, createSignal, For, JSX, on, Show } from "solid-js";
+import { createEffect, createSignal, For, JSX, on, onCleanup, Show } from "solid-js";
 import {
   Search, FileText, Replace, CaseSensitive, WholeWord, Regex, ChevronRight, Hash, Bookmark as BookmarkIcon,
   Folder, Trash2, Pencil, Heading, HelpCircle, X, Check,
@@ -9,8 +9,9 @@ import { notify } from "../core/app";
 import { prefs, openNote, sidebarTab, setSidebarTab, sidebarPaneRequest, saveAll, state, setDialog, reloadFromDisk } from "../core/store";
 import { tagTree, TagNode } from "../core/meta";
 import {
-  bookmarks, Bookmark, bookmarkLabel, removeBookmark, addGroup, renameBookmark, moveBookmark, toggleBookmark,
+  bookmarks, isBookmarked, Bookmark, bookmarkLabel, removeBookmark, addGroup, renameBookmark, moveBookmark, toggleBookmark,
 } from "../core/bookmarks";
+import { containsBookmark } from "../core/bookmarkTree";
 import { ask } from "../core/native";
 import { askText, openMenu } from "./primitives";
 
@@ -381,6 +382,10 @@ export function TagsPane() {
 // --------------------------------------------------------------- bookmarks
 
 let dragged: Bookmark | null = null;
+const BOOKMARK_DRAG = "text/notez-bookmark";
+const bookmarkDrag = (e: DragEvent) => !!e.dataTransfer?.types.some(type => type === BOOKMARK_DRAG || type === "text/notez-path");
+const [bookmarkDragEpoch, setBookmarkDragEpoch] = createSignal(0);
+const clearBookmarkDrag = () => { dragged = null; setBookmarkDragEpoch(n => n + 1); };
 
 function openBookmark(b: Bookmark) {
   if (b.type === "search") return searchFor(b.query ?? "");
@@ -406,7 +411,9 @@ function openBookmark(b: Bookmark) {
 function BookmarkRow(props: { b: Bookmark; depth: number }) {
   const [open, setOpen] = createSignal(true);
   const [over, setOver] = createSignal(false);
+  createEffect(() => { bookmarkDragEpoch(); setOver(false); });
   const b = () => props.b;
+  onCleanup(() => { if (dragged === b()) clearBookmarkDrag(); });
   const icon = () => {
     switch (b().type) {
       case "group": return <BookmarkIcon size={14} class="ti" />;
@@ -431,17 +438,28 @@ function BookmarkRow(props: { b: Bookmark; depth: number }) {
         classList={{ "drag-over": over() }}
         style={{ "padding-inline-start": `${10 + props.depth * 14}px` }}
         draggable={true}
-        onDragStart={() => (dragged = b())}
-        onDragOver={(e) => (e.preventDefault(), setOver(true))}
+        onDragStart={(e) => { e.stopPropagation(); dragged = b(); e.dataTransfer?.setData(BOOKMARK_DRAG, "bookmark"); }}
+        onDragEnd={() => { clearBookmarkDrag(); setOver(false); }}
+        onDragOver={(e) => { if (bookmarkDrag(e)) {
+          e.preventDefault(); e.stopPropagation();
+          const invalid = !!dragged && !!e.dataTransfer?.types.includes(BOOKMARK_DRAG) && containsBookmark(dragged, b());
+          if (e.dataTransfer) e.dataTransfer.dropEffect = invalid ? "none" : e.dataTransfer.types.includes(BOOKMARK_DRAG) ? "move" : "copy";
+          setOver(!invalid);
+        } }}
         onDragLeave={() => setOver(false)}
         onDrop={(e) => {
+          if (!bookmarkDrag(e)) return;
           e.preventDefault();
           e.stopPropagation();
           setOver(false);
           const path = e.dataTransfer?.getData("text/notez-path");
-          if (path && !dragged) return toggleBookmark({ type: path.match(/\.\w+$/) ? "file" : "folder", path }, b().type === "group" ? b().title : undefined);
-          if (dragged) moveBookmark(dragged, b(), b().type === "group");
-          dragged = null;
+          if (path && !e.dataTransfer?.types.includes(BOOKMARK_DRAG)) {
+            const entry: Bookmark = { type: path.match(/\.\w+$/) ? "file" : "folder", path };
+            if (!isBookmarked(entry)) toggleBookmark(entry, b().type === "group" ? b() : undefined);
+            return clearBookmarkDrag();
+          }
+          if (e.dataTransfer?.types.includes(BOOKMARK_DRAG) && dragged) moveBookmark(dragged, b(), b().type === "group");
+          clearBookmarkDrag();
         }}
         onClick={() => (b().type === "group" ? setOpen(!open()) : openBookmark(b()))}
         onContextMenu={menu}
@@ -465,13 +483,17 @@ export function BookmarksPane() {
   return (
     <div
       class="tree bookmarks-pane"
-      onDragOver={(e) => e.preventDefault()}
+      onDragOver={(e) => { if (bookmarkDrag(e)) e.preventDefault(); }}
       onDrop={(e) => {
+        if (!bookmarkDrag(e)) return;
         e.preventDefault();
         const path = e.dataTransfer?.getData("text/notez-path");
-        if (path && !dragged) toggleBookmark({ type: /\.\w+$/.test(path) ? "file" : "folder", path });
-        else if (dragged) moveBookmark(dragged, null);
-        dragged = null;
+        if (path && !e.dataTransfer?.types.includes(BOOKMARK_DRAG)) {
+          const entry: Bookmark = { type: /\.\w+$/.test(path) ? "file" : "folder", path };
+          if (!isBookmarked(entry)) toggleBookmark(entry);
+        }
+        else if (e.dataTransfer?.types.includes(BOOKMARK_DRAG) && dragged) moveBookmark(dragged, null);
+        clearBookmarkDrag();
       }}
     >
       <For

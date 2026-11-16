@@ -83,7 +83,7 @@ pub fn write(root: &Path, rel: &str, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(path, content).map_err(|e| e.to_string())
+    crate::history::write_atomic(&path, content.as_bytes())
 }
 
 /// Create a new note; fails if it already exists.
@@ -154,6 +154,28 @@ pub fn delete(root: &Path, rel: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atomic_writes_replace_and_preserve_complete_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        write(root, "A.md", "old").unwrap();
+        write(root, "A.md", "new").unwrap();
+        assert_eq!(read(root, "A.md").unwrap(), "new");
+        std::thread::scope(|scope| {
+            for n in 0..8 {
+                scope.spawn(move || write(root, "A.md", &n.to_string().repeat(10000)).unwrap());
+            }
+        });
+        let result = read(root, "A.md").unwrap();
+        assert_eq!(result.len(), 10000);
+        assert!(result.bytes().all(|b| b == result.as_bytes()[0]));
+        assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
+        std::fs::create_dir(root.join("blocked.md")).unwrap();
+        assert!(write(root, "blocked.md", "fail").is_err());
+        assert!(root.join("blocked.md").is_dir());
+        assert_eq!(std::fs::read_dir(root).unwrap().count(), 2);
+    }
 
     #[test]
     fn resolve_rejects_escape() {

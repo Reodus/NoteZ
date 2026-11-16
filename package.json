@@ -1,6 +1,6 @@
 {
   "name": "notez",
-  "version": "0.12.7",
+  "version": "1.0.0",
   "description": "Bilingual notes with beautiful PDF export",
   "type": "module",
   "scripts": {
@@ -16,7 +16,10 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "fonts": "node scripts/fonts.mjs",
     "test:asm": "node --experimental-strip-types scripts/test-asm.ts",
-    "test:dir": "node --experimental-strip-types scripts/test-dir.ts"
+    "test:dir": "node --experimental-strip-types scripts/test-dir.ts",
+    "test:comments": "node --experimental-strip-types scripts/test-comments.ts",
+    "test:stability": "node --experimental-strip-types scripts/test-stability.ts",
+    "test:ui": "node scripts/test-ui.mjs"
   },
   "license": "Apache-2.0",
   "devDependencies": {

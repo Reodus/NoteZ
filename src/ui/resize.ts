@@ -20,7 +20,10 @@ export function startResize(e: PointerEvent, panel: HTMLElement, grow: 1 | -1, s
   const startW = panel.getBoundingClientRect().width;
   let frame = 0;
   let last = e.clientX;
+  let moved = false;
   const move = (m: PointerEvent) => {
+    if (m.pointerId !== e.pointerId) return;
+    moved = true;
     last = m.clientX;
     if (frame) return;
     frame = requestAnimationFrame(() => {
@@ -28,12 +31,15 @@ export function startResize(e: PointerEvent, panel: HTMLElement, grow: 1 | -1, s
       set(Math.round(startW + sign * (last - startX)));
     });
   };
-  const stop = () => {
+  const stop = (event: PointerEvent) => {
+    if (event.pointerId !== e.pointerId) return;
     cancelAnimationFrame(frame);
+    if (moved) set(Math.round(startW + sign * (last - startX)));
     handle.removeEventListener("pointermove", move);
     handle.removeEventListener("pointerup", stop);
     handle.removeEventListener("pointercancel", stop);
     handle.removeEventListener("lostpointercapture", stop);
+    if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);
     document.body.classList.remove("resizing");
   };
   handle.setPointerCapture(e.pointerId);

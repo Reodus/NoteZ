@@ -1,4 +1,5 @@
 // Typed wrappers around every Rust core command (core/src/lib.rs).
+import { createWriteQueue } from "./writeQueue";
 import { invoke, startupArgs } from "./native";
 
 export interface Entry {
@@ -267,12 +268,15 @@ export interface PluginManifest {
   author: string;
 }
 
+const writes = createWriteQueue((path, content) => invoke<void>("write_note", { path, content }));
+export const flushWrites = writes.flush;
+
 export const ipc = {
   openVault: (path: string) => invoke<Entry[]>("open_vault", { path }),
   tree: () => invoke<Entry[]>("list_tree"),
   notes: () => invoke<string[]>("list_notes"),
   read: (path: string) => invoke<string>("read_note", { path }),
-  write: (path: string, content: string) => invoke<void>("write_note", { path, content }),
+  write: writes.write,
   createNote: (path: string) => invoke<void>("create_note", { path }),
   createFolder: (path: string) => invoke<void>("create_folder", { path }),
   /** Rename/move; with `updateLinks`, rewrites links to it. Returns the notes rewritten. */

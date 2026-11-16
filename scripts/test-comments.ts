@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import { EditorState } from '@codemirror/state';
+import { point, offset, reanchor, type NoteComment } from '../src/core/commentAnchors.ts';
+import { injectComments } from '../src/core/commentPdf.ts';
+import { commentField, refreshComments } from '../src/editor/commentRanges.ts';
+const text = 'Title\nسلام 🌍 world\nTail';
+const from = text.indexOf('سلام'), to = text.indexOf('\nTail');
+const c: NoteComment = { id: 'c', from: point(text, from), to: point(text, to), quote: text.slice(from,to), body: 'نظر -->', created: '', updated: '', resolved: false, replies: [{id:'r',body:'پاسخ',created:''}] };
+assert.equal(offset(text, c.to), to);
+let stored = [c];
+const field = commentField(() => stored);
+let state = EditorState.create({ doc: text, extensions: [field] });
+state = state.update({ changes: { from: 0, insert: 'New\n' } }).state;
+assert.equal(state.field(field)[0].from.line, 3);
+assert.equal(state.field(field)[0].quote, c.quote);
+const insert = offset(state.doc.toString(), state.field(field)[0].from) + 4;
+state = state.update({ changes: { from: insert, insert: '!' } }).state;
+assert.equal(state.field(field)[0].quote, 'سلام! 🌍 world');
+const mapped = state.field(field)[0];
+state = state.update({ changes: { from: offset(state.doc.toString(), mapped.from), to: offset(state.doc.toString(), mapped.to) } }).state;
+assert.equal(state.field(field)[0].orphaned, true);
+assert.equal(state.field(field)[0].quote, mapped.quote);
+// External replacement uses the original quote, rather than adopting unrelated text.
+stored = [c];
+state = state.update({ changes: { from: 0, to: state.doc.length, insert: 'Outside\n' + text }, effects: refreshComments.of() }).state;
+assert.equal(state.field(field)[0].from.line, 3);
+assert.equal(reanchor(c, 'gone').orphaned, true);
+const duplicate = reanchor({ ...c, from:{line:5,ch:0}, to:{line:5,ch:c.quote.length} }, c.quote + '\n\n\n\n' + c.quote);
+assert.equal(duplicate.from.line, 5);
+const pdf = injectComments('A.md', text, [c]);
+assert.equal(pdf.split('\n').length, text.split('\n').length);
+const encoded = /nz:comment ([\w-]+)-->/.exec(pdf)![1];
+assert.equal(JSON.parse(Buffer.from(encoded, 'base64url').toString()).body, c.body);
+assert.equal(injectComments('A.typ', text, [c]), text);
+assert.equal(injectComments('A.md', text, [{...c,resolved:true}]), text);
+assert.equal(injectComments('A.md', text, [{...c,orphaned:true}]), text);
+for (const source of ['---\ntitle: X\n---\n\nSafe', '| A | B |\n|---|---|\n| x | y |\n\nSafe', '```js\ncode\n```\n\nSafe', '```text\n$$\n```\n\nSafe', '$$ x $$\n\nSafe']) {
+  const result = injectComments('A.md', source, [{ ...c, to:{line:2,ch:0} }]);
+  assert.equal(result.split('\n').length, source.split('\n').length);
+  assert.ok(result.split('\n').find(l => l.includes('nz:comment'))?.trimStart().startsWith('<!--'));
+}
+console.log('Comments: anchors, CodeMirror edits, external re-anchoring, UTF-16 and PDF injection passed');

@@ -34,12 +34,15 @@ export default function TabBar() {
                 e.dataTransfer?.setData("text/notez-tab", path);
               }}
               onDragEnd={() => ((dragFrom = -1), setDropAt(-1))}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(-1); }}
               onDragOver={(e) => {
-                if (dragFrom < 0) return;
+                if (dragFrom < 0 || !e.dataTransfer?.types.includes("text/notez-tab")) return;
                 e.preventDefault();
                 setDropAt(i());
               }}
-              onDrop={() => {
+              onDrop={(e) => {
+                if (!e.dataTransfer?.types.includes("text/notez-tab")) return;
+                e.preventDefault();
                 setDropAt(-1);
                 if (dragFrom < 0 || dragFrom === i()) return;
                 const tabs = [...state.tabs];
@@ -51,16 +54,16 @@ export default function TabBar() {
               onMouseDown={(e) => {
                 if (e.button === 1) {
                   e.preventDefault();
-                  closeTab(path);
+                  void closeTab(path).catch(() => {});
                 }
               }}
               onClick={() => setState("active", path)}
               onContextMenu={(e) =>
                 openMenu(e, [
-                  { label: t("Close"), run: () => closeTab(path) },
-                  { label: t("Close others"), run: () => state.tabs.filter((t) => t !== path).forEach(closeTab) },
-                  { label: t("Close tabs to the right"), run: () => state.tabs.slice(state.tabs.indexOf(path) + 1).forEach(closeTab) },
-                  { label: t("Close all"), run: () => [...state.tabs].forEach(closeTab) },
+                  { label: t("Close"), run: () => closeTab(path).catch(() => {}) },
+                  { label: t("Close others"), run: () => state.tabs.filter((t) => t !== path).forEach(p => void closeTab(p).catch(() => {})) },
+                  { label: t("Close tabs to the right"), run: () => state.tabs.slice(state.tabs.indexOf(path) + 1).forEach(p => void closeTab(p).catch(() => {})) },
+                  { label: t("Close all"), run: () => [...state.tabs].forEach(p => void closeTab(p).catch(() => {})) },
                   "-",
                   ...fileMenu(entryFor(path), "tab"),
                 ])
@@ -79,7 +82,7 @@ export default function TabBar() {
                 aria-label={t("Close")}
                 onClick={(e) => {
                   e.stopPropagation();
-                  closeTab(path);
+                  void closeTab(path).catch(() => {});
                 }}
               >
                 {/* Dirty tabs show a dot; hovering the button turns it back into ×. */}

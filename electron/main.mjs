@@ -249,8 +249,8 @@ let watcher = null;
 let changed = new Set();
 let flushTimer = null;
 
-/** Hidden paths are ignored, except NoteZ's own styles and plugins. */
-const watched = (rel) => !rel.split("/").some((s) => s.startsWith(".")) || /^\.notez\/(styles|plugins|themes|snippets)\//.test(rel);
+/** Hidden paths are ignored, except NoteZ's own styles, plugins and comments. */
+const watched = (rel) => !rel.split("/").some((s) => s.startsWith(".")) || /^\.notez\/(styles|plugins|themes|snippets|comments)\//.test(rel);
 
 function watchVault(dir) {
   watcher?.close();
@@ -393,6 +393,25 @@ ipcMain.handle("capture-shortcut", wrap(async (accel, target) => {
   return ok;
 }));
 
+// The renderer owns unsaved buffers; keep the core alive until it confirms persistence.
+let saveRequestId = 0;
+const saveRequests = new Map();
+ipcMain.on("save-result", (event, id, ok) => {
+  const request = saveRequests.get(id);
+  if (request?.sender === event.sender) request.finish(ok === true);
+});
+function requestSave(win) {
+  if (!win || win.isDestroyed()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const id = ++saveRequestId;
+    const finish = (ok) => { clearTimeout(timer); saveRequests.delete(id); resolve(ok); };
+    const timer = setTimeout(() => finish(false), 15000);
+    saveRequests.set(id, { sender: win.webContents, finish });
+    win.webContents.send("save-request", id);
+  });
+}
+let quitPending = false;
+
 function createWindow() {
   const win = new BrowserWindow({
     title: "NoteZ",
@@ -404,6 +423,18 @@ function createWindow() {
     backgroundColor: "#00000000",
     icon: path.join(root, "build/icon.png"),
     webPreferences: { preload: path.join(here, "preload.cjs"), contextIsolation: true, sandbox: true, spellcheck: true, plugins: true },
+  });
+  let closeApproved = false;
+  let closePending = false;
+  win.on("close", (event) => {
+    if (closeApproved || quitting) return;
+    event.preventDefault();
+    if (closePending) return;
+    closePending = true;
+    void requestSave(win).then(ok => {
+      closePending = false;
+      if (ok && !win.isDestroyed()) { closeApproved = true; win.close(); }
+    });
   });
   win.once("ready-to-show", () => win.show());
   win.on("closed", () => (uiReady = false));
@@ -468,9 +499,15 @@ app.whenReady().then(() => {
 });
 
 app.on("will-quit", () => globalShortcut.unregisterAll());
-app.on("before-quit", () => {
-  quitting = true;
-  core?.kill();
+app.on("before-quit", (event) => {
+  if (quitting || !mainWindow()) { quitting = true; core?.kill(); return; }
+  event.preventDefault();
+  if (quitPending) return;
+  quitPending = true;
+  void requestSave(mainWindow()).then(ok => {
+    quitPending = false;
+    if (ok) { quitting = true; app.quit(); }
+  });
 });
 // macOS apps stay open without windows and reopen one from the Dock.
 app.on("window-all-closed", () => {

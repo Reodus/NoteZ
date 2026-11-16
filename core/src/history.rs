@@ -53,9 +53,16 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p).map_err(|e| e.to_string())?;
     }
-    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-    fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, path).map_err(|e| e.to_string())
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = tempfile::Builder::new().prefix(".notez-write-").tempfile_in(parent).map_err(|e| e.to_string())?;
+    if let Ok(meta) = fs::metadata(path) {
+        tmp.as_file().set_permissions(meta.permissions()).map_err(|e| e.to_string())?;
+    }
+    tmp.write_all(bytes).map_err(|e| e.to_string())?;
+    tmp.as_file().sync_all().map_err(|e| e.to_string())?;
+    // NamedTempFile::persist replaces existing files on Unix and Windows.
+    tmp.persist(path).map_err(|e| e.error.to_string())?;
+    Ok(())
 }
 
 // ------------------------------------------------------------ objects

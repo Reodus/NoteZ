@@ -7,6 +7,7 @@ type Handler<T> = (payload: T) => void;
 export type Disposer = () => void;
 
 export interface Events {
+  "comments:changed": { path: string };
   "vault:opened": { root: string };
   "vault:changed": void;
   /** A flashcard was graded (or a grade undone). */

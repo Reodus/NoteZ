@@ -915,6 +915,26 @@ impl<'a> Converter<'a> {
                 self.push(Frame::Div(parse_attrs(attrs)));
             } else if inner == "nz:/div" {
                 self.close_div();
+            } else if let Some(data) = inner.strip_prefix("nz:comment") {
+                // A note comment (src/core/comments.ts) shown as a margin note.
+                if let Some(c) = decode_comment(data.trim()) {
+                    self.packages.insert("drafting");
+                    let replies: Vec<String> = c.replies.iter().map(|r| q(r)).collect();
+                    let rtl = c.body.chars().find(|ch| ch.is_alphabetic()).is_some_and(is_rtl_char);
+                    let m = format!(
+                        "#nz-comment({}, {}, ({}{}){})",
+                        c.n,
+                        q(&c.body),
+                        replies.join(", "),
+                        if replies.len() == 1 { "," } else { "" },
+                        if rtl { ", rtl-body: true" } else { "" }
+                    );
+                    if block {
+                        self.deliver(format!("{m}\n\n"), String::new(), None);
+                    } else {
+                        self.emit(&m);
+                    }
+                }
             } else if let Some(n) = inner.strip_prefix("nz:vspace") {
                 // One text line per extra blank line, as in the editor: the
                 // advance between two lines in the current font, size and
@@ -1147,6 +1167,23 @@ pub struct Options2<'a> {
 }
 
 /// No embedded notes (tests, snippets).
+/// The payload of `<!--nz:comment …-->`: base64url (no padding) of
+/// `{"n": 1, "body": "…", "replies": ["…"]}`, so the text can't end the
+/// HTML comment early.
+#[derive(serde::Deserialize)]
+struct CommentMark {
+    n: u32,
+    body: String,
+    #[serde(default)]
+    replies: Vec<String>,
+}
+
+fn decode_comment(data: &str) -> Option<CommentMark> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(data.trim_end_matches('=')).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
 #[cfg(test)]
 pub fn no_notes(_: &str) -> Option<String> {
     None

@@ -9,7 +9,7 @@
 import { EditorSelection, EditorState, Extension, RangeSetBuilder, StateEffect, StateField, Transaction } from "@codemirror/state";
 import { Decoration, EditorView, keymap, showPanel, ViewPlugin, ViewUpdate, WidgetType, type Panel } from "@codemirror/view";
 import { codeFolding, foldable, foldEffect, foldedRanges, foldGutter, foldKeymap, syntaxTree, unfoldEffect } from "@codemirror/language";
-import { openMenuAt, MenuItem } from "../ui/primitives";
+import { pushLayer, openMenuAt, MenuItem } from "../ui/primitives";
 import { state as store } from "../core/store";
 import { stem } from "../core/ipc";
 import { ensureBlockId, linkName } from "../core/blocks";
@@ -17,6 +17,7 @@ import { frontmatterRange } from "../core/frontmatter";
 import { setBlockStyle, toggleList, BlockStyle } from "./format";
 import { notify } from "../core/app";
 
+import { blockMove } from "./blockMove";
 import { t } from "../core/i18n";
 export interface Block {
   /** Start of the first line and end of the last line. */
@@ -88,23 +89,8 @@ function extent(st: EditorState, b: Block): { from: number; to: number } {
 
 /** Move `[from, to]` (whole lines) to before or after block `target`. */
 function moveBlock(view: EditorView, src: { from: number; to: number }, item: boolean, at: number, before: boolean) {
-  const doc = view.state.doc;
-  if (at >= src.from && at <= src.to) return;
-  const text = doc.sliceString(src.from, src.to);
-  const sep = item ? "\n" : "\n\n";
-  // Remove the block with the line break (and blank line) after it.
-  let delFrom = src.from;
-  let delTo = src.to;
-  const after = doc.sliceString(src.to, src.to + 2);
-  if (!item && after === "\n\n") delTo += 2;
-  else if (after.startsWith("\n")) delTo += 1;
-  else if (src.from > 0) delFrom = Math.max(0, src.from - (doc.sliceString(src.from - 2, src.from) === "\n\n" && !item ? 2 : 1));
-  const insert = before ? text + sep : sep + text;
-  const changes = [{ from: delFrom, to: delTo }, { from: at, insert }];
-  const tr = view.state.update({ changes, userEvent: "move.block", scrollIntoView: true });
-  const mapped = tr.changes.mapPos(at, before ? -1 : 1) + (before ? 0 : sep.length);
-  view.dispatch(tr);
-  view.dispatch({ selection: { anchor: Math.min(mapped, view.state.doc.length) } });
+  const spec = blockMove(view.state, src, item, at, before);
+  if (spec) view.dispatch(spec);
 }
 
 // --------------------------------------------------------------- menu
@@ -206,6 +192,12 @@ class Handle {
   indicator: HTMLElement;
   block: Block | null = null;
   hideTimer = 0;
+  cancelDrag: (() => void) | null = null;
+  pointer: { x: number; y: number } | null = null;
+  refreshKey = {};
+  onMouseMove = (e: MouseEvent) => { if (!e.buttons && !(e.target as HTMLElement).closest?.(".cm-nz-handle, .cm-gutters, .cm-panels")) this.hover(e); };
+  onMouseLeave = () => { this.pointer = null; this.hideSoon(); };
+  onScroll = () => this.refresh();
   constructor(readonly view: EditorView) {
     this.dom = document.createElement("div");
     this.dom.className = "cm-nz-handle";
@@ -215,13 +207,19 @@ class Handle {
     this.indicator = document.createElement("div");
     this.indicator.className = "cm-nz-drop-line";
     view.dom.append(this.dom, this.indicator);
+    // Widgets intentionally hide their editing events from CodeMirror. Hover
+    // still belongs to the block handle, including over editable table cells.
+    view.dom.addEventListener("mousemove", this.onMouseMove, true);
+    view.dom.addEventListener("mouseleave", this.onMouseLeave);
+    view.scrollDOM.addEventListener("scroll", this.onScroll);
     this.dom.addEventListener("pointerdown", (e) => this.down(e));
     this.dom.addEventListener("mouseenter", () => clearTimeout(this.hideTimer));
     this.dom.addEventListener("mouseleave", () => this.hideSoon());
   }
   /** Mouse over the editor: show the handle by the block under it. */
   hover(e: MouseEvent) {
-    if (store.active?.endsWith(".typ")) return;
+    if (store.active?.endsWith(".typ") || this.cancelDrag) return;
+    this.pointer = { x: e.clientX, y: e.clientY };
     const content = this.view.contentDOM.getBoundingClientRect();
     // Also when the mouse is in the margin left of the text.
     const x = Math.max(content.left + 4, Math.min(e.clientX, content.right - 4));
@@ -235,30 +233,48 @@ class Handle {
   place() {
     const b = this.block;
     if (!b) return;
-    const view = this.view;
-    const dom = view.dom.getBoundingClientRect();
-    const first = view.state.doc.lineAt(b.from);
-    const indent = first.text.search(/\S|$/);
-    const at = view.coordsAtPos(first.from + indent, 1);
-    if (!at) return this.hide();
-    const lineH = Math.min(at.bottom - at.top, 40);
-    this.dom.style.top = `${at.top - dom.top + Math.max(0, (lineH - 22) / 2)}px`;
-    // Beside where the text starts: on the left of a left-to-right line, on
-    // the right of a right-to-left one — never over the text.
-    const line = view.domAtPos(first.from).node;
-    const el = (line.nodeType === 1 ? (line as HTMLElement) : line.parentElement)?.closest(".cm-line");
-    const rtl = el ? getComputedStyle(el).direction === "rtl" : false;
-    const content = view.contentDOM.getBoundingClientRect();
-    // A rendered list marker (bullet, checkbox) is a widget, whose position
-    // `coordsAtPos` can report on its inner side in a right-to-left line —
-    // which put the grip on the dot. Its own box is exact.
-    const marker = el?.querySelector<HTMLElement>(".cm-nz-lp-bullet, .cm-nz-lp-check")?.getBoundingClientRect();
-    const x = rtl
-      ? Math.min(Math.max(at.right, marker?.right ?? 0, ...lineRight(view, first.from + indent)) + 6, content.right + 4)
-      : Math.max(Math.min(at.left, marker?.left ?? Infinity) - 24, content.left - 22);
-    this.dom.style.left = `${x - dom.left}px`;
-    this.dom.classList.add("visible");
+    this.view.requestMeasure({ key: this, read: () => {
+      const view = this.view, dom = view.dom.getBoundingClientRect(), content = view.contentDOM.getBoundingClientRect();
+      const first = view.state.doc.lineAt(b.from), indent = first.text.search(/\S|$/);
+      const at = view.coordsAtPos(first.from + indent, 1);
+      if (!at) return null;
+      const found = view.domAtPos(b.from, 1);
+      const node = found.node === view.contentDOM ? found.node.childNodes[found.offset] : found.node;
+      const el = node?.nodeType === 1 ? node as HTMLElement : node?.parentElement;
+      const line = el?.closest<HTMLElement>(".cm-line");
+      const widget = line ? null : el?.closest<HTMLElement>(".cm-nz-lp-table, .cm-nz-preview") ?? (el !== view.contentDOM ? el : null);
+      const dirEl = widget?.querySelector<HTMLElement>("[dir]") ?? line ?? widget;
+      const rtl = dirEl ? getComputedStyle(dirEl).direction === "rtl" : view.textDirection === 1;
+      const marker = line?.querySelector<HTMLElement>(".cm-nz-lp-bullet, .cm-nz-lp-check")?.getBoundingClientRect();
+      const rect = widget?.getBoundingClientRect();
+      const x = rtl
+        ? Math.min(Math.max(rect?.right ?? at.right, marker?.right ?? 0, ...lineRight(view, first.from + indent)) + 6, dom.right - 22)
+        : Math.max(Math.min(rect?.left ?? at.left, marker?.left ?? Infinity) - 24, dom.left + (view.scrollDOM.querySelector<HTMLElement>(".cm-gutters")?.getBoundingClientRect().width ?? 0) + 2);
+      const top = (rect?.top ?? at.top) + Math.max(0, (Math.min(at.bottom - at.top, 40) - 22) / 2);
+      const viewport = view.scrollDOM.getBoundingClientRect();
+      if (top < viewport.top || top + 22 > viewport.bottom || !content.width) return null;
+      return { x: x - dom.left, y: top - dom.top };
+    }, write: pos => {
+      if (!pos || this.block !== b) return this.hide();
+      this.dom.style.top = `${pos.y}px`;
+      this.dom.style.left = `${pos.x}px`;
+      this.dom.classList.add("visible");
+    } });
   }
+  refresh() {
+    if (this.cancelDrag || !this.pointer) return;
+    const { x, y } = this.pointer;
+    this.view.requestMeasure({ key: this.refreshKey, read: () => {
+      const box = this.view.scrollDOM.getBoundingClientRect();
+      if (x < box.left || x > box.right || y < box.top || y > box.bottom) return null;
+      const pos = this.view.posAtCoords({ x, y }, false);
+      return pos == null ? null : blockAt(this.view.state, pos);
+    }, write: block => {
+      this.block = block;
+      if (block) this.place(); else this.hide();
+    } });
+  }
+
   hideSoon() {
     clearTimeout(this.hideTimer);
     this.hideTimer = window.setTimeout(() => this.hide(), 250);
@@ -272,39 +288,79 @@ class Handle {
     e.preventDefault();
     e.stopPropagation();
     const view = this.view;
-    const sx = e.clientX;
-    const sy = e.clientY;
-    let dragging = false;
+    this.cancelDrag?.();
+    const sx = e.clientX, sy = e.clientY;
+    let dragging = false, frame = 0;
     let drop: { at: number; before: boolean } | null = null;
+    let last = e;
     const ext = extent(view.state, b);
+    const scroll = () => {
+      if (!dragging) return;
+      const box = view.scrollDOM.getBoundingClientRect();
+      const delta = last.clientY < box.top + 40 ? -12 : last.clientY > box.bottom - 40 ? 12 : 0;
+      if (delta) { view.scrollDOM.scrollTop += delta; drop = this.dropTarget(last, ext); }
+      frame = requestAnimationFrame(scroll);
+    };
     const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      last = ev;
       if (!dragging && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
       if (!dragging) {
         dragging = true;
         document.body.classList.add("nz-dragging-block");
         this.dom.classList.add("dragging");
+        frame = requestAnimationFrame(scroll);
       }
       drop = this.dropTarget(ev, ext);
     };
-    const up = (ev: PointerEvent) => {
+    const cleanup = () => {
+      this.cancelDrag = null;
+      cancelAnimationFrame(frame);
+      removeLayer();
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", cancel, true);
+      window.removeEventListener("blur", cancel);
+      this.dom.removeEventListener("lostpointercapture", cancel);
+      if (this.dom.hasPointerCapture(e.pointerId)) this.dom.releasePointerCapture(e.pointerId);
       document.body.classList.remove("nz-dragging-block");
       this.dom.classList.remove("dragging");
       this.indicator.classList.remove("visible");
+    };
+    const cancel = () => { cleanup(); this.hide(); };
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      if (dragging) drop = this.dropTarget(ev, ext);
+      cleanup();
       if (!dragging) return blockMenu(view, b, ev.clientX, ev.clientY);
       if (drop) moveBlock(view, ext, b.kind === "item", drop.at, drop.before);
       view.focus();
     };
+    const removeLayer = pushLayer(cancel);
+    this.cancelDrag = cancel;
+    this.dom.setPointerCapture(e.pointerId);
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", cancel, true);
+    window.addEventListener("blur", cancel);
+    this.dom.addEventListener("lostpointercapture", cancel);
   }
+
   /** Where a drop at the pointer goes: before or after the block under it. */
   dropTarget(ev: PointerEvent, src: { from: number; to: number }) {
     const view = this.view;
     const content = view.contentDOM.getBoundingClientRect();
     const pos = view.posAtCoords({ x: Math.max(content.left + 4, Math.min(ev.clientX, content.right - 4)), y: ev.clientY }, false);
     let t = pos == null ? null : blockAt(view.state, pos);
+    if (!t && pos != null && !view.state.doc.lineAt(pos).text.trim()) {
+      const doc = view.state.doc, n = doc.lineAt(pos).number;
+      for (let distance = 1; !t && distance < doc.lines; distance++) for (const candidate of [n + distance, n - distance]) {
+        if (candidate >= 1 && candidate <= doc.lines) {
+          t = blockAt(view.state, doc.line(candidate).from);
+          if (t) break;
+        }
+      }
+    }
     // Inside the dragged block: no drop.
     if (!t || (t.from >= src.from && t.from <= src.to)) {
       this.indicator.classList.remove("visible");
@@ -317,14 +373,20 @@ class Handle {
     const before = ev.clientY < (top.top + bottom.bottom) / 2;
     const dom = view.dom.getBoundingClientRect();
     const firstLine = view.state.doc.lineAt(t.from);
-    const left = view.coordsAtPos(firstLine.from + firstLine.text.search(/\S|$/), 1)?.left ?? content.left;
+    const line = view.coordsAtPos(firstLine.from + firstLine.text.search(/\S|$/), 1);
+    const left = Math.max(dom.left + 24, Math.min(line?.left ?? content.left, content.left + 48));
     this.indicator.style.top = `${(before ? top.top : bottom.bottom) - dom.top - 1}px`;
     this.indicator.style.left = `${left - dom.left}px`;
-    this.indicator.style.width = `${content.right - left - 8}px`;
+    this.indicator.style.width = `${Math.max(0, Math.min(dom.right - 24, content.right - 48) - left)}px`;
     this.indicator.classList.add("visible");
     return { at: before ? t.from : t.to, before };
   }
   destroy() {
+    this.cancelDrag?.();
+    this.view.dom.removeEventListener("mousemove", this.onMouseMove, true);
+    this.view.dom.removeEventListener("mouseleave", this.onMouseLeave);
+    this.view.scrollDOM.removeEventListener("scroll", this.onScroll);
+    clearTimeout(this.hideTimer);
     this.dom.remove();
     this.indicator.remove();
   }
@@ -338,28 +400,15 @@ const handlePlugin = ViewPlugin.fromClass(
     }
     update(u: ViewUpdate) {
       if (u.docChanged || u.geometryChanged) {
-        if (this.h.block && u.docChanged) this.h.block = null;
-        this.h.hide();
+        if (u.docChanged) this.h.cancelDrag?.();
+        this.h.refresh();
       }
     }
     destroy() {
       this.h.destroy();
     }
   },
-  {
-    eventHandlers: {
-      mousemove(e) {
-        if (e.buttons) return;
-        this.h.hover(e);
-      },
-      mouseleave() {
-        this.h.hideSoon();
-      },
-      scroll() {
-        this.h.hide();
-      },
-    },
-  },
+
 );
 
 // --------------------------------------------------------------- zoom

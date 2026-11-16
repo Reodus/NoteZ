@@ -7,11 +7,12 @@ import {
   focusMode, setFocusMode, viewLayout,
 } from "./core/store";
 import { fileKind, ipc } from "./core/ipc";
-import { setZoom, setSpellcheck, takeOpenedFiles, onOpenPath, onVaultFs, onCapture, setCaptureShortcut } from "./core/native";
+import { onSaveRequest, setZoom, setSpellcheck, takeOpenedFiles, onOpenPath, onVaultFs, onCapture, setCaptureShortcut } from "./core/native";
 import { applyTheme, loadUserCss, themeById } from "./core/uithemes";
 import { loadBuiltins, loadVaultPlugins } from "./core/plugins";
 import { corePlugin, readingTimePlugin } from "./plugins/core";
 import { mermaidPlugin } from "./plugins/mermaid";
+import { commentsPlugin } from "./plugins/CommentsPane";
 import { outlinePlugin, backlinksPlugin, pdfExportPlugin, diagramsPlugin } from "./plugins/builtins";
 import { templatesPlugin } from "./plugins/templates";
 import { dailyNotesPlugin, captureText, captureNote } from "./plugins/daily";
@@ -117,13 +118,13 @@ export default function App() {
     }
     app.commands.handleKey(e);
   };
-  const onUnload = () => void saveAll();
+  onCleanup(onSaveRequest(saveAll));
 
   onMount(async () => {
     window.addEventListener("keydown", onKey);
-    window.addEventListener("beforeunload", onUnload);
+
     initUpdates();
-    await loadBuiltins([corePlugin, readingTimePlugin, mermaidPlugin, outlinePlugin, backlinksPlugin, pdfExportPlugin, diagramsPlugin, templatesPlugin, dailyNotesPlugin]);
+    await loadBuiltins([corePlugin, readingTimePlugin, mermaidPlugin, commentsPlugin, outlinePlugin, backlinksPlugin, pdfExportPlugin, diagramsPlugin, templatesPlugin, dailyNotesPlugin]);
     const args = await ipc.startupArgs().catch(() => [] as string[]);
     const vault = args[0] ?? prefs.lastVault;
     if (vault) await openVault(vault);
@@ -140,7 +141,7 @@ export default function App() {
   });
   onCleanup(() => {
     window.removeEventListener("keydown", onKey);
-    window.removeEventListener("beforeunload", onUnload);
+
   });
 
   // Vault plugins follow the open vault.

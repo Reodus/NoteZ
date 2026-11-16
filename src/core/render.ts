@@ -6,6 +6,8 @@ import { app, notify } from "./app";
 import { ipc, Diagnostic, RenderedBlock, stem, dirname } from "./ipc";
 import { root, state, viewLayout, prefs } from "./store";
 
+import { comments, loadComments } from "./comments";
+import { injectComments } from "./commentPdf";
 import { t } from "./i18n";
 export interface Fence {
   lang: string;
@@ -97,6 +99,14 @@ app.events.on("vault:changed", () => {
   if (path && /\.md$/i.test(path) && DATA.test(state.buffers[path]?.content ?? "")) schedulePreview(400);
 });
 
+app.events.on("comments:changed", () => { if (prefs.commentsInPdf) schedulePreview(); });
+
+async function withComments(path: string, text: string) {
+  if (!prefs.commentsInPdf) return text;
+  await loadComments(path);
+  return injectComments(path, text, comments[path] ?? []);
+}
+
 export async function runPreview() {
   const path = state.active;
   if (!path || viewLayout() === "editor") return;
@@ -110,7 +120,7 @@ export async function runPreview() {
     const prev = preview();
     const have = new Map<string, string>();
     if (prev.path === path) prev.hashes.forEach((h, i) => prev.pages[i] && have.set(h, prev.pages[i]));
-    const r = await ipc.renderPreview(path, text, blocks, [...have.keys()]);
+    const r = await ipc.renderPreview(path, await withComments(path, text), blocks, [...have.keys()]);
     if (my !== seq) return; // a newer render started
     const pages = r.pages.map((p, i) => p ?? have.get(r.hashes[i]) ?? "");
     const errors = r.diagnostics.filter((d) => d.severity === "error").length;
@@ -120,7 +130,7 @@ export async function runPreview() {
       pages: pages.length || prev.path !== path ? pages : prev.pages,
       hashes: pages.length || prev.path !== path ? r.hashes : prev.hashes,
       diagnostics: r.diagnostics,
-      notes: r.notes,
+      notes: prefs.commentsInPdf && path.endsWith(".typ") ? [...r.notes, t("Typst comments are shown in the panel only.")] : r.notes,
       millis: r.millis,
       busy: false,
     });
@@ -165,7 +175,7 @@ export async function exportNote(path = state.active, format: ExportFormat = "pd
   notify(t("Exporting {name}…", { name }));
   try {
     const blocks = await renderPluginBlocks(text);
-    const warnings = await run(path, text, blocks, target);
+    const warnings = await run(path, format === "pdf" ? await withComments(path, text) : text, blocks, target);
     if (prefs.openAfterExport) await openPath(target).catch((e) => notify(String(e), "error"));
     const more = warnings.length ? `\n${warnings.slice(0, 4).join("\n")}${warnings.length > 4 ? `\n${t("…and {n} more", { n: warnings.length - 4 })}` : ""}` : "";
     notify(t("Exported {x}{more}", { x: target.split(/[\\/]/).pop(), more }), warnings.length ? "info" : "success", {
