@@ -9,14 +9,20 @@ import { createServer } from 'vite';
 import { readingFixture, checkReading } from './reading-cases.mjs';
 import { checkScroll } from './scroll-cases.mjs';
 const readingOnly=process.argv.includes('--reading');
-const scratch=mkdtempSync(path.join(tmpdir(),'notez-ui-')),vault=path.join(scratch,'vault');
+const scratch=mkdtempSync(path.join(process.env.RUNNER_TEMP||tmpdir(),'notez-ui-')),vault=path.join(scratch,'vault');
 mkdirSync(vault);mkdirSync(path.join(scratch,'second'));
 const fixture='---\ntitle: Audit\n---\n\n# English\n\nAlpha paragraph.\n\nBeta destination.\n\n- [ ] English task\n\n| Name | Value |\n| --- | --- |\n| A | B |\n\n# فارسی\n\nسلام دنیا، این یک پاراگراف است.\n\n- [ ] کار فارسی\n\n| نام | مقدار |\n| --- | --- |\n| یک | دو |\n';
 writeFileSync(path.join(vault,'Audit.md'),fixture);writeFileSync(path.join(vault,'Other.md'),'Other note. [[Audit]]\n');
 for(const name of ['LongA.md','LongB.md','Slow.md'])writeFileSync(path.join(vault,name),Array.from({length:400},(_,i)=>`Paragraph ${i}: long note content for scrolling.\n`).join('\n'));
 writeFileSync(path.join(vault,'pixel.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jY9sAAAAASUVORK5CYII=','base64'));
 const readingText=readingOnly?readingFixture(vault):null;
-const server=await createServer({server:{host:'127.0.0.1',port:0,strictPort:false},logLevel:'error'});await server.listen();
+// Vite plugins install this gate before the HTML middleware, so CDP can
+// attach to about:blank during a deliberately delayed initial navigation.
+const server=await createServer({plugins:[{name:'test-startup-delay',configureServer(server){
+ server.middlewares.use((req,res,next)=>{
+  if(req.url==='/'&&process.env.NOTEZ_TEST_STARTUP_DELAY)setTimeout(next,Number(process.env.NOTEZ_TEST_STARTUP_DELAY));else next();
+ });
+}}],server:{host:'127.0.0.1',port:0,strictPort:false},logLevel:'error'});await server.listen();
 const child=spawn(electron,['.', '--remote-debugging-port=0',`--user-data-dir=${path.join(scratch,'user-data')}`,'--disable-gpu',...(process.platform==='linux'?['--ozone-platform=x11']:[]),'--disable-background-timer-throttling','--disable-renderer-backgrounding',...(process.env.CI || process.getuid?.()===0?['--no-sandbox']:[]),vault,'Audit.md'],{env:{...process.env,XDG_CONFIG_HOME:path.join(scratch,'config'),NOTEZ_DEV_URL:server.resolvedUrls.local[0]},stdio:['ignore','pipe','pipe']});
 let stderr='',exited=false;const exit=new Promise(resolve=>child.once('exit',code=>{exited=true;resolve(code);}));child.stderr.on('data',b=>stderr+=b);child.stdout.on('data',()=>{});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -25,16 +31,34 @@ let ws;const pending=new Map();let seq=0;const exceptions=[],layoutWarnings=[];
 try {
  await until(()=>/DevTools listening on ws:/.test(stderr),'debugger startup');
  const port=/DevTools listening on ws:\/\/[^:]+:(\d+)/.exec(stderr)[1];
- const targets=await(await fetch(`http://127.0.0.1:${port}/json/list`)).json();
- ws=new WebSocket(targets.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise(r=>ws.addEventListener('open',r,{once:true}));
+ let target;
+ await until(async()=>{const targets=await(await fetch(`http://127.0.0.1:${port}/json/list`)).json();target=targets.find(t=>t.type==='page');return !!target;},'page target');
+ ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise(r=>ws.addEventListener('open',r,{once:true}));
  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){pending.get(m.id)?.(m);pending.delete(m.id);}else if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails);else if(m.method==='Runtime.consoleAPICalled'&&['error','warning'].includes(m.params.type)){const message=JSON.stringify(m.params.args.map(a=>a.description??a.value));console.error('renderer:',message);if(/Viewport failed to stabilize|Measure loop restarted/.test(message))layoutWarnings.push(message);}};
  const rpc=(method,params={})=>new Promise((resolve,reject)=>{if(process.env.UI_DEBUG)console.log('CDP',method);const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout '+method));},25000);pending.set(id,m=>{clearTimeout(timer);m.error?reject(Error(JSON.stringify(m.error))):resolve(m.result);});ws.send(JSON.stringify({id,method,params}));});
  const evaluate=async expression=>{const r=await rpc('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
  await rpc('Runtime.enable');await rpc('Page.bringToFront');await rpc('Emulation.setFocusEmulationEnabled',{enabled:true});
- await until(()=>evaluate(`(async()=>{const s=await import('/src/core/store.ts');return !!s.editorView() && s.state.active==='Audit.md'})()`),'editor ready');
+ const waitForEditor=async(language)=>{
+  const origin=new URL(server.resolvedUrls.local[0]).origin;
+  await until(async()=>{
+   try {
+    // about:blank cannot resolve a root-relative import. Wait without
+    // importing until the application document has finished navigating.
+    const ready=await evaluate(`location.origin===${JSON.stringify(origin)}&&document.readyState==='complete'`);
+    if(!ready)return false;
+    return await evaluate(`(async()=>{const s=await import('/src/core/store.ts');return !!s.editorView()&&s.state.active==='Audit.md'&&${language?`document.documentElement.lang===${JSON.stringify(language)}`:'true'}})()`);
+   } catch(error) {
+    // Navigation may replace the context between readiness and import.
+    // Application/module errors must still fail immediately.
+    if(/Execution context was destroyed|Cannot find context with specified id|Inspected target navigated/.test(String(error)))return false;
+    throw error;
+   }
+  },'application editor ready',60000);
+ };
+ await waitForEditor();
  if(process.env.NOTEZ_TEST_LANGUAGE==='fa'){
   await evaluate(`(()=>{const p=JSON.parse(localStorage.getItem('notez.prefs.v1')||'{}');localStorage.setItem('notez.prefs.v1',JSON.stringify({...p,uiLanguage:'fa'}))})()`);await rpc('Page.reload');
-  await until(()=>evaluate(`(async()=>{const s=await import('/src/core/store.ts');return document.documentElement.lang==='fa'&&!!s.editorView()&&s.state.active==='Audit.md'})()`),'Persian UI ready');
+  await waitForEditor('fa');
  }
  await evaluate(`(async()=>{const s=await import('/src/core/store.ts'),c=await import('/src/core/comments.ts'),{ipc}=await import('/src/core/ipc.ts');window.test={s,c,ipc};window.testErrors=[];window.addEventListener('error',e=>window.testErrors.push(e.message));s.setPrefs('checkUpdates',false);s.setPrefs('snapshotDaily',false);s.setPrefs('updateLinks','always');s.setPrefs('confirmDelete',false);s.setPrefs('deleteToTrash',false);await c.loadComments(s.state.active)})()`);
  if(readingOnly){
@@ -115,6 +139,7 @@ try {
  console.log('Scratch artifacts: '+scratch);
  }
 } catch(error) {
+ writeFileSync(path.join(scratch,'failure.txt'),String(error.stack??error)+'\nElectron stderr:\n'+stderr+'\nRenderer exceptions:\n'+JSON.stringify(exceptions,null,2));
  console.error(error);
  if(ws?.readyState===1){const id=++seq;await Promise.race([sleep(3000),new Promise(resolve=>{pending.set(id,m=>{if(m.result?.data)writeFileSync(path.join(scratch,'failure.png'),Buffer.from(m.result.data,'base64'));resolve();});ws.send(JSON.stringify({id,method:'Page.captureScreenshot',params:{format:'png'}}));})]);}
  console.error('Failed artifacts: '+scratch);throw error;

@@ -67,3 +67,7 @@ The supplied note with image stand-ins passed 524 wheel steps and 14 click/type/
 The general Persian smoke suite passed its interaction, persistence and export assertions. Its rapid Source tab/remount setup still emits two `Measure loop restarted more than 5 times` warnings; the visible-paragraph preservation assertions pass. These are recorded separately from the continuous-reading test, which fails on geometry-loop warnings and emitted none. This follow-up does not assert that every possible layout warning has been eliminated.
 
 CI now includes the reading test on Windows as well as Linux/Xvfb. A locally passing Linux run is not a claim that the Windows job has run or that the friend's exact Windows setup has been verified.
+
+## 1.0.2 CI startup correction
+
+The Windows 1.0.1 reading job failed before exercising the editor: CDP attached while the initial application document was still loading, and `/src/core/store.ts` was imported from a context without the Vite origin. The harness now waits for a page target and for the expected application origin with a complete document before importing editor modules, including after the Persian-language reload. Only context-replacement errors during navigation are retried; actual module/application errors still fail. CI deliberately delays initial HTML by 1500ms to exercise this startup ordering. Failure diagnostics (stderr, exception details, screenshots and reading traces) are uploaded as artifacts on both platforms.

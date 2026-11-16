@@ -46,10 +46,20 @@ jobs:
         run: node node_modules/electron/install.js
 
       - name: Electron smoke tests
+        env:
+          NOTEZ_TEST_STARTUP_DELAY: 1500
         run: |
           xvfb-run -a npm run test:ui
           NOTEZ_TEST_LANGUAGE=fa xvfb-run -a npm run test:ui
           xvfb-run -a npm run test:reading
+
+      - name: Upload Electron failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-linux-failure
+          path: ${{ runner.temp }}/notez-ui-*/
+          retention-days: 7
 
       - name: Test core
         run: cargo test --release --lib --manifest-path core/Cargo.toml
@@ -80,7 +90,17 @@ jobs:
         run: npm run fonts && npm run core
 
       - name: Live reading regression on Windows
+        env:
+          NOTEZ_TEST_STARTUP_DELAY: 1500
         run: npm run test:reading
+
+      - name: Upload Electron failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-windows-failure
+          path: ${{ runner.temp }}/notez-ui-*/
+          retention-days: 7
 
   macos-core:
     runs-on: macos-latest
