@@ -40,3 +40,30 @@ Rendered table screenshots are inspected for grip/text overlap, checkbox and gut
 ## Platform and integration limits
 
 Interactive verification runs on Linux/X11; CI uses Xvfb. The existing Windows/macOS build jobs remain responsible for their platform builds. The tests exercise encrypted folder sync; they do not require live WebDAV/S3 credentials. Existing optional/credential-dependent Rust tests remain ignored. Packaging is prepared locally; this document does not assert a published GitHub release or successful remote workflow run.
+
+## Post-release Live scrolling investigation
+
+The earlier navigation tests did **not** verify continuous reading of a long mixed Persian/English note. They established fixes for tab/navigation jumps, not for every report of jumping within Live preview.
+
+The supplied 588-line note exposed two interacting layout problems:
+
+- Recreated image widgets briefly lost their dimensions. On an upward 400px wheel step, the same text moved as much as 1076px in a copy with replacement images. Missing-asset labels also collapsed during asynchronous resolution (a separate 25px shift in the supplied note without assets). Known image dimensions and missing labels are now restored synchronously; missing assets are still retried and the cache is scoped by vault and note.
+- Viewport-only styles were removed from CodeMirror's retained offscreen cursor line. Its font size changed, invalidating measured paragraph heights. Short styled code lines could also be mistaken for the default text metric sample. In a narrow editor, repeated metric changes left the height model inconsistent with the rendered lines, and coordinate lookup threw. Height-affecting styles now live in a document state field; styled headings/code/markers use a text wrapper so they are not sampled as unstyled body text. No CodeMirror internals or dependency versions are patched.
+
+`npm run test:reading` uses a synthetic mixed-direction note with long wrapped paragraphs, headings, code, present images and a missing image. It sends native CDP wheel input in both directions at 1280/900px (including fractional device scaling), measures the same text position before and after each step, verifies offscreen cursor styles, clicks/types/undoes, checks missing-image recovery, and verifies the saved Markdown is unchanged. Geometry-loop warnings fail the test. The first version of the test failed on the old code with a 118.6px excess movement; increasing the tolerance was not used to hide the failure.
+
+Optional local reproduction (only a copy is edited):
+
+```sh
+NOTEZ_SCROLL_FILE='/absolute/path/to/note.md' npm run test:reading
+NOTEZ_TEST_LANGUAGE=fa NOTEZ_SCROLL_IMAGES=1 NOTEZ_SCROLL_FILE='/absolute/path/to/note.md' npm run test:reading
+NOTEZ_READING_MODE=source NOTEZ_SCROLL_FILE='/absolute/path/to/note.md' npm run test:reading
+```
+
+`NOTEZ_SCROLL_IMAGES=1` supplies repository-icon stand-ins for bare PNG embeds in the temporary vault; it does not reconstruct the original attachments. The user's note and its contents are not committed. Logs, text-anchor traces and screenshots stay in the printed temporary artifact directory. Initial font loading and window resizing settle before wheel measurements; this suite does not claim to freeze layout while a user deliberately changes fonts or window dimensions.
+
+The supplied note with image stand-ins passed 524 wheel steps and 14 click/type/undo cases in the Persian interface across both widths on Linux. Final checks also passed 336 Live wheel steps without the attachments at 900px, 180 Source wheel steps at 1280px, and seven click/type/undo cases in each. The synthetic fixture passed 264 steps plus image aspect-ratio and missing-asset recovery checks.
+
+The general Persian smoke suite passed its interaction, persistence and export assertions. Its rapid Source tab/remount setup still emits two `Measure loop restarted more than 5 times` warnings; the visible-paragraph preservation assertions pass. These are recorded separately from the continuous-reading test, which fails on geometry-loop warnings and emitted none. This follow-up does not assert that every possible layout warning has been eliminated.
+
+CI now includes the reading test on Windows as well as Linux/Xvfb. A locally passing Linux run is not a claim that the Windows job has run or that the friend's exact Windows setup has been verified.

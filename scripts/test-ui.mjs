@@ -6,25 +6,28 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import electron from 'electron';
 import { createServer } from 'vite';
+import { readingFixture, checkReading } from './reading-cases.mjs';
 import { checkScroll } from './scroll-cases.mjs';
+const readingOnly=process.argv.includes('--reading');
 const scratch=mkdtempSync(path.join(tmpdir(),'notez-ui-')),vault=path.join(scratch,'vault');
 mkdirSync(vault);mkdirSync(path.join(scratch,'second'));
 const fixture='---\ntitle: Audit\n---\n\n# English\n\nAlpha paragraph.\n\nBeta destination.\n\n- [ ] English task\n\n| Name | Value |\n| --- | --- |\n| A | B |\n\n# فارسی\n\nسلام دنیا، این یک پاراگراف است.\n\n- [ ] کار فارسی\n\n| نام | مقدار |\n| --- | --- |\n| یک | دو |\n';
 writeFileSync(path.join(vault,'Audit.md'),fixture);writeFileSync(path.join(vault,'Other.md'),'Other note. [[Audit]]\n');
 for(const name of ['LongA.md','LongB.md','Slow.md'])writeFileSync(path.join(vault,name),Array.from({length:400},(_,i)=>`Paragraph ${i}: long note content for scrolling.\n`).join('\n'));
 writeFileSync(path.join(vault,'pixel.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jY9sAAAAASUVORK5CYII=','base64'));
+const readingText=readingOnly?readingFixture(vault):null;
 const server=await createServer({server:{host:'127.0.0.1',port:0,strictPort:false},logLevel:'error'});await server.listen();
-const child=spawn(electron,['.', '--remote-debugging-port=0','--disable-gpu','--ozone-platform=x11','--disable-background-timer-throttling','--disable-renderer-backgrounding',...(process.env.CI || process.getuid?.()===0?['--no-sandbox']:[]),vault,'Audit.md'],{env:{...process.env,XDG_CONFIG_HOME:path.join(scratch,'config'),NOTEZ_DEV_URL:server.resolvedUrls.local[0]},stdio:['ignore','pipe','pipe']});
+const child=spawn(electron,['.', '--remote-debugging-port=0',`--user-data-dir=${path.join(scratch,'user-data')}`,'--disable-gpu',...(process.platform==='linux'?['--ozone-platform=x11']:[]),'--disable-background-timer-throttling','--disable-renderer-backgrounding',...(process.env.CI || process.getuid?.()===0?['--no-sandbox']:[]),vault,'Audit.md'],{env:{...process.env,XDG_CONFIG_HOME:path.join(scratch,'config'),NOTEZ_DEV_URL:server.resolvedUrls.local[0]},stdio:['ignore','pipe','pipe']});
 let stderr='',exited=false;const exit=new Promise(resolve=>child.once('exit',code=>{exited=true;resolve(code);}));child.stderr.on('data',b=>stderr+=b);child.stdout.on('data',()=>{});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function until(fn,label,timeout=20000){const end=Date.now()+timeout;while(Date.now()<end){if(await fn())return;await sleep(80);}throw Error('Timed out: '+label+'\n'+stderr.slice(-2000));}
-let ws;const pending=new Map();let seq=0;const exceptions=[];
+let ws;const pending=new Map();let seq=0;const exceptions=[],layoutWarnings=[];
 try {
  await until(()=>/DevTools listening on ws:/.test(stderr),'debugger startup');
  const port=/DevTools listening on ws:\/\/[^:]+:(\d+)/.exec(stderr)[1];
  const targets=await(await fetch(`http://127.0.0.1:${port}/json/list`)).json();
  ws=new WebSocket(targets.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise(r=>ws.addEventListener('open',r,{once:true}));
- ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){pending.get(m.id)?.(m);pending.delete(m.id);}else if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails);else if(m.method==='Runtime.consoleAPICalled'&&m.params.type==='error')console.error('renderer:',JSON.stringify(m.params.args.map(a=>a.description??a.value)));};
+ ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){pending.get(m.id)?.(m);pending.delete(m.id);}else if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails);else if(m.method==='Runtime.consoleAPICalled'&&['error','warning'].includes(m.params.type)){const message=JSON.stringify(m.params.args.map(a=>a.description??a.value));console.error('renderer:',message);if(/Viewport failed to stabilize|Measure loop restarted/.test(message))layoutWarnings.push(message);}};
  const rpc=(method,params={})=>new Promise((resolve,reject)=>{if(process.env.UI_DEBUG)console.log('CDP',method);const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout '+method));},25000);pending.set(id,m=>{clearTimeout(timer);m.error?reject(Error(JSON.stringify(m.error))):resolve(m.result);});ws.send(JSON.stringify({id,method,params}));});
  const evaluate=async expression=>{const r=await rpc('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
  await rpc('Runtime.enable');await rpc('Page.bringToFront');await rpc('Emulation.setFocusEmulationEnabled',{enabled:true});
@@ -34,6 +37,11 @@ try {
   await until(()=>evaluate(`(async()=>{const s=await import('/src/core/store.ts');return document.documentElement.lang==='fa'&&!!s.editorView()&&s.state.active==='Audit.md'})()`),'Persian UI ready');
  }
  await evaluate(`(async()=>{const s=await import('/src/core/store.ts'),c=await import('/src/core/comments.ts'),{ipc}=await import('/src/core/ipc.ts');window.test={s,c,ipc};window.testErrors=[];window.addEventListener('error',e=>window.testErrors.push(e.message));s.setPrefs('checkUpdates',false);s.setPrefs('snapshotDaily',false);s.setPrefs('updateLinks','always');s.setPrefs('confirmDelete',false);s.setPrefs('deleteToTrash',false);await c.loadComments(s.state.active)})()`);
+ if(readingOnly){
+  await checkReading({evaluate,rpc,sleep,scratch,vault,original:readingText});
+  assert.deepEqual(await evaluate('window.testErrors'),[]);assert.equal(exceptions.length,0,JSON.stringify(exceptions));assert.deepEqual(layoutWarnings,[],'editor geometry must stabilize');
+  console.log('Reading artifacts: '+scratch);
+ } else {
  await checkScroll(evaluate,sleep);
  const before=readFileSync(path.join(vault,'Audit.md'),'utf8');
  await evaluate(`(async()=>{const {s,c}=window.test,v=s.editorView();const a=v.state.doc.toString().indexOf('Alpha');v.dispatch({selection:{anchor:a,head:a+5}});await c.addComment();const id=c.comments[s.state.active][0].id;window.test.id=id;const input=document.querySelector('.comment-body');input.value='Review فارسی';input.dispatchEvent(new Event('input',{bubbles:true}));await c.flushComments();s.setRightTab('preview');document.addEventListener('mousemove',e=>window.lastMouse={x:e.clientX,y:e.clientY,target:e.target.className})})()`);
@@ -105,6 +113,7 @@ try {
  assert.equal(exceptions.length,0,JSON.stringify(exceptions));
  console.log('Electron smoke passed: block/table grips, pointer drag/autoscroll/cancel, LTR/RTL modes and widths, comments, tabs, file drag, renames, attachments, exports, history, sync, failed saves and native close.');
  console.log('Scratch artifacts: '+scratch);
+ }
 } catch(error) {
  console.error(error);
  if(ws?.readyState===1){const id=++seq;await Promise.race([sleep(3000),new Promise(resolve=>{pending.set(id,m=>{if(m.result?.data)writeFileSync(path.join(scratch,'failure.png'),Buffer.from(m.result.data,'base64'));resolve();});ws.send(JSON.stringify({id,method:'Page.captureScreenshot',params:{format:'png'}}));})]);}

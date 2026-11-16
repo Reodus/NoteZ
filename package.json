@@ -19,7 +19,8 @@
     "test:dir": "node --experimental-strip-types scripts/test-dir.ts",
     "test:comments": "node --experimental-strip-types scripts/test-comments.ts",
     "test:stability": "node --experimental-strip-types scripts/test-stability.ts",
-    "test:ui": "node scripts/test-ui.mjs"
+    "test:ui": "node scripts/test-ui.mjs",
+    "test:reading": "node scripts/test-ui.mjs --reading"
   },
   "license": "Apache-2.0",
   "devDependencies": {

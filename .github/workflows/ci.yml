@@ -49,6 +49,7 @@ jobs:
         run: |
           xvfb-run -a npm run test:ui
           NOTEZ_TEST_LANGUAGE=fa xvfb-run -a npm run test:ui
+          xvfb-run -a npm run test:reading
 
       - name: Test core
         run: cargo test --release --lib --manifest-path core/Cargo.toml
@@ -66,6 +67,20 @@ jobs:
 
       - name: Build core
         run: cargo build --release --manifest-path core/Cargo.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install UI and Electron
+        run: npm ci
+
+      - name: Prepare Electron core and fonts
+        run: npm run fonts && npm run core
+
+      - name: Live reading regression on Windows
+        run: npm run test:reading
 
   macos-core:
     runs-on: macos-latest

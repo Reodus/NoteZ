@@ -1,8 +1,8 @@
 // WYSIWYM styling: the editor mirrors the document's styles — heading
 // sizes/colors/fonts from the theme, `::: {align=…}` blocks aligned,
 // `[text]{color=…}` spans colored — while staying plain text underneath.
-import { RangeSetBuilder, StateEffect, StateField, Extension } from "@codemirror/state";
-import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from "@codemirror/view";
+import { RangeSetBuilder, StateEffect, StateField, EditorState, Extension } from "@codemirror/state";
+import { Decoration, DecorationSet, EditorView } from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 import type { Theme, TextStyle } from "../core/ipc";
@@ -76,6 +76,12 @@ export function themeCss(theme: Theme | null): Record<string, string> {
 
 const lineDeco = (cls: string, attrs: Record<string, string> = {}) => Decoration.line({ class: cls, attributes: attrs });
 
+// A differently styled line must not be sampled as the editor's default
+// text metrics. CodeMirror skips marked text when choosing a plain-text
+// sample; this wrapper leaves rendering unchanged and keeps headings/code
+// from alternately resetting its height map as they enter the viewport.
+const STYLED_TEXT = Decoration.mark({ class: "cm-nz-styled-text" });
+
 const SYNTAX = Decoration.mark({ class: "cm-nz-syntax" });
 
 function spanStyle(attrs: Record<string, string>): string {
@@ -94,38 +100,41 @@ function spanStyle(attrs: Record<string, string>): string {
   return css.join(";");
 }
 
-function build(view: EditorView, typstMode: boolean): DecorationSet {
+function build(state: EditorState, typstMode: boolean): DecorationSet {
   const b = new RangeSetBuilder<Decoration>();
-  const doc = view.state.doc;
+  const doc = state.doc;
   // Div context must be computed from the top (cheap: line scan).
   const divStack: Record<string, string>[] = [];
   let inFence = false;
   let inFrontmatter = doc.lines > 0 && doc.line(1).text === "---" && !typstMode;
-  const visible = view.visibleRanges;
-  const isVisible = (from: number, to: number) => visible.some((r) => to >= r.from && from <= r.to);
 
   for (let i = 1; i <= doc.lines; i++) {
     const line = doc.line(i);
     const text = line.text;
-    const show = isVisible(line.from, line.to);
+    const styledText = () => {
+      if (line.length) b.add(line.from, line.to, STYLED_TEXT);
+    };
 
     if (inFrontmatter) {
-      if (show) b.add(line.from, line.from, lineDeco("cm-nz-frontmatter"));
+      b.add(line.from, line.from, lineDeco("cm-nz-frontmatter"));
+      styledText();
       if (i > 1 && (text === "---" || text === "...")) inFrontmatter = false;
       continue;
     }
     if (/^\s*(```|~~~)/.test(text)) {
       inFence = !inFence;
-      if (show) b.add(line.from, line.from, lineDeco("cm-nz-fence-line"));
+      b.add(line.from, line.from, lineDeco("cm-nz-fence-line"));
+      styledText();
       continue;
     }
     if (inFence) {
-      if (show) b.add(line.from, line.from, lineDeco("cm-nz-code-line"));
+      b.add(line.from, line.from, lineDeco("cm-nz-code-line"));
+      styledText();
       continue;
     }
     if (typstMode) {
       const h = /^(=+)\s/.exec(text);
-      if (h && show) b.add(line.from, line.from, lineDeco(`cm-nz-h cm-nz-h${Math.min(6, h[1].length)}`));
+      if (h) { b.add(line.from, line.from, lineDeco(`cm-nz-h cm-nz-h${Math.min(6, h[1].length)}`)); styledText(); }
       continue;
     }
 
@@ -133,15 +142,16 @@ function build(view: EditorView, typstMode: boolean): DecorationSet {
     const divClose = /^\s*:::\s*$/.test(text);
     if (divOpen && !divClose) {
       divStack.push(parseAttrs(divOpen[1]));
-      if (show) b.add(line.from, line.from, lineDeco("cm-nz-div-marker"));
+      b.add(line.from, line.from, lineDeco("cm-nz-div-marker"));
+      styledText();
       continue;
     }
     if (divClose) {
       divStack.pop();
-      if (show) b.add(line.from, line.from, lineDeco("cm-nz-div-marker"));
+      b.add(line.from, line.from, lineDeco("cm-nz-div-marker"));
+      styledText();
       continue;
     }
-    if (!show) continue;
 
     const merged: Record<string, string> = Object.assign({}, ...divStack);
     const classes: string[] = [];
@@ -158,6 +168,8 @@ function build(view: EditorView, typstMode: boolean): DecorationSet {
     if (merged.dir === "rtl" || merged.dir === "ltr") attrs.dir = merged.dir;
     if (divStack.length) classes.push("cm-nz-in-div");
     if (classes.length || Object.keys(attrs).length) b.add(line.from, line.from, lineDeco(classes.join(" "), attrs));
+
+    if (h || merged.font) styledText();
 
     // Inline spans: [text]{attrs}
     const re = /\[([^\]]*)\]\{([^}]*)\}/g;
@@ -182,20 +194,17 @@ const typstModeField = StateField.define<boolean>({
   update: (v, tr) => tr.effects.reduce((acc, e) => (e.is(setTypstMode) ? e.value : acc), v),
 });
 
-const wysiwym = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-    constructor(view: EditorView) {
-      this.decorations = build(view, view.state.field(typstModeField));
-    }
-    update(u: ViewUpdate) {
-      if (u.docChanged || u.viewportChanged || u.transactions.some((t) => t.effects.some((e) => e.is(setTypstMode)))) {
-        this.decorations = build(u.view, u.state.field(typstModeField));
-      }
-    }
+// Height-affecting styles must also cover CodeMirror's retained cursor line
+// outside the viewport. Dropping its font size while scrolling changes the
+// editor's text metrics and invalidates already measured paragraph heights.
+const wysiwym = StateField.define<DecorationSet>({
+  create: state => build(state, state.field(typstModeField)),
+  update(value, tr) {
+    return tr.docChanged || tr.effects.some(e => e.is(setTypstMode))
+      ? build(tr.state, tr.state.field(typstModeField)) : value;
   },
-  { decorations: (v) => v.decorations },
-);
+  provide: field => EditorView.decorations.from(field),
+});
 
 export function styling(typstMode: boolean): Extension {
   return [typstModeField.init(() => typstMode), wysiwym, syntaxHighlighting(markdownHighlight)];

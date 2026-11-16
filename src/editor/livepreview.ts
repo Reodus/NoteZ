@@ -30,6 +30,16 @@ export interface LiveOptions {
 let liveOpts: LiveOptions | null = null;
 export const getLiveOpts = () => liveOpts;
 const resolved = new Map<string, Promise<string | null>>();
+// Virtualized lines recreate their widgets. Reserve the already known image
+// dimensions synchronously so a cached image never collapses to 0px between
+// insertion and its load event (which makes CodeMirror compensate scroll twice).
+const imageSizes = new Map<string, { width: number; height: number } | null>();
+const imageKey = (src: string) => `${liveOpts?.vaultRoot()}\0${liveOpts?.notePath()}\0${src}`;
+function rememberImage(key: string, size: { width: number; height: number } | null) {
+  imageSizes.delete(key);
+  imageSizes.set(key, size);
+  if (imageSizes.size > 256) imageSizes.delete(imageSizes.keys().next().value!);
+}
 
 /** Image URL the webview can load, or null when the file can't be found. */
 export function resolveImage(src: string): Promise<string | null> {
@@ -37,7 +47,7 @@ export function resolveImage(src: string): Promise<string | null> {
   const o = liveOpts;
   if (!o?.resolveAsset) return Promise.resolve(null);
   const note = o.notePath() ?? "";
-  const key = `${note}\0${src}`;
+  const key = `${o.vaultRoot()}\0${note}\0${src}`;
   let p = resolved.get(key);
   if (!p) {
     p = o
@@ -302,6 +312,18 @@ class ImageWidget extends WidgetType {
     frame.className = "cm-nz-img-frame";
     const img = document.createElement("img");
     img.alt = this.caption;
+    const sizeKey = imageKey(this.src);
+    const size = imageSizes.get(sizeKey);
+    if (size) { img.width = size.width; img.height = size.height; }
+    img.onload = () => {
+      // Cache the intrinsic size constrained by the image's height cap. Using
+      // unconstrained width/height attributes on a tall image would turn its
+      // auto width into a fixed width and distort it when max-height applies.
+      const cap = parseFloat(getComputedStyle(img).maxHeight);
+      const scale = Number.isFinite(cap) ? Math.min(1, cap / img.naturalHeight) : 1;
+      rememberImage(sizeKey, { width: img.naturalWidth * scale, height: img.naturalHeight * scale });
+      if (outer.isConnected) view.requestMeasure();
+    };
     if (this.width) img.style.width = `${this.width}px`;
     frame.append(img);
     wrap.append(frame);
@@ -312,14 +334,29 @@ class ImageWidget extends WidgetType {
       return this.mode === "preview" ? null : imageRange(view, from);
     };
     let url: string | null = null;
+    let missingLabel: Text | null = null;
     const missing = () => {
       wrap.classList.add("missing");
       url = null;
       // Keep the bar: the edit button fixes a wrong path.
-      img.replaceWith(document.createTextNode(`🖼 ${this.caption || this.src}`));
+      rememberImage(sizeKey, null);
+      if (!missingLabel) {
+        missingLabel = document.createTextNode(`🖼 ${this.caption || this.src}`);
+        img.replaceWith(missingLabel);
+      }
+      if (outer.isConnected) view.requestMeasure();
     };
     img.onerror = missing;
-    resolveImage(this.src).then((u) => (u ? ((url = u), (img.src = u)) : missing()));
+    // Keep a missing-asset label stable too, but retry resolution so copying
+    // the asset into the vault later can recover without restarting the app.
+    if (size === null) missing();
+    resolveImage(this.src).then((u) => {
+      if (!u) return missing();
+      if (missingLabel) { missingLabel.replaceWith(img); missingLabel = null; }
+      wrap.classList.remove("missing");
+      url = u;
+      img.src = u;
+    });
 
     if (this.mode !== "preview") {
       const bar = document.createElement("span");
