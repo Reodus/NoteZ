@@ -18,6 +18,12 @@ All interactive tests use disposable vaults and an isolated Electron configurati
 | Failed image/file paste removes selection | Select source text and reject attachment import | Original text remains intact |
 | Import lands in a different tab | Start attachment import, immediately switch tabs | Link is inserted only in the original note |
 
+## Note navigation and scrolling follow-up
+
+A long-note regression reproduced a viewport change from 1985px to 1232px after switching tabs, and a delayed line-101 jump landing in a different note. Per-tab CodeMirror scroll snapshots now preserve the visible location. Cached states are patched for external edits and mapped to the changed document; caches are reset between vaults. Pending focus/line/table callbacks are cancelled or checked against the current note/state.
+
+`scripts/scroll-cases.mjs`, invoked by the Electron suite, covers tab switching without moving the cursor, Source/Live editor remounts via an image tab, hidden-note disk edits, delayed line navigation and an old slow read racing an actual tab click. Virtual height estimates may change the absolute scrollTop after remounting, so those cases assert the same visible paragraph rather than an arbitrary pixel offset.
+
 ## Automated checks
 
 - `npm run test:asm`: six assembly dialects.

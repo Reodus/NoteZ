@@ -337,7 +337,9 @@ export const skipTableCaret = EditorView.updateListener.of((u) => {
   const down = sel.head >= u.startState.selection.main.head;
   const target = down ? Math.min(s.doc.length, t.to + 1) : Math.max(0, t.from - 1);
   if (target >= t.from && target <= t.to) return;
-  queueMicrotask(() => u.view.dispatch({ selection: { anchor: target }, scrollIntoView: true }));
+  queueMicrotask(() => {
+    if (u.view.state === s) u.view.dispatch({ selection: { anchor: target }, scrollIntoView: true });
+  });
 });
 
 // ------------------------------------------- toolbar ↔ focused cell

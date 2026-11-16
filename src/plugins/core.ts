@@ -3,7 +3,7 @@ import { checkForUpdates } from "../core/updates";
 import type { BuiltinPlugin } from "../core/plugins";
 import { activeWords } from "../core/words";
 import {
-  state, setState, setDialog, closeTab, saveAll, prefs, setPrefs, setSidebarOpen, sidebarOpen, createNote,
+  state, openNote, setDialog, closeTab, saveAll, prefs, setPrefs, setSidebarOpen, sidebarOpen, createNote,
   setRightTab, focusMode, setFocusMode, newNoteDir,
 } from "../core/store";
 import { chooseVault } from "../ui/Welcome";
@@ -29,7 +29,7 @@ export const corePlugin: BuiltinPlugin = {
       palette: false,
       run: () => {
         const i = state.tabs.indexOf(state.active ?? "");
-        if (state.tabs.length) setState("active", state.tabs[(i + 1) % state.tabs.length]);
+        if (state.tabs.length) openNote(state.tabs[(i + 1) % state.tabs.length]);
       },
     });
     c({
@@ -39,7 +39,7 @@ export const corePlugin: BuiltinPlugin = {
       palette: false,
       run: () => {
         const i = state.tabs.indexOf(state.active ?? "");
-        if (state.tabs.length) setState("active", state.tabs[(i - 1 + state.tabs.length) % state.tabs.length]);
+        if (state.tabs.length) openNote(state.tabs[(i - 1 + state.tabs.length) % state.tabs.length]);
       },
     });
     c({ id: "vault.open", title: t("Open vault…"), key: "Mod-o", run: chooseVault });

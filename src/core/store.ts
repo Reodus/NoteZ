@@ -327,6 +327,7 @@ export async function refreshTree() {
 }
 
 export async function openVault(path: string) {
+  noteOpenSeq++;
   await saveAll();
   try {
     setTree(await ipc.openVault(path));
@@ -344,6 +345,7 @@ export async function openVault(path: string) {
 }
 
 export async function closeVault() {
+  noteOpenSeq++;
   await saveAll();
   setRoot(null);
   setState({ tabs: [], active: null, buffers: {} });
@@ -368,8 +370,11 @@ export async function openOsPath(p: string) {
 /** Bumped when files change on disk, so image/PDF tabs reload. */
 export const [fileRev, setFileRev] = createSignal(0);
 
+let noteOpenSeq = 0;
+
 /** Open a vault file: notes in the editor, images and PDFs in a viewer tab, anything else in its default app. */
 export async function openNote(path: string, opts: { line?: number } = {}) {
+  const request = ++noteOpenSeq, vault = root();
   const kind = fileKind(path);
   if (kind === "other") {
     if (root()) await openPath(`${root()}/${path}`).catch((e) => notify(String(e), "error"));
@@ -378,6 +383,7 @@ export async function openNote(path: string, opts: { line?: number } = {}) {
   if (kind === "note" && !state.buffers[path]) {
     try {
       const content = await ipc.read(path);
+      if (request !== noteOpenSeq || vault !== root()) return;
       setState("buffers", path, { content, saved: content });
     } catch (e) {
       notify(String(e), "error");
@@ -394,7 +400,9 @@ export async function openNote(path: string, opts: { line?: number } = {}) {
     }),
   );
   app.events.emit("note:opened", { path });
-  if (opts.line) queueMicrotask(() => setTimeout(() => goToLine(opts.line!), 30));
+  if (opts.line) queueMicrotask(() => setTimeout(() => {
+    if (request === noteOpenSeq && root() === vault && state.active === path) goToLine(opts.line!);
+  }, 30));
 }
 
 export function goToLine(line: number) {
@@ -440,6 +448,7 @@ export async function closeTab(path: string) {
   await flushSaveParticipants();
   await flushComments();
   do { await save(path); } while (isDirty(path));
+  if (state.active === path) noteOpenSeq++;
   setState(
     produce((s) => {
       const i = s.tabs.indexOf(path);

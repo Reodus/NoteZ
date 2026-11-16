@@ -1,7 +1,7 @@
 import { noteIcon } from "../core/meta";
 import { createSignal, For, Show } from "solid-js";
 import { X, FileText, FileCode2, FileImage, FileType2, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2, Table2 } from "lucide-solid";
-import { state, setState, isDirty, closeTab, prefs, setPrefs, setFocusMode } from "../core/store";
+import { state, setState, openNote, isDirty, closeTab, prefs, setPrefs, setFocusMode } from "../core/store";
 import { stem, basename, fileKind, isNotePath } from "../core/ipc";
 import { fileMenu, entryFor } from "./fileMenu";
 import { openMenu } from "./primitives";
@@ -57,7 +57,7 @@ export default function TabBar() {
                   void closeTab(path).catch(() => {});
                 }
               }}
-              onClick={() => setState("active", path)}
+              onClick={() => void openNote(path)}
               onContextMenu={(e) =>
                 openMenu(e, [
                   { label: t("Close"), run: () => closeTab(path).catch(() => {}) },

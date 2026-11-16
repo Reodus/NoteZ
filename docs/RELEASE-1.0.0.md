@@ -4,6 +4,8 @@ This release stabilizes editing, drag and drop, persistence and review comments.
 
 ## Editing and moving
 
+- Reading positions survive tab switches and returns from image/PDF tabs. Disk reloads map the viewport anchor instead of resetting the editor. Superseded note loads and delayed line jumps cannot steal navigation.
+
 - Block grips remain hover-only and follow the rendered block's reading direction, including editable tables, task markers and mixed Persian/English notes.
 - Moving a block keeps its cursor/selection and comments. Undo and redo restore comment anchors along with the text.
 - Block dragging supports edge autoscroll and cancels cleanly on Escape, pointer cancellation, lost capture, blur or editor destruction.

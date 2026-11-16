@@ -1,5 +1,5 @@
 import { onCleanup, onMount, createEffect, on } from "solid-js";
-import { Compartment, EditorState, Extension, Prec } from "@codemirror/state";
+import { Compartment, EditorState, Extension, Prec, Transaction } from "@codemirror/state";
 import {
   EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, dropCursor,
   highlightSpecialChars, rectangularSelection, crosshairCursor, placeholder,
@@ -166,9 +166,17 @@ export function openLinkTarget(target: string): boolean {
 
 /** Run `fn` once the editor shows note `path` (right after opening it). */
 function whenShown(path: string, fn: () => void, tries = 20) {
-  const view = editorView();
-  if (view && state.active === path && view.state.doc.toString() === state.buffers[path]?.content) fn();
-  else if (tries > 0) setTimeout(() => whenShown(path, fn, tries - 1), 25);
+  if (state.active !== path) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancel = app.events.on("note:opened", () => { clearTimeout(timer); cancel(); });
+  const check = () => {
+    const view = editorView();
+    if (state.active !== path) { cancel(); return; }
+    if (view && view.state.doc.toString() === state.buffers[path]?.content) { cancel(); fn(); }
+    else if (tries-- > 0) timer = setTimeout(check, 25);
+    else cancel();
+  };
+  check();
 }
 
 /** Ctrl+click on [[wikilinks]] and [text](target) links opens them. */
@@ -219,12 +227,24 @@ function languageFor(path: string): Extension {
 /** Editor state per open tab (undo history, cursor), kept while the editor
  * is unmounted, e.g. while an image or PDF tab is shown. */
 const states = new Map<string, EditorState>();
+const scrolls = new Map<string, ReturnType<EditorView["scrollSnapshot"]>>();
+app.events.on("vault:opened", () => { states.clear(); scrolls.clear(); });
+
+/** Patch disk changes without resetting the cursor, history or viewport anchor. */
+function textChange(before: string, after: string) {
+  let from = 0;
+  while (from < before.length && from < after.length && before[from] === after[from]) from++;
+  let suffix = 0;
+  while (suffix < before.length - from && suffix < after.length - from && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
+  return { from, to: before.length - suffix, insert: after.slice(from, after.length - suffix) };
+}
 
 export default function Editor() {
   let host!: HTMLDivElement;
   let view: EditorView | undefined;
   /** Editor state per open tab: keeps undo history and cursor when switching. */
   let current: string | null = null;
+  let focusFrame = 0;
   const live = (path: string) => [
     prefs.editorMode === "live" && !path.endsWith(".typ") ? liveEmbeds : [],
     livePreview(prefs.editorMode === "live", path.endsWith(".typ"), {
@@ -294,18 +314,30 @@ export default function Editor() {
 
   function show(path: string | null) {
     if (!view) return;
-    if (current && current !== path) states.set(current, view.state);
+    if (path && current === path && view.state.doc.toString() === state.buffers[path]?.content) return;
+    cancelAnimationFrame(focusFrame);
+    if (current && current !== path) {
+      states.set(current, view.state);
+      scrolls.set(current, view.scrollSnapshot());
+    }
     // Drop states of closed tabs.
-    for (const p of [...states.keys()]) if (!state.tabs.includes(p)) states.delete(p);
+    for (const p of [...states.keys()]) if (!state.tabs.includes(p)) { states.delete(p); scrolls.delete(p); }
     current = path;
     if (!path) return;
     const buf = state.buffers[path];
     let st = states.get(path);
-    if (!st || st.doc.toString() !== buf?.content) st = makeState(path, buf?.content ?? "");
+    if (!st) st = makeState(path, buf?.content ?? "");
+    else if (st.doc.toString() !== buf?.content) {
+      const tr = st.update({ changes: textChange(st.doc.toString(), buf?.content ?? ""), effects: refreshComments.of(), annotations: Transaction.addToHistory.of(false) });
+      const mapped = scrolls.get(path)?.map(tr.changes);
+      if (mapped) scrolls.set(path, mapped);
+      st = tr.state;
+    }
     view.setState(st);
     // Re-apply dynamic config that may have changed while the tab was hidden.
     view.dispatch({
       effects: [
+        ...(scrolls.has(path) ? [scrolls.get(path)!] : []),
         refreshComments.of(),
         commentsComp.reconfigure(prefs.disabledBuiltins.includes("core.comments") ? [] : commentExtension(path)),
         lineNumbersComp.reconfigure(prefs.lineNumbers ? lineNumbers() : []),
@@ -319,7 +351,7 @@ export default function Editor() {
     const sel = view.state.selection.main;
     const line = view.state.doc.lineAt(sel.head);
     setCursor({ line: line.number, col: sel.head - line.from + 1, selected: 0 });
-    requestAnimationFrame(() => view?.focus());
+    focusFrame = requestAnimationFrame(() => { if (current === path && state.active === path) view?.focus(); });
   }
 
   onMount(() => {
@@ -334,11 +366,10 @@ export default function Editor() {
     if (!view || path !== current) return;
     const old = view.state.doc.toString();
     if (old === content) return;
-    let a = 0;
-    while (a < old.length && a < content.length && old[a] === content[a]) a++;
-    let b = 0;
-    while (b < old.length - a && b < content.length - a && old[old.length - 1 - b] === content[content.length - 1 - b]) b++;
-    view.dispatch({ changes: { from: a, to: old.length - b, insert: content.slice(a, content.length - b) }, effects: refreshComments.of() });
+    const tr = view.state.update({ changes: textChange(old, content), effects: refreshComments.of(), annotations: Transaction.addToHistory.of(false) });
+    const scroll = view.scrollSnapshot().map(tr.changes);
+    view.dispatch(tr);
+    if (scroll) view.dispatch({ effects: scroll });
   }));
 
   createEffect(on(() => state.active, (path) => show(path)));
@@ -423,9 +454,11 @@ export default function Editor() {
   createEffect(on(() => [state.active ? state.buffers[state.active]?.content : undefined, prefs.commentsInPdf], () => schedulePreview(), { defer: false }));
 
   onCleanup(() => {
-    if (view && current) states.set(current, view.state);
+    cancelAnimationFrame(focusFrame);
+    if (view && current) { states.set(current, view.state); scrolls.set(current, view.scrollSnapshot()); }
     setEditorView(null);
     view?.destroy();
+    view = undefined;
   });
 
   return (
