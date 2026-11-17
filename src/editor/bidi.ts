@@ -245,4 +245,36 @@ export const homeEndKeys = Prec.high(
   ]),
 );
 
-export const bidi = [EditorView.perLineTextDirection.of(true), autoDirPlugin, homeEndKeys];
+/** Blank space beyond an RTL row means its logical end, even when the last
+ * run is LTR (the browser otherwise reports the start of that run). */
+function rtlRowEnd(view: EditorView, e: MouseEvent): number | null {
+  const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+  if (pos === null) return null;
+  const line = view.state.doc.lineAt(pos);
+  if (view.textDirectionAt(line.from) !== Direction.RTL) return null;
+  const span = view.bidiSpans(line).find(s => s.to === line.length);
+  if (!span || span.dir !== Direction.LTR) return null;
+  const end = view.coordsAtPos(line.to, -1);
+  const start = view.coordsAtPos(line.from + span.from, 1);
+  if (!end || !start || e.clientY < end.top || e.clientY > end.bottom || Math.abs(start.top - end.top) > 2) return null;
+  return e.clientX < start.left ? line.to : null;
+}
+
+const bidiMouse = EditorView.mouseSelectionStyle.of((view, event) => {
+  if (event.button !== 0 || event.detail > 1) return null;
+  const end = rtlRowEnd(view, event);
+  if (end === null) return null;
+  let initial = view.state.selection, anchor = end;
+  return {
+    get(e, extend, multiple) {
+      const head = rtlRowEnd(view, e) ?? view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
+      const range = EditorSelection.range(extend ? initial.main.anchor : anchor, head);
+      return multiple ? initial.addRange(range) : EditorSelection.create([range]);
+    },
+    update(u) {
+      if (u.docChanged) { initial = initial.map(u.changes); anchor = u.changes.mapPos(anchor); }
+    },
+  };
+});
+
+export const bidi = [EditorView.perLineTextDirection.of(true), autoDirPlugin, homeEndKeys, bidiMouse];

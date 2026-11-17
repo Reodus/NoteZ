@@ -246,11 +246,16 @@ class Handle {
       const dirEl = widget?.querySelector<HTMLElement>("[dir]") ?? line ?? widget;
       const rtl = dirEl ? getComputedStyle(dirEl).direction === "rtl" : view.textDirection === 1;
       const marker = line?.querySelector<HTMLElement>(".cm-nz-lp-bullet, .cm-nz-lp-check")?.getBoundingClientRect();
+      // Inline image previews share the source line and can make the caret
+      // rectangle as tall as the image. Anchor the grip to the source row.
+      const sourceImage = line?.querySelector<HTMLElement>(".cm-nz-lp-image.preview");
       const rect = widget?.getBoundingClientRect();
+      const sourceRow = sourceImage ? line!.getBoundingClientRect() : null;
+      const rowHeight = sourceImage ? view.defaultLineHeight : at.bottom - at.top;
       const x = rtl
-        ? Math.min(Math.max(rect?.right ?? at.right, marker?.right ?? 0, ...lineRight(view, first.from + indent)) + 6, dom.right - 22)
-        : Math.max(Math.min(rect?.left ?? at.left, marker?.left ?? Infinity) - 24, dom.left + (view.scrollDOM.querySelector<HTMLElement>(".cm-gutters")?.getBoundingClientRect().width ?? 0) + 2);
-      const top = (rect?.top ?? at.top) + Math.max(0, (Math.min(at.bottom - at.top, 40) - 22) / 2);
+        ? Math.min(Math.max(sourceRow?.right ?? rect?.right ?? at.right, marker?.right ?? 0, ...lineRight(view, first.from + indent)) + 6, dom.right - 22)
+        : Math.max(Math.min(sourceRow?.left ?? rect?.left ?? at.left, marker?.left ?? Infinity) - 24, dom.left + (view.scrollDOM.querySelector<HTMLElement>(".cm-gutters")?.getBoundingClientRect().width ?? 0) + 2);
+      const top = (rect?.top ?? sourceRow?.top ?? at.top) + Math.max(0, (Math.min(rowHeight, 40) - 22) / 2);
       const viewport = view.scrollDOM.getBoundingClientRect();
       if (top < viewport.top || top + 22 > viewport.bottom || !content.width) return null;
       return { x: x - dom.left, y: top - dom.top };

@@ -58,13 +58,16 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
   const lines=await evaluate(`(()=>{const d=window.test.s.editorView().state.doc;return Array.from({length:d.lines},(_,i)=>d.line(i+1)).filter(l=>l.text.length>250&&!l.text.includes('![[')).filter((_,i)=>i%7===0).slice(0,10).map(l=>l.number)})()`);
   let edits=0;
   for(const n of lines) {
-   // Scroll the exact character we will click, rather than the start of
-   // its logical line (a wrapped paragraph can be taller than the viewport).
+   // Navigation must materialize the target, as the app's note/block jumps
+   // do. A scroll effect alone can center an estimated height-map gap rather
+   // than this character on platforms with different font metrics. The
+   // selection keeps this position rendered while CM measures the paragraph.
+   // We move the caret away again before the real click below.
    const target=await evaluate(`window.test.s.editorView().state.doc.line(${n}).from+20`);
    let point=null,lastGeometry=null;
    const deadline=Date.now()+5000;
    while(Date.now()<deadline){
-    await evaluate(`(()=>{const v=window.test.s.editorView();v.dispatch({effects:v.constructor.scrollIntoView(${target},{y:'center'})})})()`);
+    await evaluate(`(()=>{const v=window.test.s.editorView();v.dispatch({selection:{anchor:${target}},effects:v.constructor.scrollIntoView(${target},{y:'center'})})})()`);
     await sleep(100);
     lastGeometry=await evaluate(`(()=>{const v=window.test.s.editorView(),r=v.scrollDOM.getBoundingClientRect(),c=v.coordsAtPos(${target});return {rect:r.toJSON(),coords:c,viewport:v.viewport,top:v.scrollDOM.scrollTop}})()`);
     const {rect:r,coords:c}=lastGeometry;
@@ -72,6 +75,10 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
    }
    if(!point)writeFileSync(path.join(scratch,`editing-${width}-${n}.json`),JSON.stringify(lastGeometry,null,2));
    assert.ok(point,`character ${target} on line ${n} must be reachable for editing: ${JSON.stringify(lastGeometry)}`);
+   await evaluate(`window.test.s.editorView().dispatch({selection:{anchor:0}})`);await sleep(100);
+   const clickGeometry=await evaluate(`(()=>{const v=window.test.s.editorView(),c=v.coordsAtPos(${target}),r=v.scrollDOM.getBoundingClientRect();return {c,r:r.toJSON()}})()`);
+   assert.ok(clickGeometry.c&&clickGeometry.c.top>clickGeometry.r.top&&clickGeometry.c.bottom<clickGeometry.r.bottom,'target stays visible with caret elsewhere');
+   point={x:clickGeometry.c.left,y:(clickGeometry.c.top+clickGeometry.c.bottom)/2};
    edits++;
    await rpc('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});
    await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});await sleep(100);

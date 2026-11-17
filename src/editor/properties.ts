@@ -3,7 +3,7 @@
 // `yaml` Document API (comments and key order survive) as one undo step.
 import { WidgetType, EditorView } from "@codemirror/view";
 import { parseDocument } from "yaml";
-import { editFrontmatter, renameFrontmatterKey } from "../core/frontmatter";
+import { editFrontmatter, renameFrontmatterKey, frontmatterRange } from "../core/frontmatter";
 import { getLiveOpts, hydrateMath, inlineHtml } from "./livepreview";
 
 import { t } from "../core/i18n";
@@ -39,7 +39,7 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""): 
 }
 
 /** A one-line contenteditable that shows rendered Markdown until focused. */
-function inlineEditor(raw: string, placeholder: string, commit: (v: string) => void, render = true): HTMLElement {
+function inlineEditor(raw: string, placeholder: string, commit: (v: string) => void, render = true, enter?: () => void): HTMLElement {
   const el = h("div", "nz-prop-edit");
   el.contentEditable = "true";
   el.spellcheck = false;
@@ -59,9 +59,10 @@ function inlineEditor(raw: string, placeholder: string, commit: (v: string) => v
     }
   });
   el.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !e.isComposing) {
       e.preventDefault();
       el.blur();
+      enter?.();
     } else if (e.key === "Escape") {
       e.preventDefault();
       el.textContent = value;
@@ -184,7 +185,18 @@ export class PropertiesWidget extends WidgetType {
     // The `title:` property is the document title, shown like the PDF does.
     const title = props.find(([k]) => k === "title");
     if (title && isScalar(title[1])) {
-      const t = inlineEditor(show(title[1]), "Untitled", (s) => set("title", s || null));
+      const t = inlineEditor(show(title[1]), "Untitled", (s) => set("title", s || null), true, () => {
+        // Blur commits YAML first, so calculate the body offset from the new document.
+        const doc = view.state.doc;
+        const start = frontmatterRange(doc.toString())?.bodyStart ?? 0;
+        const needsLine = start === doc.length && doc.lineAt(start).text.length > 0;
+        view.dispatch({
+          ...(needsLine ? { changes: { from: start, insert: "\n" } } : {}),
+          selection: { anchor: start + (needsLine ? 1 : 0) },
+          scrollIntoView: true,
+        });
+        view.focus();
+      });
       t.classList.add("cm-nz-lp-doc-title");
       outer.append(t);
     }

@@ -8,6 +8,7 @@ import electron from 'electron';
 import { createServer } from 'vite';
 import { readingFixture, checkReading } from './reading-cases.mjs';
 import { checkScroll } from './scroll-cases.mjs';
+import { checkEditor } from './editor-cases.mjs';
 const readingOnly=process.argv.includes('--reading');
 const scratch=mkdtempSync(path.join(process.env.RUNNER_TEMP||tmpdir(),'notez-ui-')),vault=path.join(scratch,'vault');
 mkdirSync(vault);mkdirSync(path.join(scratch,'second'));
@@ -66,6 +67,7 @@ try {
   assert.deepEqual(await evaluate('window.testErrors'),[]);assert.equal(exceptions.length,0,JSON.stringify(exceptions));assert.deepEqual(layoutWarnings,[],'editor geometry must stabilize');
   console.log('Reading artifacts: '+scratch);
  } else {
+ await checkEditor({evaluate,rpc,sleep});
  await checkScroll(evaluate,sleep);
  const before=readFileSync(path.join(vault,'Audit.md'),'utf8');
  await evaluate(`(async()=>{const {s,c}=window.test,v=s.editorView();const a=v.state.doc.toString().indexOf('Alpha');v.dispatch({selection:{anchor:a,head:a+5}});await c.addComment();const id=c.comments[s.state.active][0].id;window.test.id=id;const input=document.querySelector('.comment-body');input.value='Review فارسی';input.dispatchEvent(new Event('input',{bubbles:true}));await c.flushComments();s.setRightTab('preview');document.addEventListener('mousemove',e=>window.lastMouse={x:e.clientX,y:e.clientY,target:e.target.className})})()`);
