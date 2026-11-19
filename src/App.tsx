@@ -1,10 +1,10 @@
-import { createEffect, onCleanup, onMount, Show, Switch, Match } from "solid-js";
+import { createEffect, createMemo, on, onCleanup, onMount, Show, Switch, Match } from "solid-js";
 import { initUpdates } from "./core/updates";
 import { Copy, Minimize2, PanelLeft } from "lucide-solid";
 import { app, notify } from "./core/app";
 import {
   root, prefs, isDark, openVault, openNote, openOsPath, dialog, setDialog, sidebarOpen, setSidebarOpen, saveAll, state,
-  focusMode, setFocusMode, viewLayout,
+  focusMode, setFocusMode, viewLayout, activeThemeKey, refreshActiveTheme,
 } from "./core/store";
 import { fileKind, ipc } from "./core/ipc";
 import { onSaveRequest, setZoom, setSpellcheck, takeOpenedFiles, onOpenPath, onVaultFs, onCapture, setCaptureShortcut } from "./core/native";
@@ -24,6 +24,7 @@ import Sidebar from "./ui/Sidebar";
 import TabBar from "./ui/TabBar";
 import Toolbar from "./ui/Toolbar";
 import RightPanel from "./ui/RightPanel";
+import { cancelDragAnimations } from "./ui/dragMotion";
 import StatusBar from "./ui/StatusBar";
 import CommandPalette from "./ui/CommandPalette";
 import Settings from "./ui/Settings";
@@ -87,6 +88,13 @@ function EmptyState() {
 }
 
 export default function App() {
+  const documentThemeKey = createMemo(activeThemeKey);
+  createEffect(on(documentThemeKey, (key) => {
+    if (!key) return;
+    const timer = window.setTimeout(() => void refreshActiveTheme(), 250);
+    onCleanup(() => clearTimeout(timer));
+  }));
+
   // Appearance → CSS.
   createEffect(() => {
     const el = document.documentElement;
@@ -106,7 +114,10 @@ export default function App() {
   }));
 
   createEffect(() => setZoom(prefs.uiZoom));
-  createEffect(() => document.documentElement.classList.toggle("no-anim", !prefs.animations));
+  createEffect(() => {
+    document.documentElement.classList.toggle("no-anim", !prefs.animations);
+    if (!prefs.animations) cancelDragAnimations();
+  });
   createEffect(() => void setSpellcheck(prefs.spellcheck, [...prefs.spellcheckLanguages]).catch(() => {}));
 
   const onKey = (e: KeyboardEvent) => {

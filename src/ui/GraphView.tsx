@@ -357,7 +357,7 @@ export default function GraphView() {
         ctx.lineTo(n.x!, n.y! + s);
         ctx.stroke();
       }
-      if (n.id === active || n === focus || (n.kind === "folder" && n.note && n.note === active)) {
+      if (n.id === active || n === focus || (n === drag?.node && drag.moved) || (n.kind === "folder" && n.note && n.note === active)) {
         ctx.beginPath();
         ctx.arc(n.x!, n.y!, n.r * (n.kind === "folder" ? 1.25 : 1) + 3.5 / view.k + 1, 0, Math.PI * 2);
         ctx.lineWidth = 2 / view.k;
@@ -546,44 +546,62 @@ export default function GraphView() {
     }
   };
 
-  let drag: { node: Node | null; sx: number; sy: number; vx: number; vy: number; moved: boolean; ev: MouseEvent } | null = null;
+  let drag: { node: Node | null; sx: number; sy: number; vx: number; vy: number; dx: number; dy: number; moved: boolean; ev: MouseEvent } | null = null;
+  let motionFrame = 0;
+  let lastMove: MouseEvent | undefined;
   const onDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
-    const n = hit(e);
-    drag = { node: n, sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y, moved: false, ev: e };
-    if (n && n.kind !== "root") {
-      const p = toGraph(e);
-      n.fx = p.x;
-      n.fy = p.y;
-      sim?.alphaTarget(0.25).restart();
+    const node = hit(e), p = toGraph(e);
+    drag = {
+      node, sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y,
+      dx: (node?.x ?? p.x) - p.x, dy: (node?.y ?? p.y) - p.y, moved: false, ev: e,
+    };
+    if (node && node.kind !== "root") {
+      node.fx = node.x ?? p.x;
+      node.fy = node.y ?? p.y;
     }
     canvas.style.cursor = "grabbing";
   };
-  const onMove = (e: MouseEvent) => {
-    if (!drag) return setHover(hit(e));
-    if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 3) drag.moved = true;
+  const moveGraph = (e: MouseEvent) => {
+    if (!drag) return;
+    if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) <= 3) return;
+    if (!drag.moved && drag.node && drag.node.kind !== "root") sim?.alphaTarget(0.25).restart();
+    drag.moved = true;
     if (drag.node && drag.node.kind !== "root") {
-      const p = toGraph(e);
-      drag.node.fx = p.x;
-      drag.node.fy = p.y;
+      const p = toGraph(e), node = drag.node;
+      node.x = node.fx = p.x + drag.dx;
+      node.y = node.fy = p.y + drag.dy;
     } else if (!drag.node) {
       view.x = drag.vx + e.clientX - drag.sx;
       view.y = drag.vy + e.clientY - drag.sy;
-      redraw();
     }
+    redraw();
   };
-  const onUp = () => {
+  const onMove = (e: MouseEvent) => {
+    if (!drag) return setHover(hit(e));
+    lastMove = e;
+    if (!motionFrame) motionFrame = requestAnimationFrame(() => {
+      motionFrame = 0;
+      if (lastMove) moveGraph(lastMove);
+    });
+  };
+  const onUp = (e?: MouseEvent) => {
     if (!drag) return;
+    cancelAnimationFrame(motionFrame);
+    motionFrame = 0;
+    if (e && lastMove) moveGraph(e);
     const { node, moved, ev } = drag;
     drag = null;
+    lastMove = undefined;
     if (node && node.kind !== "root") {
-      // A dragged node stays where it was put (Alt-drag lets it go back).
       if (!moved || ev.altKey) (node.fx = null), (node.fy = null);
       sim?.alphaTarget(0);
     }
     canvas.style.cursor = hover ? "pointer" : "grab";
-    if (node && !moved) activate(node, ev);
+    redraw();
+    if (e && node && !moved) activate(node, ev);
   };
+  const onBlur = () => onUp();
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
     const r = canvas.getBoundingClientRect();
@@ -604,10 +622,13 @@ export default function GraphView() {
     const ro = new ResizeObserver(redraw);
     ro.observe(wrap);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("blur", onBlur);
     window.addEventListener("keydown", onKey);
     onCleanup(() => {
       ro.disconnect();
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("blur", onBlur);
+      cancelAnimationFrame(motionFrame);
       window.removeEventListener("keydown", onKey);
       sim?.stop();
       cancelAnimationFrame(frame);

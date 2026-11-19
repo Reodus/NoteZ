@@ -6,7 +6,7 @@ import { app } from "./app";
 import { ipc } from "./ipc";
 import { notify } from "./app";
 
-import { removeFromTree, moveInTree } from "./bookmarkTree";
+import { removeFromTree, moveInTree, withBookmarkItems } from "./bookmarkTree";
 import { t } from "./i18n";
 export interface Bookmark {
   type: "file" | "folder" | "search" | "group";
@@ -63,8 +63,8 @@ export function toggleBookmark(b: Bookmark, group?: string | Bookmark) {
   if (group) {
     let found = false;
     const append = (list: Bookmark[]): Bookmark[] => list.map(x => {
-      if (x.type === "group" && (typeof group === "string" ? !found && x.title === group : x === group)) { found = true; return { ...x, items: [...(x.items ?? []), entry] }; }
-      return x.items ? { ...x, items: append(x.items) } : x;
+      if (x.type === "group" && (typeof group === "string" ? !found && x.title === group : x === group)) { found = true; return withBookmarkItems(x, [...(x.items ?? []), entry]); }
+      return x.items ? withBookmarkItems(x, append(x.items)) : x;
     });
     const next = append(items());
     if (found) return save(next);

@@ -1,5 +1,6 @@
-import { createSignal, For, Show, createEffect, on, createRoot, Switch, Match } from "solid-js";
+import { createSignal, For, Show, createEffect, on, onCleanup, createRoot, Switch, Match } from "solid-js";
 import { startResize } from "./resize";
+import { DragProjection, dragItems, endNativeDrag, nativeDropRect, pulseDrop, settleDragItems, startNativeDrag } from "./dragMotion";
 import {
   Files, Search, FilePlus, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, FileText, FileCode2,
   FolderInput, Settings, Sun, Moon, Monitor, ArrowLeftRight, ChevronsDownUp, Waypoints, File, FileImage, FileType2,
@@ -113,6 +114,35 @@ let draggedPath: string | null = null;
 const [dropDir, setDropDir] = createSignal<string | null>(null);
 const DRAG_TYPE = "text/notez-path";
 const isOurDrag = (ev: DragEvent) => !!ev.dataTransfer?.types.includes(DRAG_TYPE);
+const fileProjection = new DragProjection();
+const fileNodes = (tree: Element) => dragItems(tree, ".tree-item[data-path]", el => el.dataset.path!);
+
+function previewFileMove(scope: HTMLElement, dir: string, from: string) {
+  const nodes = fileNodes(scope);
+  const source = nodes.get(from), folder = nodes.get(dir);
+  if (!source || (dir && !folder?.nextElementSibling?.matches(".tree-children"))) return fileProjection.clear();
+  const rows = [...nodes.values()];
+  const index = rows.indexOf(source);
+  const name = from.split("/").at(-1)!.toLowerCase();
+  const isDir = source.classList.contains("dir");
+  const next = rows.find(el => {
+    const path = el.dataset.path!;
+    if (el === source || dirname(path) !== dir) return false;
+    const siblingIsDir = el.classList.contains("dir");
+    return siblingIsDir === isDir ? path.split("/").at(-1)!.toLowerCase() > name : isDir;
+  });
+  const following = dir ? rows.find(el => rows.indexOf(el) > rows.indexOf(folder!) && !el.dataset.path!.startsWith(dir + "/")) : undefined;
+  const at = next ?? following;
+  const destination = at ? rows.indexOf(at) : rows.length;
+  const step = source.offsetHeight;
+  const offsets = new Map<HTMLElement, { x: number; y: number }>();
+  rows.forEach((el, i) => {
+    if (index < i && i < destination || destination <= i && i < index)
+      offsets.set(el, { x: 0, y: index < destination ? -step : step });
+  });
+  fileProjection.show(offsets, scope.getBoundingClientRect());
+}
+
 
 function dropProps(target: () => string) {
   return {
@@ -124,22 +154,45 @@ function dropProps(target: () => string) {
       const invalid = !!draggedPath && (dir === draggedPath || dir.startsWith(draggedPath + "/") || dir === dirname(draggedPath));
       if (ev.dataTransfer) ev.dataTransfer.dropEffect = invalid ? "none" : "move";
       setDropDir(invalid ? null : dir);
+      const scope = (ev.currentTarget as HTMLElement).closest<HTMLElement>(".tree");
+      if (!invalid && scope && draggedPath) previewFileMove(scope, dir, draggedPath);
+      else fileProjection.clear();
     },
-    onDragLeave: (ev: DragEvent) => { if (!(ev.currentTarget as HTMLElement).contains(ev.relatedTarget as Node | null)) setDropDir(null); },
+    onDragLeave: (ev: DragEvent) => {
+      if (!(ev.currentTarget as HTMLElement).contains(ev.relatedTarget as Node | null)) setDropDir(null);
+    },
     onDrop: (ev: DragEvent) => {
       if (!isOurDrag(ev)) return;
       ev.preventDefault();
       ev.stopPropagation();
       setDropDir(null);
       const from = ev.dataTransfer?.getData(DRAG_TYPE);
-      if (from) void moveEntry(from, target());
+      if (!from) return fileProjection.clear();
+      const dir = target();
+      const dest = dir ? `${dir}/${from.split("/").at(-1)}` : from.split("/").at(-1)!;
+      if (dir === from || dir.startsWith(from + "/") || dest === from) return fileProjection.clear();
+      const scope = (ev.currentTarget as HTMLElement).closest(".tree");
+      if (!scope) return;
+      const items = () => fileNodes(scope);
+      const before = fileProjection.capture(items());
+      fileProjection.clear();
+      const drop = nativeDropRect(ev), vault = root();
+      endNativeDrag();
+      const hasPath = (entries: Entry[], path: string): boolean =>
+        entries.some(entry => entry.path === path || hasPath(entry.children ?? [], path));
+      void moveEntry(from, dir).then(() => requestAnimationFrame(() => {
+        if (!scope.isConnected || vault !== root() || hasPath(tree(), from) || !hasPath(tree(), dest)) return;
+        const after = items();
+        settleDragItems(before, after, { key: dest, rect: drop ?? before.get(from) });
+        if (!after.has(dest)) pulseDrop(after.get(dir) ?? scope as HTMLElement);
+      }));
     },
   };
 }
 const dragProps = (path: () => string) => ({
   draggable: true,
-  onDragStart: (ev: DragEvent) => { ev.stopPropagation(); draggedPath = path(); ev.dataTransfer?.setData(DRAG_TYPE, path()); },
-  onDragEnd: () => { draggedPath = null; setDropDir(null); },
+  onDragStart: (ev: DragEvent) => { ev.stopPropagation(); draggedPath = path(); ev.dataTransfer?.setData(DRAG_TYPE, path()); startNativeDrag(ev, ev.currentTarget as HTMLElement); },
+  onDragEnd: (ev: DragEvent) => { endNativeDrag(ev.currentTarget as HTMLElement); fileProjection.clear(); draggedPath = null; setDropDir(null); },
 });
 
 // Keyboard: one row is the tab stop (roving tabindex); arrows move between rows.
@@ -267,6 +320,7 @@ function TreeNode(props: { entry: Entry; depth: number }) {
 }
 
 function FilesPane() {
+  onCleanup(() => fileProjection.clear());
   return (
     <div
       class="tree"
@@ -279,7 +333,7 @@ function FilesPane() {
       {...dropProps(() => "")}
       onDragLeave={(e) => {
         // Left the tree altogether (not just moved onto a child).
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropDir(null);
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setDropDir(null); fileProjection.clear(); }
       }}
     >
       <For

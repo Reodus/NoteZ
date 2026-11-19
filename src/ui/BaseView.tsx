@@ -15,6 +15,7 @@ import { fileSrc } from "../core/native";
 import { openNote, prefs, root, state, tree } from "../core/store";
 import { askText, openMenuAt, MenuItem } from "./primitives";
 import { parseDocument } from "yaml";
+import { DragProjection, dragItems, endNativeDrag, nativeDropRect, pulseDrop, settleDragItems, startNativeDrag } from "./dragMotion";
 
 import { t, tn } from "../core/i18n";
 export interface BaseViewProps {
@@ -352,14 +353,18 @@ export default function BaseView(props: BaseViewProps) {
     </div>
   );
 
+  let boardSource: string | null = null;
+  const boardProjection = new DragProjection();
+  onCleanup(() => boardProjection.clear());
   const Card = (p: { row: BaseResult["rows"][number]; drag?: boolean }) => {
     const img = () => imageUrl(p.row.image ?? null);
     return (
       <div
         class="base-card"
+        data-card-path={p.row.path}
         draggable={p.drag}
-        onDragStart={(e) => { e.stopPropagation(); e.dataTransfer?.setData("text/x-notez-row", p.row.path); }}
-        onDragEnd={() => setOver(null)}
+        onDragStart={(e) => { e.stopPropagation(); boardSource = p.row.path; e.dataTransfer?.setData("text/x-notez-row", p.row.path); startNativeDrag(e, e.currentTarget); }}
+        onDragEnd={(e) => { endNativeDrag(e.currentTarget); boardSource = null; boardProjection.clear(); setOver(null); }}
       >
         <Show when={img()}><img class="base-cover" src={img()!} alt="" loading="lazy" /></Show>
         <div class="base-card-body">
@@ -416,6 +421,23 @@ export default function BaseView(props: BaseViewProps) {
 
   const [over, setOver] = createSignal<string | null>(null);
   const BoardLayout = () => {
+    const [pending, setPending] = createSignal<{
+      before: Map<string, DOMRect>; moved: { key: string; rect?: DOMRect }; group: string;
+    }>();
+    let board!: HTMLDivElement;
+    const items = () => dragItems(board, ".base-card", el => el.dataset.cardPath!);
+    createEffect(() => {
+      const movement = pending();
+      if (!movement || !(r()?.rows.some(row => row.path === movement.moved.key && (row.group ?? "") === movement.group))) return;
+      setPending(undefined);
+      requestAnimationFrame(() => {
+        if (!board.isConnected) return;
+        const after = items();
+        settleDragItems(movement.before, after, movement.moved);
+        if (!after.has(movement.moved.key))
+          pulseDrop([...board.querySelectorAll<HTMLElement>(".base-column")].find(el => el.dataset.group === movement.group));
+      });
+    });
     const prop = () => r()!.group_by;
     const movable = () => !!prop()?.startsWith("note.");
     const drop = async (e: DragEvent, g: string) => {
@@ -425,22 +447,49 @@ export default function BaseView(props: BaseViewProps) {
       const path = e.dataTransfer?.getData("text/x-notez-row");
       if (!path || !movable()) return;
       const row = r()!.rows.find((x) => x.path === path);
-      if (!row || row.group === g) return;
+      if (!row || (row.group ?? "") === g) return;
+      const before = boardProjection.capture(items());
+      boardProjection.clear();
+      const rect = nativeDropRect(e);
+      endNativeDrag();
+      setPending(undefined);
       // The group's raw value (from a card already in it), else its name.
       const sample = r()!.rows.find((x) => x.group === g)?.group_value;
       const value = g === "" ? null : sample !== undefined && typeof sample !== "object" ? sample : parseInput(g, null);
       await setNoteProperty(path, prop()!.replace(/^note\./, ""), value);
+      if (board.isConnected) setPending({ before, moved: { key: path, rect }, group: g });
     };
     return (
       <Show when={prop()} fallback={<div class="base-hint">{t("A board needs a group: choose")} <b>{t("Group")}</b> {t("above (e.g. status).")}</div>}>
-        <div class="base-board">
+        <div class="base-board" ref={board}>
           <For each={groupsOf()}>
             {(g) => (
               <div
                 class="base-column"
+                data-group={g.name ?? ""}
                 classList={{ over: over() === g.name }}
-                onDragOver={(e) => movable() && e.dataTransfer?.types.includes("text/x-notez-row") && (e.preventDefault(), setOver(g.name))}
-                onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(null); }}
+                onDragOver={(e) => {
+                  if (!movable() || !e.dataTransfer?.types.includes("text/x-notez-row")) return;
+                  const source = r()?.rows.find(row => row.path === boardSource);
+                  const valid = !!source && (source.group ?? "") !== (g.name ?? "");
+                  if (e.dataTransfer) e.dataTransfer.dropEffect = valid ? "move" : "none";
+                  if (valid) e.preventDefault();
+                  setOver(valid ? g.name : null);
+                  const moving = boardSource && items().get(boardSource);
+                  if (!valid || !moving) return boardProjection.clear();
+                  const cards = [...e.currentTarget.querySelectorAll<HTMLElement>(".base-card")];
+                  const at = cards.findIndex(el => {
+                    const rect = el.getBoundingClientRect();
+                    return e.clientY < rect.top + rect.height / 2;
+                  });
+                  const height = moving.offsetHeight + 8;
+                  const offsets = new Map(cards.slice(at < 0 ? cards.length : at)
+                    .map(el => [el, { x: 0, y: height }]));
+                  boardProjection.show(offsets, board.getBoundingClientRect());
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setOver(null); boardProjection.clear(); }
+                }}
                 onDrop={(e) => void drop(e, g.name ?? "").catch(error => notify(String(error), "error"))}
               >
                 <div class="base-column-head" dir="auto">{g.name || t("No value")} <span class="base-count">{g.rows.length}</span></div>
@@ -501,14 +550,15 @@ export default function BaseView(props: BaseViewProps) {
     </div>
   );
 
+  const layout = createMemo(() => r()?.type ?? "table");
   const body = () => {
-    const t = r()?.type ?? "table";
+    const t = layout();
     if (t === "count") return <div class="base-big">{r()!.total}</div>;
     if (t === "lines" || t === "tasks") return <LinesLayout />;
     if (t === "cards") return <CardsLayout />;
     if (t === "list") return <ListLayout />;
     if (t === "board") return <BoardLayout />;
-  return <TableLayout />;
+    return <TableLayout />;
   };
 
   return (

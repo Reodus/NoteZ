@@ -7,7 +7,8 @@ import { flushSaveParticipants } from "./saveParticipants";
 import { flushComments, renameComments } from "./comments";
 import { renameBookmarkPaths } from "./bookmarks";
 import { app, notify } from "./app";
-import { ipc, flushWrites, Entry, Theme, dirname, join, fileKind } from "./ipc";
+import { ipc, flushWrites, Entry, Theme, dirname, join, fileKind, isNotePath } from "./ipc";
+import { frontmatterRange } from "./frontmatter";
 
 import { t, tn } from "./i18n";
 // ------------------------------------------------------------ preferences
@@ -291,6 +292,24 @@ export const [state, setState] = createStore<State>({ tabs: [], active: null, bu
 export const [editorView, setEditorView] = createSignal<EditorView | null>(null);
 /** Effective theme of the active note (for WYSIWYM styling + styles panel). */
 export const [activeTheme, setActiveTheme] = createSignal<Theme | null>(null);
+
+export function activeThemeKey() {
+  const path = state.active;
+  if (!path || !isNotePath(path)) return "";
+  const text = state.buffers[path]?.content ?? "";
+  const meta = path.endsWith(".typ") ? text.split("\n", 1)[0] : text.slice(0, frontmatterRange(text)?.to ?? 0);
+  return `${root()}\u0000${path}\u0000${meta}`;
+}
+
+let themeRequest = 0;
+export async function refreshActiveTheme() {
+  const path = state.active;
+  const key = activeThemeKey();
+  const request = ++themeRequest;
+  if (!path || !key) return setActiveTheme(null);
+  const theme = await ipc.noteTheme(path, state.buffers[path]?.content ?? "").catch(() => null);
+  if (request === themeRequest && key === activeThemeKey()) setActiveTheme(theme);
+}
 /** Cursor info for the status bar. */
 export const [cursor, setCursor] = createSignal({ line: 1, col: 1, selected: 0 });
 

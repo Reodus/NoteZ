@@ -31,21 +31,27 @@ export function startResize(e: PointerEvent, panel: HTMLElement, grow: 1 | -1, s
       set(Math.round(startW + sign * (last - startX)));
     });
   };
-  const stop = (event: PointerEvent) => {
-    if (event.pointerId !== e.pointerId) return;
+  const finish = () => {
     cancelAnimationFrame(frame);
     if (moved) set(Math.round(startW + sign * (last - startX)));
-    handle.removeEventListener("pointermove", move);
-    handle.removeEventListener("pointerup", stop);
-    handle.removeEventListener("pointercancel", stop);
-    handle.removeEventListener("lostpointercapture", stop);
+    window.removeEventListener("pointermove", move, true);
+    window.removeEventListener("pointerup", stop, true);
+    window.removeEventListener("pointercancel", stop, true);
+    window.removeEventListener("blur", finish);
+    handle.removeEventListener("lostpointercapture", lost);
     if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);
     document.body.classList.remove("resizing");
+    handle.classList.remove("nz-resize-active");
   };
+  const stop = (event: PointerEvent) => { if (event.pointerId === e.pointerId) finish(); };
+  // Window tracking can continue when Chromium releases capture while held.
+  const lost = (event: PointerEvent) => { if (!event.buttons) stop(event); };
   handle.setPointerCapture(e.pointerId);
   document.body.classList.add("resizing");
-  handle.addEventListener("pointermove", move);
-  handle.addEventListener("pointerup", stop);
-  handle.addEventListener("pointercancel", stop);
-  handle.addEventListener("lostpointercapture", stop);
+  handle.classList.add("nz-resize-active");
+  window.addEventListener("pointermove", move, true);
+  window.addEventListener("pointerup", stop, true);
+  window.addEventListener("pointercancel", stop, true);
+  window.addEventListener("blur", finish);
+  handle.addEventListener("lostpointercapture", lost);
 }

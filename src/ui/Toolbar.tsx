@@ -16,13 +16,13 @@ import {
   insertLink, insertImage, insertTable, insertMath, insertPageBreak, insertFootnote, insertToc, isTypst, insertCallout,
   spanAttrsAt, listKindAt,
 } from "../editor/format";
-import { Direction } from "@codemirror/view";
+import { editorLineDirection } from "../editor/bidi";
 import { platformKeys } from "../core/keys";
 import { CALLOUTS } from "../editor/livepreview";
 import { ColorGrid, ComboBox, Popover, SvgIcon } from "./primitives";
 import { NoteMenuButton } from "./NoteMenu";
 
-import { t } from "../core/i18n";
+import { t, uiRtl } from "../core/i18n";
 const STYLE_NAMES: Record<BlockStyle, string> = {
   p: t("Normal"),
   h1: t("Heading 1"),
@@ -132,13 +132,14 @@ export default function Toolbar() {
         list: null as ReturnType<typeof listKindAt>, span: {} as ReturnType<typeof spanAttrsAt>,
       };
     const pos = v.state.selection.main.head;
+    const direction = editorLineDirection(v.state.doc, pos);
     const marks = new Set((["bold", "italic", "underline", "strike", "code"] as InlineKind[]).filter((k) => inlineActive(v.state, k)));
     return {
       style: blockStyleAt(v.state, pos),
       align: blockAttr(v.state, pos, "align"),
       dir: blockAttr(v.state, pos, "dir"),
       // The paragraph's actual direction (set, or detected from its text).
-      rtl: v.textDirectionAt(pos) === Direction.RTL,
+      rtl: direction === "rtl" || (direction === "auto" && uiRtl && !/\p{L}/u.test(v.state.doc.lineAt(pos).text)),
       marks,
       list: listKindAt(v.state, pos),
       span: spanAttrsAt(v.state, pos),

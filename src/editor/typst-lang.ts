@@ -51,7 +51,7 @@ export const typst = StreamLanguage.define<S>({
     }
     if (stream.match(/^"(?:[^"\\]|\\.)*"/)) return "string";
     if (stream.match(/^#(let|set|show|import|include|if|else|for|while|return|context)\b/)) return "keyword";
-    if (stream.match(/^#[\w-]+(\.[\w-]+)*/)) return "function";
+    if (stream.match(/^#[\w-]+(\.[\w-]+)*/)) return "variableName.function";
     if (stream.match(/^<[\w:.-]+>/)) return "labelName";
     if (stream.match(/^@[\w:.-]+/)) return "link";
     if (stream.match(/^\*[^*\n]+\*/)) return "strong";

@@ -11,9 +11,10 @@ import { tagTree, TagNode } from "../core/meta";
 import {
   bookmarks, isBookmarked, Bookmark, bookmarkLabel, removeBookmark, addGroup, renameBookmark, moveBookmark, toggleBookmark,
 } from "../core/bookmarks";
-import { containsBookmark } from "../core/bookmarkTree";
+import { bookmarkLayoutKey, containsBookmark } from "../core/bookmarkTree";
 import { ask } from "../core/native";
 import { askText, openMenu } from "./primitives";
+import { DragProjection, dragItems, endNativeDrag, nativeDropRect, pulseDrop, settleDragItems, startNativeDrag } from "./dragMotion";
 
 import { t, tn, num } from "../core/i18n";
 // ------------------------------------------------------------------ search
@@ -385,7 +386,58 @@ let dragged: Bookmark | null = null;
 const BOOKMARK_DRAG = "text/notez-bookmark";
 const bookmarkDrag = (e: DragEvent) => !!e.dataTransfer?.types.some(type => type === BOOKMARK_DRAG || type === "text/notez-path");
 const [bookmarkDragEpoch, setBookmarkDragEpoch] = createSignal(0);
-const clearBookmarkDrag = () => { dragged = null; setBookmarkDragEpoch(n => n + 1); };
+const bookmarkProjection = new DragProjection();
+const bookmarkNodes = (pane: Element) => dragItems(pane, ".bookmark-item", el => el.dataset.motionKey!);
+const clearBookmarkDrag = () => {
+  dragged = null;
+  bookmarkProjection.clear();
+  setBookmarkDragEpoch(n => n + 1);
+};
+
+function previewBookmarkMove(pane: HTMLElement, target?: HTMLElement) {
+  if (!dragged) return;
+  const nodes = [...bookmarkNodes(pane).values()];
+  const from = nodes.findIndex(el => el.dataset.motionKey === bookmarkLayoutKey(dragged!));
+  const to = target ? nodes.indexOf(target) : nodes.length;
+  if (from < 0 || to < 0) return;
+  const step = nodes[from].offsetHeight;
+  const offsets = new Map<HTMLElement, { x: number; y: number }>();
+  nodes.forEach((el, index) => {
+    if (from < index && index < to || to <= index && index < from)
+      offsets.set(el, { x: 0, y: from < to ? -step : step });
+  });
+  bookmarkProjection.show(offsets, pane.getBoundingClientRect());
+}
+
+function dropBookmark(e: DragEvent, target: Bookmark | null) {
+  const pane = (e.currentTarget as HTMLElement).closest(".bookmarks-pane");
+  if (!pane) return;
+  const nodes = bookmarkNodes(pane);
+  const before = bookmarkProjection.capture(nodes);
+  const path = e.dataTransfer?.getData("text/notez-path");
+  const moving = e.dataTransfer?.types.includes(BOOKMARK_DRAG) ? dragged : null;
+  const point = nativeDropRect(e);
+  const into = target?.type === "group";
+  if (moving && target && containsBookmark(moving, target)) return clearBookmarkDrag();
+  if (moving) moveBookmark(moving, target, into);
+  else if (path) {
+    const entry: Bookmark = { type: /\.\w+$/.test(path) ? "file" : "folder", path };
+    if (isBookmarked(entry)) return clearBookmarkDrag();
+    toggleBookmark(entry, into ? target! : undefined);
+  }
+  clearBookmarkDrag();
+  endNativeDrag();
+  requestAnimationFrame(() => {
+    if (!pane.isConnected) return;
+    const after = bookmarkNodes(pane);
+    const key = moving ? bookmarkLayoutKey(moving) : [...after.keys()].find(k => !before.has(k)
+      && after.get(k)?.title === path);
+    settleDragItems(before, after, key ? { key, rect: point } : undefined);
+    if ((!key || !after.has(key)) && into) {
+      pulseDrop(after.get(bookmarkLayoutKey(target)));
+    }
+  });
+}
 
 function openBookmark(b: Bookmark) {
   if (b.type === "search") return searchFor(b.query ?? "");
@@ -408,12 +460,18 @@ function openBookmark(b: Bookmark) {
   }
 }
 
-function BookmarkRow(props: { b: Bookmark; depth: number }) {
-  const [open, setOpen] = createSignal(true);
+function BookmarkRow(props: { b: Bookmark; depth: number; groupStates: Map<string, boolean> }) {
+  const groupKey = bookmarkLayoutKey(props.b);
+  const [open, setOpen] = createSignal(props.groupStates.get(groupKey) ?? true);
+  const toggle = () => {
+    const expanded = !open();
+    props.groupStates.set(groupKey, expanded);
+    setOpen(expanded);
+  };
   const [over, setOver] = createSignal(false);
   createEffect(() => { bookmarkDragEpoch(); setOver(false); });
   const b = () => props.b;
-  onCleanup(() => { if (dragged === b()) clearBookmarkDrag(); });
+  onCleanup(() => { if (dragged === b()) { endNativeDrag(); clearBookmarkDrag(); } });
   const icon = () => {
     switch (b().type) {
       case "group": return <BookmarkIcon size={14} class="ti" />;
@@ -435,33 +493,35 @@ function BookmarkRow(props: { b: Bookmark; depth: number }) {
     <>
       <div
         class="tree-item bookmark-item"
+        data-motion-key={bookmarkLayoutKey(b())}
         classList={{ "drag-over": over() }}
         style={{ "padding-inline-start": `${10 + props.depth * 14}px` }}
         draggable={true}
-        onDragStart={(e) => { e.stopPropagation(); dragged = b(); e.dataTransfer?.setData(BOOKMARK_DRAG, "bookmark"); }}
-        onDragEnd={() => { clearBookmarkDrag(); setOver(false); }}
+        onDragStart={(e) => { e.stopPropagation(); dragged = b(); e.dataTransfer?.setData(BOOKMARK_DRAG, "bookmark"); startNativeDrag(e, e.currentTarget); }}
+        onDragEnd={(e) => {
+          endNativeDrag(e.currentTarget);
+          const pane = e.currentTarget.closest(".bookmarks-pane");
+          if (pane) bookmarkProjection.cancel(bookmarkNodes(pane));
+          clearBookmarkDrag(); setOver(false);
+        }}
         onDragOver={(e) => { if (bookmarkDrag(e)) {
           e.preventDefault(); e.stopPropagation();
           const invalid = !!dragged && !!e.dataTransfer?.types.includes(BOOKMARK_DRAG) && containsBookmark(dragged, b());
           if (e.dataTransfer) e.dataTransfer.dropEffect = invalid ? "none" : e.dataTransfer.types.includes(BOOKMARK_DRAG) ? "move" : "copy";
           setOver(!invalid);
+          const pane = e.currentTarget.closest<HTMLElement>(".bookmarks-pane");
+          if (!invalid && pane && b().type !== "group") previewBookmarkMove(pane, e.currentTarget);
+          else bookmarkProjection.clear();
         } }}
-        onDragLeave={() => setOver(false)}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false); }}
         onDrop={(e) => {
           if (!bookmarkDrag(e)) return;
           e.preventDefault();
           e.stopPropagation();
           setOver(false);
-          const path = e.dataTransfer?.getData("text/notez-path");
-          if (path && !e.dataTransfer?.types.includes(BOOKMARK_DRAG)) {
-            const entry: Bookmark = { type: path.match(/\.\w+$/) ? "file" : "folder", path };
-            if (!isBookmarked(entry)) toggleBookmark(entry, b().type === "group" ? b() : undefined);
-            return clearBookmarkDrag();
-          }
-          if (e.dataTransfer?.types.includes(BOOKMARK_DRAG) && dragged) moveBookmark(dragged, b(), b().type === "group");
-          clearBookmarkDrag();
+          dropBookmark(e, b());
         }}
-        onClick={() => (b().type === "group" ? setOpen(!open()) : openBookmark(b()))}
+        onClick={() => (b().type === "group" ? toggle() : openBookmark(b()))}
         onContextMenu={menu}
         title={b().path ?? b().query ?? b().title ?? ""}
       >
@@ -473,27 +533,28 @@ function BookmarkRow(props: { b: Bookmark; depth: number }) {
         <Show when={b().type === "group"}><span class="count">{b().items?.length || ""}</span></Show>
       </div>
       <Show when={b().type === "group" && open()}>
-        <For each={b().items ?? []}>{(c) => <BookmarkRow b={c} depth={props.depth + 1} />}</For>
+        <For each={b().items ?? []}>{(c) => <BookmarkRow b={c} depth={props.depth + 1} groupStates={props.groupStates} />}</For>
       </Show>
     </>
   );
 }
 
 export function BookmarksPane() {
+  const groupStates = new Map<string, boolean>();
+  onCleanup(() => bookmarkProjection.clear());
   return (
     <div
       class="tree bookmarks-pane"
-      onDragOver={(e) => { if (bookmarkDrag(e)) e.preventDefault(); }}
+      onDragOver={(e) => {
+        if (!bookmarkDrag(e)) return;
+        e.preventDefault();
+        previewBookmarkMove(e.currentTarget);
+      }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) bookmarkProjection.clear(); }}
       onDrop={(e) => {
         if (!bookmarkDrag(e)) return;
         e.preventDefault();
-        const path = e.dataTransfer?.getData("text/notez-path");
-        if (path && !e.dataTransfer?.types.includes(BOOKMARK_DRAG)) {
-          const entry: Bookmark = { type: /\.\w+$/.test(path) ? "file" : "folder", path };
-          if (!isBookmarked(entry)) toggleBookmark(entry);
-        }
-        else if (e.dataTransfer?.types.includes(BOOKMARK_DRAG) && dragged) moveBookmark(dragged, null);
-        clearBookmarkDrag();
+        dropBookmark(e, null);
       }}
     >
       <For
@@ -505,7 +566,7 @@ export function BookmarksPane() {
           </div>
         }
       >
-        {(b) => <BookmarkRow b={b} depth={0} />}
+        {(b) => <BookmarkRow b={b} depth={0} groupStates={groupStates} />}
       </For>
     </div>
   );

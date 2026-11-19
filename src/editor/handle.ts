@@ -18,6 +18,7 @@ import { setBlockStyle, toggleList, BlockStyle } from "./format";
 import { notify } from "../core/app";
 
 import { blockMove } from "./blockMove";
+import { carryDrag, DragProjection } from "../ui/dragMotion";
 import { t } from "../core/i18n";
 export interface Block {
   /** Start of the first line and end of the last line. */
@@ -299,11 +300,30 @@ class Handle {
     let drop: { at: number; before: boolean } | null = null;
     let last = e;
     const ext = extent(view.state, b);
+    let preview: ReturnType<typeof carryDrag>;
+    const projection = new DragProjection();
+    const visibleBlocks = () => [...view.contentDOM.children]
+      .filter((el): el is HTMLElement => el instanceof HTMLElement && !el.classList.contains("cm-gap"))
+      .map(el => ({ el, pos: view.posAtDOM(el, 0) }));
+    const startBlock = view.lineBlockAt(ext.from);
+    const endBlock = view.lineBlockAt(ext.to);
+    const step = endBlock.bottom - startBlock.top + view.defaultLineHeight;
+    const paint = () => {
+      drop = this.dropTarget(last, ext);
+      const offsets = new Map<HTMLElement, { x: number; y: number }>();
+      if (drop) for (const { el, pos } of visibleBlocks()) {
+        if (drop.at < ext.from && (drop.before ? pos >= drop.at : pos > drop.at) && pos < ext.from)
+          offsets.set(el, { x: 0, y: step });
+        else if (drop.at > ext.to && pos > ext.to && (drop.before ? pos < drop.at : pos <= drop.at))
+          offsets.set(el, { x: 0, y: -step });
+      }
+      projection.show(offsets, view.scrollDOM.getBoundingClientRect());
+    };
     const scroll = () => {
       if (!dragging) return;
       const box = view.scrollDOM.getBoundingClientRect();
       const delta = last.clientY < box.top + 40 ? -12 : last.clientY > box.bottom - 40 ? 12 : 0;
-      if (delta) { view.scrollDOM.scrollTop += delta; drop = this.dropTarget(last, ext); }
+      if (delta) { view.scrollDOM.scrollTop += delta; paint(); }
       frame = requestAnimationFrame(scroll);
     };
     const move = (ev: PointerEvent) => {
@@ -314,13 +334,21 @@ class Handle {
         dragging = true;
         document.body.classList.add("nz-dragging-block");
         this.dom.classList.add("dragging");
+        const carried = visibleBlocks().filter(({ pos }) => pos >= ext.from && pos <= ext.to).map(({ el }) => el);
+        if (carried.length) {
+          const first = carried[0].getBoundingClientRect(), last = carried[carried.length - 1].getBoundingClientRect();
+          preview = carryDrag(carried, new DOMRect(first.left, first.top, first.width, last.bottom - first.top), e, true);
+        }
         frame = requestAnimationFrame(scroll);
       }
-      drop = this.dropTarget(ev, ext);
+      preview?.move(ev);
+      paint();
     };
     const cleanup = () => {
       this.cancelDrag = null;
       cancelAnimationFrame(frame);
+      projection.clear();
+      preview?.remove();
       removeLayer();
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up, true);
@@ -354,6 +382,11 @@ class Handle {
   /** Where a drop at the pointer goes: before or after the block under it. */
   dropTarget(ev: PointerEvent, src: { from: number; to: number }) {
     const view = this.view;
+    const viewport = view.scrollDOM.getBoundingClientRect();
+    if (ev.clientX < viewport.left || ev.clientX > viewport.right || ev.clientY < viewport.top || ev.clientY > viewport.bottom) {
+      this.indicator.classList.remove("visible");
+      return null;
+    }
     const content = view.contentDOM.getBoundingClientRect();
     const pos = view.posAtCoords({ x: Math.max(content.left + 4, Math.min(ev.clientX, content.right - 4)), y: ev.clientY }, false);
     let t = pos == null ? null : blockAt(view.state, pos);

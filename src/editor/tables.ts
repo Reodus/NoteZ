@@ -7,20 +7,22 @@
 // - Enter: cell below (adds a row at the end). Shift+Enter: line break.
 // - Arrows move between cells at the edges; Up/Down leave the table at the
 //   top/bottom; Escape returns to the text.
+// - Drag a header grip to move a column.
 // - Right-click: insert/delete/move rows and columns, align, sort, format,
 //   or edit the table as plain Markdown.
 // - The source is re-aligned (padded pipes) on Tab/Enter and when you leave.
 import { EditorState, Prec, StateEffect, StateField } from "@codemirror/state";
 import { EditorView, WidgetType, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
-import { undo, redo } from "@codemirror/commands";
-import { askText, openMenu, MenuItem } from "../ui/primitives";
+import { undo, redo, isolateHistory } from "@codemirror/commands";
+import { askText, openMenu, openMenuAt, MenuItem } from "../ui/primitives";
 import { openPath } from "../core/native";
-import { root } from "../core/store";
+import { root, state } from "../core/store";
 import { saveFiles } from "./attachments";
 import { getLiveOpts, hydrateImages, hydrateMath, inlineHtml } from "./livepreview";
 import { WRAP_PAIRS } from "./autopair";
 import { ltrRanges, RTL, rtlLine, tableDir } from "./bidi";
+import { movedRanges } from "./commentRanges";
 
 import { t } from "../core/i18n";
 type Align = "" | "left" | "center" | "right";
@@ -111,6 +113,8 @@ interface Live {
   src: string;
   /** Direction forced by an enclosing `:::` block. */
   dir: "rtl" | "ltr" | null;
+  cancelColumnDrag?: () => void;
+  stopGripMeasure?: () => void;
 }
 const live = new WeakMap<HTMLElement, Live>();
 /** The cell whose own input is being written (don't overwrite its text). */
@@ -124,7 +128,7 @@ export class TableWidget extends WidgetType {
     return o.src === this.src && o.dir === this.dir;
   }
   get estimatedHeight() {
-    return 16 + 38 * Math.max(1, this.src.split("\n").length - 1);
+    return 34 + 38 * Math.max(1, this.src.split("\n").length - 1);
   }
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
@@ -136,6 +140,7 @@ export class TableWidget extends WidgetType {
   updateDOM(dom: HTMLElement, view: EditorView) {
     const st = live.get(dom);
     if (!st) return false;
+    if (st.view !== view || st.src !== this.src || st.dir !== this.dir) st.cancelColumnDrag?.();
     st.view = view;
     st.src = this.src;
     st.dir = this.dir;
@@ -176,6 +181,11 @@ export class TableWidget extends WidgetType {
   ignoreEvent() {
     return true; // the widget handles its own mouse/keyboard
   }
+  destroy(dom: HTMLElement) {
+    const st = live.get(dom);
+    st?.cancelColumnDrag?.();
+    st?.stopGripMeasure?.();
+  }
 }
 
 function paint(cell: HTMLElement) {
@@ -188,6 +198,7 @@ function paint(cell: HTMLElement) {
 function render(wrap: HTMLElement, m: Model) {
   const st = live.get(wrap)!;
   wrap.className = /!\[/.test(st.src) ? "cm-nz-lp-table nz-edit-table figure" : "cm-nz-lp-table nz-edit-table";
+  st.stopGripMeasure?.();
   wrap.textContent = "";
   const dir = tableDir(st.src, st.dir);
   const box = el("div", "nz-table-box");
@@ -195,6 +206,8 @@ function render(wrap: HTMLElement, m: Model) {
   const scroll = el("div", "nz-table-scroll");
   const table = document.createElement("table");
   table.dir = dir;
+  const indicator = el("div", "nz-column-drop");
+  indicator.hidden = true;
   const mkRow = (cells: string[], r: number, tag: "th" | "td") => {
     const tr = document.createElement("tr");
     cells.forEach((raw, c) => {
@@ -218,7 +231,60 @@ function render(wrap: HTMLElement, m: Model) {
   const tbody = document.createElement("tbody");
   m.rows.forEach((row, i) => tbody.append(mkRow(row, i + 1, "td")));
   table.append(thead, tbody);
-  scroll.append(table);
+  const track = el("div", "nz-table-track");
+  const rail = el("div", "nz-column-rail");
+  const headers = [...thead.rows[0].cells];
+  const grips = headers.map((_, c) => {
+    const grip = el("button", "nz-column-grip");
+    grip.type = "button";
+    grip.disabled = headers.length < 2;
+    grip.title = t("Move column {number}", { number: c + 1 });
+    grip.setAttribute("aria-label", grip.title);
+    grip.setAttribute("aria-haspopup", "menu");
+    grip.dataset.column = String(c);
+    wireColumnGrip(wrap, scroll, table, indicator, grip, c, () => showGrip(-1));
+    return grip;
+  });
+  rail.append(...grips);
+  track.append(rail, table);
+  scroll.append(track);
+  let hovered = -1;
+  const showGrip = (column: number) => {
+    if (column === hovered) return;
+    grips[hovered]?.classList.remove("hovered");
+    grips[column]?.classList.add("hovered");
+    hovered = column;
+  };
+  scroll.addEventListener("pointermove", (e) => {
+    if (wrap.classList.contains("nz-dragging-column")) return;
+    const target = e.target as HTMLElement;
+    const grip = target.closest<HTMLElement>(".nz-column-grip");
+    const cell = target.closest<HTMLTableCellElement>("td, th");
+    if (grip) showGrip(Number(grip.dataset.column));
+    else if (cell?.closest("table") === table) showGrip(cell.cellIndex);
+    else if (rail.contains(target)) showGrip(headers.findIndex(header => {
+      const rect = header.getBoundingClientRect();
+      return e.clientX >= rect.left && e.clientX < rect.right;
+    }));
+    else showGrip(-1);
+  });
+  scroll.addEventListener("pointerleave", () => showGrip(-1));
+  let gripFrame = 0;
+  const observer = new ResizeObserver(() => {
+    if (gripFrame) return;
+    gripFrame = requestAnimationFrame(() => {
+      gripFrame = 0;
+      const left = rail.getBoundingClientRect().left;
+      const centers = headers.map(cell => {
+        const rect = cell.getBoundingClientRect();
+        return rect.left + rect.width / 2 - left;
+      });
+      grips.forEach((grip, i) => { grip.style.left = `${centers[i]}px`; });
+    });
+  });
+  headers.forEach(cell => observer.observe(cell));
+  st.stopGripMeasure = () => { observer.disconnect(); cancelAnimationFrame(gripFrame); };
+
   const addRow = el("button", "nz-add-row");
   addRow.title = t("Add row");
   addRow.textContent = "+";
@@ -238,8 +304,157 @@ function render(wrap: HTMLElement, m: Model) {
       return { r: 0, c: m.header.length - 1 };
     });
   });
-  box.append(scroll, addRow, addCol);
+  box.append(scroll, addRow, addCol, indicator);
   wrap.append(box);
+}
+
+function columnMoveItems(column: number, count: number, move: (to: number) => void): MenuItem[] {
+  const items: MenuItem[] = [];
+  if (column > 0) items.push({ label: t("Move column before"), run: () => move(column - 1) });
+  if (column + 1 < count) items.push({ label: t("Move column after"), run: () => move(column + 1) });
+  return items;
+}
+
+function wireColumnGrip(
+  wrap: HTMLElement, scroll: HTMLElement, table: HTMLTableElement, indicator: HTMLElement,
+  grip: HTMLButtonElement, column: number, clearHover: () => void,
+) {
+  const menu = () => {
+    const bounds = grip.getBoundingClientRect();
+    grip.focus({ preventScroll: true });
+    openMenuAt(bounds.left, bounds.bottom, columnMoveItems(column, table.rows[0].cells.length, (to) => {
+      moveColumn(wrap, column, to);
+      wrap.querySelectorAll<HTMLButtonElement>(".nz-column-grip")[to]?.focus({ preventScroll: true });
+    }));
+  };
+  grip.addEventListener("click", (e) => { if (e.detail === 0) menu(); });
+  grip.addEventListener("keydown", (e) => {
+    if ((e.key !== "Enter" && e.key !== " ") || e.ctrlKey || e.metaKey || e.altKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    menu();
+  });
+  grip.addEventListener("pointerdown", (e) => {
+    if (!e.isPrimary || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const st = live.get(wrap)!;
+    st.cancelColumnDrag?.();
+    const note = state.active, vault = root();
+    const listeners = new AbortController();
+    const signal = listeners.signal;
+    const pointer = e.pointerId;
+    let last = e, dragging = false, frame = 0;
+    const columns = [...table.rows[0].cells].map(cell => cell.getBoundingClientRect());
+    const startLeft = table.getBoundingClientRect().left;
+    const rtl = table.dir === "rtl";
+    const rows = [...table.rows];
+    const cells = columns.map((_, c) => rows.map(row => row.cells[c]));
+    const source = columns[column];
+    let projected = column;
+
+    const current = () => wrap.isConnected && note === state.active && vault === root();
+    const target = ({ clientX: x, clientY: y }: PointerEvent) => {
+      if (!scroll.contains(document.elementFromPoint(x, y))) return null;
+      // Hit-test against the stationary grid, even while the cells translate.
+      const scrollDelta = table.getBoundingClientRect().left - startLeft;
+      const index = columns.findIndex(r => rtl ? x - scrollDelta > r.left + r.width / 2 : x - scrollDelta < r.left + r.width / 2);
+      const slot = index < 0 ? columns.length : index;
+      const to = slot > column ? slot - 1 : slot;
+      if (to === column) return null;
+      const edge = columns[index < 0 ? columns.length - 1 : index];
+      const line = ((index < 0) === rtl ? edge.left : edge.right) + scrollDelta;
+      return { to, line };
+    };
+    const paintDrop = () => {
+      frame = 0;
+      if (!current()) return cleanup();
+      const bounds = scroll.getBoundingClientRect();
+      const grid = table.getBoundingClientRect();
+      const desired = last.clientX - e.clientX - (grid.left - startLeft);
+      const x = Math.min(grid.width - (source.right - startLeft), Math.max(startLeft - source.left, desired));
+      table.style.setProperty("--nz-column-drag-x", `${x}px`);
+      grip.style.setProperty("--nz-column-drag-x", `${x}px`);
+      const drop = target(last);
+      const destination = drop?.to ?? column;
+      if (projected !== destination) {
+        projected = destination;
+        const step = source.width * (rtl ? -1 : 1);
+        cells.forEach((group, i) => {
+          if (i === column) return;
+          const shift = column < i && i <= destination ? -step : destination <= i && i < column ? step : 0;
+          group.forEach(cell => cell.style.setProperty("--nz-column-shift", `${shift}px`));
+        });
+      }
+      indicator.hidden = !drop;
+      if (drop) {
+        const left = Math.max(bounds.left + 1, Math.min(drop.line, bounds.right - 1));
+        indicator.style.left = `${left - bounds.left}px`;
+      }
+      if (!scroll.contains(document.elementFromPoint(last.clientX, last.clientY))) return;
+      const edge = Math.min(32, bounds.width / 4);
+      const delta = last.clientX < bounds.left + edge ? -12 : last.clientX > bounds.right - edge ? 12 : 0;
+      if (!delta) return;
+      const before = scroll.scrollLeft;
+      scroll.scrollLeft += delta;
+      if (scroll.scrollLeft !== before) frame = requestAnimationFrame(paintDrop);
+    };
+    const cleanup = () => {
+      listeners.abort();
+      cancelAnimationFrame(frame);
+      if (dragging) {
+        clearHover();
+        table.style.removeProperty("--nz-column-drag-x");
+        grip.style.removeProperty("--nz-column-drag-x");
+        cells[column].forEach(cell => cell.classList.remove("nz-column-carried"));
+        cells.flat().forEach(cell => cell.style.removeProperty("--nz-column-shift"));
+      }
+      st.cancelColumnDrag = undefined;
+      if (grip.hasPointerCapture(pointer)) grip.releasePointerCapture(pointer);
+      wrap.classList.remove("nz-dragging-column");
+      grip.classList.remove("dragging");
+      indicator.hidden = true;
+    };
+
+    st.cancelColumnDrag = cleanup;
+    grip.setPointerCapture(pointer);
+    window.addEventListener("pointermove", (ev) => {
+      if (ev.pointerId !== pointer) return;
+      if (!dragging && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 5) return;
+      if (!dragging) {
+        dragging = true;
+        wrap.classList.add("nz-dragging-column");
+        grip.classList.add("dragging");
+        cells[column].forEach(cell => cell.classList.add("nz-column-carried"));
+      }
+      last = ev;
+      if (!frame) frame = requestAnimationFrame(paintDrop);
+    }, { signal, capture: true });
+    window.addEventListener("pointerup", (ev) => {
+      if (ev.pointerId !== pointer) return;
+      const valid = current();
+      const drop = valid && dragging ? target(ev) : null;
+      cleanup();
+      if (drop) {
+        const focus = focusedCell(wrap);
+        moveColumn(wrap, column, drop.to, focus);
+        if (!focus) st.view.focus();
+      } else if (valid && !dragging && grip.contains(document.elementFromPoint(ev.clientX, ev.clientY))) {
+        menu();
+      }
+    }, { signal, capture: true });
+    window.addEventListener("pointercancel", (ev) => {
+      if (ev.pointerId === pointer) cleanup();
+    }, { signal, capture: true });
+    grip.addEventListener("lostpointercapture", (ev) => { if (!ev.buttons) cleanup(); }, { signal });
+    window.addEventListener("blur", cleanup, { signal });
+    window.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      cleanup();
+    }, { signal, capture: true });
+  });
 }
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string) => {
@@ -793,6 +1008,7 @@ function wire(wrap: HTMLElement) {
 
   wrap.addEventListener("focusout", (e) => {
     const cell = e.target as HTMLElement;
+    if (cell.classList?.contains("nz-column-grip")) return;
     if (cell.classList?.contains("nz-cell")) {
       cell.classList.remove("editing");
       paint(cell);
@@ -892,14 +1108,10 @@ function wire(wrap: HTMLElement) {
 
   wrap.addEventListener("keydown", (e) => {
     const cell = e.target as HTMLElement;
-    if (!cell.classList?.contains("nz-cell")) return;
+    const grip = cell.classList?.contains("nz-column-grip");
+    if (!grip && !cell.classList?.contains("nz-cell")) return;
     const st = live.get(wrap);
     if (!st) return;
-    const m = parse(st.src);
-    const r = Number(cell.dataset.r);
-    const c = Number(cell.dataset.c);
-    const nRows = m.rows.length + 1; // incl. header
-    const nCols = m.header.length;
     const mod = e.ctrlKey || e.metaKey;
     const handled = () => (e.preventDefault(), e.stopPropagation());
 
@@ -907,6 +1119,7 @@ function wire(wrap: HTMLElement) {
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) return handled(), undo(st.view);
       if ((k === "z" && e.shiftKey) || k === "y") return handled(), redo(st.view);
+      if (grip) return;
       const wrapSel = (mark: string) => {
         const sel = window.getSelection()?.toString() ?? "";
         document.execCommand("insertText", false, mark + sel + mark);
@@ -916,10 +1129,16 @@ function wire(wrap: HTMLElement) {
       if (k === "e") return handled(), wrapSel("`");
       return;
     }
+    if (grip) return;
 
     const close = WRAP_PAIRS[e.key];
     if (close && !e.altKey && wrapCellSelection(cell, e.key, close)) return handled();
 
+    const m = parse(st.src);
+    const r = Number(cell.dataset.r);
+    const c = Number(cell.dataset.c);
+    const nRows = m.rows.length + 1; // incl. header
+    const nCols = m.header.length;
     switch (e.key) {
       case "Tab": {
         handled();
@@ -1010,8 +1229,7 @@ function wire(wrap: HTMLElement) {
       "-",
       { label: t("Move row up"), run: () => edit(wrap, (m) => (body > 0 ? ([m.rows[body - 1], m.rows[body]] = [m.rows[body], m.rows[body - 1]], { r: r - 1, c }) : null)) },
       { label: t("Move row down"), run: () => edit(wrap, (m) => (body >= 0 && body < m.rows.length - 1 ? ([m.rows[body + 1], m.rows[body]] = [m.rows[body], m.rows[body + 1]], { r: r + 1, c }) : null)) },
-      { label: t("Move column before"), run: () => edit(wrap, (m) => (c > 0 ? (swapCols(m, c, c - 1), { r, c: c - 1 }) : null)) },
-      { label: t("Move column after"), run: () => edit(wrap, (m) => (c < m.header.length - 1 ? (swapCols(m, c, c + 1), { r, c: c + 1 }) : null)) },
+      ...columnMoveItems(c, m0.header.length, (to) => moveColumn(wrap, c, to, { r, c })),
       "-",
       { label: t("Align column: start"), hint: m0.aligns[c] === "left" ? "✓" : "", run: () => edit(wrap, (m) => void (m.aligns[c] = "left")) },
       { label: t("Align column: center"), hint: m0.aligns[c] === "center" ? "✓" : "", run: () => edit(wrap, (m) => void (m.aligns[c] = "center")) },
@@ -1204,8 +1422,56 @@ function insertCol(m: Model, at: number) {
   m.rows.forEach((r) => r.splice(at, 0, ""));
 }
 
-function swapCols(m: Model, a: number, b: number) {
-  for (const row of [m.header, m.aligns as string[], ...m.rows]) [row[a], row[b]] = [row[b], row[a]];
+function moveColumn(wrap: HTMLElement, from: number, to: number, focus = focusedCell(wrap)) {
+  const st = live.get(wrap);
+  const range = rangeOf(wrap);
+  if (!st || !range || st.view.state.sliceDoc(range.from, range.to) !== st.src || from === to) return;
+  const m = parse(st.src);
+  const order = m.header.map((_, c) => c);
+  if (from < 0 || to < 0 || from >= order.length || to >= order.length) return;
+  order.splice(to, 0, order.splice(from, 1)[0]);
+  const text = format({
+    header: order.map((c) => m.header[c]),
+    aligns: order.map((c) => m.aligns[c]),
+    rows: m.rows.map((row) => order.map((c) => row[c])),
+  });
+  if (cellSel?.wrap === wrap) setCellSel(null);
+  const view = st.view;
+  view.dispatch({
+    changes: { ...range, insert: text },
+    annotations: [isolateHistory.of("full"), movedRanges.of(columnRanges(st.src, text, range.from, order))],
+    userEvent: "move.table.column",
+  });
+  if (focus) focusCell(findWrap(view, range.from) ?? wrap, focus.r, order.indexOf(focus.c));
+}
+
+/** Map cell content by its row and column, including identical text in different cells. */
+function columnRanges(before: string, after: string, start: number, order: number[]) {
+  const ranges: { from: number; to: number; dest: number }[] = [];
+  const lines = after.split("\n");
+  let oldStart = start, newStart = start, row = 0;
+  for (const line of before.split("\n")) {
+    if (line.trim()) {
+      const next = lines[row];
+      if (row !== 1) {
+        const oldCells = segments(line), newCells = segments(next);
+        order.forEach((oldColumn, newColumn) => {
+          const old = oldCells[oldColumn];
+          if (!old) return;
+          const raw = line.slice(old.from, old.to);
+          const content = raw.trim();
+          if (!content) return;
+          const from = oldStart + old.from + raw.length - raw.trimStart().length;
+          // The formatter always writes one space between a pipe and the content.
+          ranges.push({ from, to: from + content.length, dest: newStart + newCells[newColumn].from + 1 });
+        });
+      }
+      newStart += next.length + 1;
+      row++;
+    }
+    oldStart += line.length + 1;
+  }
+  return ranges;
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });

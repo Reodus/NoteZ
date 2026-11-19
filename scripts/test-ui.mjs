@@ -9,6 +9,10 @@ import { createServer } from 'vite';
 import { readingFixture, checkReading } from './reading-cases.mjs';
 import { checkScroll } from './scroll-cases.mjs';
 import { checkEditor } from './editor-cases.mjs';
+import { checkDocumentThemes } from './theme-cases.mjs';
+import { checkTableColumns } from './column-cases.mjs';
+import { checkFootnoteComposer } from './footnote-cases.mjs';
+import { checkDragMotion } from './drag-motion-cases.mjs';
 const readingOnly=process.argv.includes('--reading');
 const scratch=mkdtempSync(path.join(process.env.RUNNER_TEMP||tmpdir(),'notez-ui-')),vault=path.join(scratch,'vault');
 mkdirSync(vault);mkdirSync(path.join(scratch,'second'));
@@ -67,8 +71,15 @@ try {
   assert.deepEqual(await evaluate('window.testErrors'),[]);assert.equal(exceptions.length,0,JSON.stringify(exceptions));assert.deepEqual(layoutWarnings,[],'editor geometry must stabilize');
   console.log('Reading artifacts: '+scratch);
  } else {
+ await rpc('Emulation.setDeviceMetricsOverride',{width:947,height:850,deviceScaleFactor:1,mobile:false});
+ await sleep(150);
  await checkEditor({evaluate,rpc,sleep});
  await checkScroll(evaluate,sleep);
+ assert.deepEqual(layoutWarnings,[],'Source and Live scroll restores must stabilize');
+ await checkDocumentThemes({evaluate,rpc,until,vault});
+ await checkTableColumns({evaluate,rpc,until,sleep});
+ await checkFootnoteComposer({evaluate,rpc,until,sleep});
+ await checkDragMotion({evaluate,rpc,until,sleep,vault});
  const before=readFileSync(path.join(vault,'Audit.md'),'utf8');
  await evaluate(`(async()=>{const {s,c}=window.test,v=s.editorView();const a=v.state.doc.toString().indexOf('Alpha');v.dispatch({selection:{anchor:a,head:a+5}});await c.addComment();const id=c.comments[s.state.active][0].id;window.test.id=id;const input=document.querySelector('.comment-body');input.value='Review فارسی';input.dispatchEvent(new Event('input',{bubbles:true}));await c.flushComments();s.setRightTab('preview');document.addEventListener('mousemove',e=>window.lastMouse={x:e.clientX,y:e.clientY,target:e.target.className})})()`);
  assert.equal(readFileSync(path.join(vault,'Audit.md'),'utf8'),before,'comments must not edit source');
@@ -109,10 +120,12 @@ try {
  const scrollBefore=await evaluate(`({top:window.test.s.editorView().scrollDOM.scrollTop,text:window.test.s.editorView().state.doc.toString(),bottom:window.test.s.editorView().scrollDOM.getBoundingClientRect().bottom})`);
  await rpc('Input.dispatchMouseEvent',{type:'mousePressed',x:cancelGrip.x,y:cancelGrip.y,button:'left',clickCount:1});
  await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:cancelGrip.x+30,y:scrollBefore.bottom-4,buttons:1});
+ await until(()=>evaluate("!!document.querySelector('.nz-drag-float')"),'editor block follows the pointer');
  await sleep(250);assert.ok(await evaluate(`window.test.s.editorView().scrollDOM.scrollTop`)>scrollBefore.top,'drag autoscroll');
  await rpc('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});
  await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',x:cancelGrip.x+30,y:cancelGrip.y+30,button:'left',clickCount:1});
  assert.equal(await evaluate(`document.body.classList.contains('nz-dragging-block')`),false);
+ await until(()=>evaluate("!document.querySelector('.nz-drag-float')"),'cancel clears the floating editor block');
  assert.equal(await evaluate(`window.test.s.editorView().state.doc.toString()`),scrollBefore.text,'cancel must retain document');
  await evaluate(`(async()=>{const {s,ipc}=window.test;await s.saveAll();await ipc.createFolder('folder');await s.renameEntry('Audit.md','Renamed.md');await s.moveEntry('Renamed.md','folder');await s.renameEntry('folder','archive');await s.saveAll();await s.openNote('Other.md');const tabs=document.querySelectorAll('.tab'),dataTransfer=new DataTransfer();tabs[1].dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer}));tabs[0].dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer}));tabs[0].dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer}));if(s.state.tabs[0]!=='Other.md')throw Error('Tab reorder failed');await s.openNote('archive/Renamed.md');const section=await ipc.noteSection('Other.md','Renamed');if(section?.path!=='archive/Renamed.md')throw Error('Renamed link no longer resolves')})()`);
  assert.ok(existsSync(path.join(vault,'.notez/comments/archive/Renamed.md.json')),'sidecar follows file/folder');
@@ -137,7 +150,8 @@ try {
  ws.send(JSON.stringify({id:++seq,method:'Browser.close'}));await until(()=>exited,'successful saved exit');
  assert.ok(readFileSync(path.join(vault,'archive/Renamed.md'),'utf8').includes('UNSAVED-MARKER'));
  assert.equal(exceptions.length,0,JSON.stringify(exceptions));
- console.log('Electron smoke passed: block/table grips, pointer drag/autoscroll/cancel, LTR/RTL modes and widths, comments, tabs, file drag, renames, attachments, exports, history, sync, failed saves and native close.');
+ assert.deepEqual(layoutWarnings,[],'editor geometry must stabilize throughout the smoke suite');
+ console.log('Electron smoke passed: Source/Live scroll and tabs, footnotes, themes, block/table grips, LTR/RTL, comments, file drag, renames, attachments, exports, history, sync, failed saves and native close.');
  console.log('Scratch artifacts: '+scratch);
  }
 } catch(error) {

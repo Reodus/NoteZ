@@ -1,20 +1,29 @@
 import { noteIcon } from "../core/meta";
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, For, onCleanup, Show } from "solid-js";
 import { X, FileText, FileCode2, FileImage, FileType2, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2, Table2 } from "lucide-solid";
 import { state, setState, openNote, isDirty, closeTab, prefs, setPrefs, setFocusMode } from "../core/store";
 import { stem, basename, fileKind, isNotePath } from "../core/ipc";
 import { fileMenu, entryFor } from "./fileMenu";
 import { openMenu } from "./primitives";
 import { NoteMenuButton } from "./NoteMenu";
+import { DragProjection, dragItems, endNativeDrag, nativeDropRect, settleDragItems, startNativeDrag } from "./dragMotion";
 
 import { t } from "../core/i18n";
 export default function TabBar() {
-  let dragFrom = -1;
+  let dragged: string | null = null;
+  let strip!: HTMLDivElement;
+  const projection = new DragProjection();
+  const items = () => dragItems(strip, ".tab", el => el.title);
+  const clear = () => { projection.clear(); setDropAt(-1); };
+  onCleanup(() => {
+    if (dragged) endNativeDrag(items().get(dragged));
+    projection.clear();
+  });
   // The tab a dragged tab is over: the dropped tab lands on its far side.
   const [dropAt, setDropAt] = createSignal(-1);
   return (
     <div class="tabbar">
-      <div class="tabs" role="tablist">
+      <div class="tabs" role="tablist" ref={strip} onDragLeave={(e) => { if (!strip.contains(e.relatedTarget as Node | null)) clear(); }}>
         <For each={state.tabs}>
           {(path, i) => (
             <div
@@ -22,34 +31,52 @@ export default function TabBar() {
               classList={{
                 active: state.active === path,
                 dirty: isDirty(path),
-                "drop-before": dropAt() === i() && dragFrom > i(),
-                "drop-after": dropAt() === i() && dragFrom >= 0 && dragFrom < i(),
+                "drop-before": dropAt() === i() && dragged !== null && state.tabs.indexOf(dragged) > i(),
+                "drop-after": dropAt() === i() && dragged !== null && state.tabs.indexOf(dragged) < i(),
               }}
               role="tab"
               aria-selected={state.active === path}
               title={path}
               draggable={true}
               onDragStart={(e) => {
-                dragFrom = i();
+                dragged = path;
                 e.dataTransfer?.setData("text/notez-tab", path);
+                startNativeDrag(e, e.currentTarget);
               }}
-              onDragEnd={() => ((dragFrom = -1), setDropAt(-1))}
-              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(-1); }}
+              onDragEnd={(e) => { endNativeDrag(e.currentTarget); dragged = null; projection.cancel(items()); clear(); }}
               onDragOver={(e) => {
-                if (dragFrom < 0 || !e.dataTransfer?.types.includes("text/notez-tab")) return;
+                if (!dragged || !e.dataTransfer?.types.includes("text/notez-tab")) return;
                 e.preventDefault();
-                setDropAt(i());
+                if (dropAt() === i()) return;
+                const from = state.tabs.indexOf(dragged), to = i();
+                setDropAt(to);
+                const nodes = items();
+                const source = nodes.get(dragged);
+                if (!source || from < 0) return clear();
+                const sign = getComputedStyle(strip).direction === "rtl" ? -1 : 1;
+                const step = (source.offsetWidth + (parseFloat(getComputedStyle(strip).columnGap) || 0)) * sign;
+                const offsets = new Map<HTMLElement, { x: number; y: number }>();
+                state.tabs.forEach((tab, index) => {
+                  const el = nodes.get(tab);
+                  if (el && (from < index && index <= to || to <= index && index < from))
+                    offsets.set(el, { x: from < to ? -step : step, y: 0 });
+                });
+                projection.show(offsets, strip.getBoundingClientRect());
               }}
               onDrop={(e) => {
-                if (!e.dataTransfer?.types.includes("text/notez-tab")) return;
+                if (!dragged || !e.dataTransfer?.types.includes("text/notez-tab")) return;
                 e.preventDefault();
-                setDropAt(-1);
-                if (dragFrom < 0 || dragFrom === i()) return;
+                const from = state.tabs.indexOf(dragged), to = i();
+                const moved = { key: dragged, rect: nativeDropRect(e) };
+                const before = projection.capture(items());
+                clear();
+                endNativeDrag();
+                dragged = null;
+                if (from < 0 || from === to) return;
                 const tabs = [...state.tabs];
-                const [moved] = tabs.splice(dragFrom, 1);
-                tabs.splice(i(), 0, moved);
+                tabs.splice(to, 0, tabs.splice(from, 1)[0]);
                 setState("tabs", tabs);
-                dragFrom = -1;
+                requestAnimationFrame(() => { if (strip.isConnected) settleDragItems(before, items(), moved); });
               }}
               onMouseDown={(e) => {
                 if (e.button === 1) {

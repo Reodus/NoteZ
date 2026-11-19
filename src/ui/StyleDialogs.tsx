@@ -3,8 +3,9 @@ import { createStore, reconcile, unwrap } from "solid-js/store";
 import { Check, Copy, RotateCcw, Bold as BoldIcon, Italic as ItalicIcon, Underline as UnderlineIcon } from "lucide-solid";
 import { notify } from "../core/app";
 import { ipc, TextStyle, PageStyle, HeaderFooter, Theme } from "../core/ipc";
-import { editorView, state, setActiveTheme, prefs, setPrefs } from "../core/store";
-import { readFrontmatter, setFrontmatter } from "../core/frontmatter";
+import { editorView, state, refreshActiveTheme, prefs, setPrefs } from "../core/store";
+import { readFrontmatter, setFrontmatter, setFrontmatterText } from "../core/frontmatter";
+import { applyText } from "../core/blocks";
 import { runPreview } from "../core/render";
 import { fontList, FONT_SIZES } from "../core/fonts";
 import { DIGIT_OPTIONS, SCRIPT_FONT_KEYS, languageOptions } from "../core/languages";
@@ -19,32 +20,32 @@ export function docThemeId(): string {
   const path = state.active;
   if (!path) return "default";
   const text = state.buffers[path]?.content ?? "";
-  if (path.endsWith(".typ")) return /^\/\/ theme:\s*(\S+)/.exec(text)?.[1] ?? "default";
+  if (path.endsWith(".typ")) return /^[^\S\r\n]*\/\/ theme:[^\S\r\n]*(\S+)/.exec(text)?.[1] ?? "default";
   return readFrontmatter(text).theme ?? "default";
 }
 
 /** Set the active note's theme. */
 export function setDocTheme(id: string) {
-  const view = editorView();
-  if (!view) return;
-  if (isTypst()) {
-    const first = view.state.doc.line(1);
-    if (/^\/\/ theme:/.test(first.text)) view.dispatch({ changes: { from: first.from, to: first.to, insert: `// theme: ${id}` } });
-    else view.dispatch({ changes: { from: 0, insert: `// theme: ${id}\n` } });
+  const path = state.active;
+  const buffer = path && state.buffers[path];
+  if (!path || !buffer || docThemeId() === id) return;
+  const text = buffer.content;
+  if (path.endsWith(".typ")) {
+    const directive = `// theme: ${id}`;
+    const first = text.split("\n", 1)[0];
+    const next = /^[^\S\r\n]*\/\/ theme:/.test(first)
+      ? directive + (first.endsWith("\r") ? "\r" : "") + text.slice(first.length)
+      : directive + (text.includes("\r\n") ? "\r\n" : "\n") + text;
+    applyText(path, next, "change.documentTheme");
   } else {
-    setFrontmatter(view, ["theme"], id === "default" ? null : id);
+    applyText(path, setFrontmatterText(text, "theme", id === "default" ? null : id), "change.documentTheme");
   }
 }
 
-async function refreshTheme() {
-  const path = state.active;
-  if (!path) return;
-  try {
-    setActiveTheme(await ipc.noteTheme(path, state.buffers[path]?.content ?? ""));
-  } catch {
-    /* ignore */
-  }
-  runPreview();
+function refreshTheme() {
+  const theme = refreshActiveTheme();
+  void runPreview();
+  return theme;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -570,9 +571,9 @@ export function ThemesDialog(props: { onClose: () => void }) {
     return Promise.all(list.map(async (info) => ({ info, theme: await ipc.theme(info.id) })));
   });
 
-  const choose = async (id: string) => {
+  const choose = (id: string) => {
     setDocTheme(id);
-    await refreshTheme();
+    void refreshTheme();
     props.onClose();
   };
 

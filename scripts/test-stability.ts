@@ -35,9 +35,12 @@ await assert.rejects(retry.write('A','keep me'));await assert.rejects(retry.flus
 // Pointer release before requestAnimationFrame must still commit the final width.
 for(const dir of ['ltr','rtl']){
  const handlers=new Map<string,Function>();let raf:Function|null=null,width=0,captured=false;
- Object.assign(globalThis,{getComputedStyle:()=>({direction:dir}),requestAnimationFrame:(f:Function)=>(raf=f,1),cancelAnimationFrame:()=>raf=null,document:{body:{classList:{add(){},remove(){}}}}});
- const handle={setPointerCapture(){captured=true;},hasPointerCapture(){return captured;},releasePointerCapture(){captured=false;},addEventListener:(n:string,f:Function)=>handlers.set(n,f),removeEventListener:(n:string)=>handlers.delete(n)};
+ const events={addEventListener:(n:string,f:Function)=>handlers.set(n,f),removeEventListener:(n:string)=>handlers.delete(n)};
+ const classList={add(){},remove(){}};
+ Object.assign(globalThis,{getComputedStyle:()=>({direction:dir}),requestAnimationFrame:(f:Function)=>(raf=f,1),cancelAnimationFrame:()=>raf=null,document:{body:{classList}},window:events});
+ const handle={...events,classList,setPointerCapture(){captured=true;},hasPointerCapture(){return captured;},releasePointerCapture(){captured=false;}};
  startResize({button:0,preventDefault(){},currentTarget:handle,clientX:100,pointerId:1} as any,{getBoundingClientRect:()=>({width:300})} as any,1,w=>width=w);
+ handlers.get('lostpointercapture')!({pointerId:1,buttons:1});
  handlers.get('pointermove')!({clientX:130,pointerId:1});handlers.get('pointerup')!({clientX:130,pointerId:1});assert.equal(width,dir==='ltr'?330:270);assert.equal(captured,false);assert.equal(handlers.size,0);assert.equal(raf,null);
 }
 console.log('Stability: block moves + comment undo/redo, nested bookmarks, write ordering/retry and fast resize passed');

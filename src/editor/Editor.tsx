@@ -7,6 +7,7 @@ import {
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { footnoteDefinitions } from "./footnotes";
+import { footnoteComposer } from "./footnoteComposer";
 import { languages } from "@codemirror/language-data";
 import { codeLanguage } from "./asm";
 import { bracketMatching, indentOnInput, indentUnit } from "@codemirror/language";
@@ -16,7 +17,7 @@ import { setDiagnostics, lintGutter, Diagnostic as CmDiagnostic } from "@codemir
 
 import { app } from "../core/app";
 import {
-  state, prefs, updateContent, setEditorView, setCursor, setActiveTheme, activeTheme,
+  state, prefs, updateContent, setEditorView, setCursor, activeTheme,
   isDark, notesList, openNote, root,
   editorView, allFiles, setPdfJump,
 } from "../core/store";
@@ -227,7 +228,8 @@ function languageFor(path: string): Extension {
 /** Editor state per open tab (undo history, cursor), kept while the editor
  * is unmounted, e.g. while an image or PDF tab is shown. */
 const states = new Map<string, EditorState>();
-const scrolls = new Map<string, ReturnType<EditorView["scrollSnapshot"]>>();
+interface ReadingPosition { pos: number; offset: number; left: number }
+const scrolls = new Map<string, ReadingPosition>();
 app.events.on("vault:opened", () => { states.clear(); scrolls.clear(); });
 
 /** Patch disk changes without resetting the cursor, history or viewport anchor. */
@@ -245,6 +247,37 @@ export default function Editor() {
   /** Editor state per open tab: keeps undo history and cursor when switching. */
   let current: string | null = null;
   let focusFrame = 0;
+  let restore: { position: ReadingPosition; frame: number } | null = null;
+
+  function readingPosition(v: EditorView): ReadingPosition {
+    if (restore) return restore.position;
+    const { scrollTop, scrollLeft } = v.scrollDOM;
+    const y = scrollTop + 12 - v.documentPadding.top;
+    const block = v.viewportLineBlocks.find(({ top, bottom }) => top <= y && y <= bottom) ?? v.lineBlockAtHeight(y);
+    return { pos: block.from, offset: scrollTop - block.top, left: scrollLeft };
+  }
+
+  function cancelRestore() {
+    if (restore) cancelAnimationFrame(restore.frame);
+    restore = null;
+  }
+
+  function restoreReadingPosition(v: EditorView, position: ReadingPosition) {
+    cancelRestore();
+    const apply = () => {
+      v.scrollDOM.scrollTop = v.lineBlockAt(position.pos).top + position.offset;
+      v.scrollDOM.scrollLeft = position.left;
+    };
+    // Let the destination view measure its layout first. The first scroll
+    // brings the anchor into the viewport, where its height is then measured.
+    restore = { position, frame: requestAnimationFrame(() => {
+      apply();
+      if (restore) restore.frame = requestAnimationFrame(() => {
+        apply();
+        restore = null;
+      });
+    }) };
+  }
   const live = (path: string) => [
     prefs.editorMode === "live" && !path.endsWith(".typ") ? liveEmbeds : [],
     livePreview(prefs.editorMode === "live", path.endsWith(".typ"), {
@@ -282,6 +315,7 @@ export default function Editor() {
         slashGhost,
         tagExtension((tag) => searchFor(`tag:${tag}`)),
         path.endsWith(".typ") ? [] : [blockExtensions(), blockTools()],
+        footnoteComposer,
         commentsComp.of(prefs.disabledBuiltins.includes("core.comments") ? [] : commentExtension(path)),
         Prec.high(formattingKeymap()),
         keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
@@ -302,6 +336,7 @@ export default function Editor() {
         liveComp.of(live(path)),
         pluginComp.of(app.editorExtensions.items()),
         EditorView.updateListener.of((u) => {
+          if (u.selectionSet || u.transactions.some((tr) => tr.scrollIntoView)) cancelRestore();
           if (u.docChanged) updateContent(path, u.state.doc.toString());
           if (u.docChanged || u.selectionSet) {
             const sel = u.state.selection.main;
@@ -318,8 +353,9 @@ export default function Editor() {
     cancelAnimationFrame(focusFrame);
     if (current && current !== path) {
       states.set(current, view.state);
-      scrolls.set(current, view.scrollSnapshot());
+      scrolls.set(current, readingPosition(view));
     }
+    cancelRestore();
     // Drop states of closed tabs.
     for (const p of [...states.keys()]) if (!state.tabs.includes(p)) { states.delete(p); scrolls.delete(p); }
     current = path;
@@ -329,15 +365,16 @@ export default function Editor() {
     if (!st) st = makeState(path, buf?.content ?? "");
     else if (st.doc.toString() !== buf?.content) {
       const tr = st.update({ changes: textChange(st.doc.toString(), buf?.content ?? ""), effects: refreshComments.of(), annotations: Transaction.addToHistory.of(false) });
-      const mapped = scrolls.get(path)?.map(tr.changes);
-      if (mapped) scrolls.set(path, mapped);
+      const reading = scrolls.get(path);
+      if (reading) scrolls.set(path, { ...reading, pos: tr.changes.mapPos(reading.pos, 1) });
       st = tr.state;
     }
+    view.scrollDOM.scrollTop = 0;
+    view.scrollDOM.scrollLeft = 0;
     view.setState(st);
     // Re-apply dynamic config that may have changed while the tab was hidden.
     view.dispatch({
       effects: [
-        ...(scrolls.has(path) ? [scrolls.get(path)!] : []),
         refreshComments.of(),
         commentsComp.reconfigure(prefs.disabledBuiltins.includes("core.comments") ? [] : commentExtension(path)),
         lineNumbersComp.reconfigure(prefs.lineNumbers ? lineNumbers() : []),
@@ -348,6 +385,8 @@ export default function Editor() {
         vimComp.reconfigure(vimExt && prefs.vimMode ? vimExt : []),
       ],
     });
+    const reading = scrolls.get(path);
+    if (reading) restoreReadingPosition(view, reading);
     const sel = view.state.selection.main;
     const line = view.state.doc.lineAt(sel.head);
     setCursor({ line: line.number, col: sel.head - line.from + 1, selected: 0 });
@@ -356,6 +395,8 @@ export default function Editor() {
 
   onMount(() => {
     view = new EditorView({ parent: host });
+    view.scrollDOM.addEventListener("wheel", cancelRestore, { passive: true, capture: true });
+    view.scrollDOM.addEventListener("pointerdown", cancelRestore, { capture: true });
     setEditorView(view);
     show(state.active);
   });
@@ -367,9 +408,9 @@ export default function Editor() {
     const old = view.state.doc.toString();
     if (old === content) return;
     const tr = view.state.update({ changes: textChange(old, content), effects: refreshComments.of(), annotations: Transaction.addToHistory.of(false) });
-    const scroll = view.scrollSnapshot().map(tr.changes);
+    const reading = readingPosition(view);
     view.dispatch(tr);
-    if (scroll) view.dispatch({ effects: scroll });
+    restoreReadingPosition(view, { ...reading, pos: tr.changes.mapPos(reading.pos, 1) });
   }));
 
   createEffect(on(() => state.active, (path) => show(path)));
@@ -404,27 +445,6 @@ export default function Editor() {
     view?.dispatch({ effects: pluginComp.reconfigure(exts) });
   }, { defer: true }));
 
-  // Note theme → CSS variables (WYSIWYM). Refetch when the frontmatter changes.
-  let themeTimer: number | undefined;
-  let lastFm = "";
-  createEffect(() => {
-    const path = state.active;
-    const text = path ? state.buffers[path]?.content ?? "" : "";
-    const fm = path?.endsWith(".typ") ? text.split("\n", 1)[0] : (/^---\n[\s\S]*?\n---/.exec(text)?.[0] ?? "");
-    const key = `${path}\u0000${fm}`;
-    if (key === lastFm) return;
-    lastFm = key;
-    clearTimeout(themeTimer);
-    themeTimer = window.setTimeout(async () => {
-      if (!path) return setActiveTheme(null);
-      try {
-        setActiveTheme(await ipc.noteTheme(path, text));
-      } catch {
-        setActiveTheme(null);
-      }
-    }, 250);
-  });
-
   createEffect(() => {
     const vars = themeCss(activeTheme());
     host.style.cssText = Object.entries(vars).map(([k, v]) => `${k}:${v}`).join(";");
@@ -455,7 +475,8 @@ export default function Editor() {
 
   onCleanup(() => {
     cancelAnimationFrame(focusFrame);
-    if (view && current) { states.set(current, view.state); scrolls.set(current, view.scrollSnapshot()); }
+    if (view && current) { states.set(current, view.state); scrolls.set(current, readingPosition(view)); }
+    cancelRestore();
     setEditorView(null);
     view?.destroy();
     view = undefined;

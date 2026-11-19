@@ -5,7 +5,7 @@ import { registerSaveParticipant } from "../core/saveParticipants";
 import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import {
-  Highlighter, MousePointer2, StickyNote, Square, PanelRight, Search, ZoomIn, ZoomOut, ChevronUp, ChevronDown, Link2, Quote, Trash2, Image as ImageIcon, X,
+  Highlighter, MousePointer2, Hand, StickyNote, Square, PanelRight, Search, ZoomIn, ZoomOut, ChevronUp, ChevronDown, Link2, Quote, Trash2, Image as ImageIcon, X,
 } from "lucide-solid";
 import { ipc, basename, stem } from "../core/ipc";
 import { app, notify } from "../core/app";
@@ -88,7 +88,7 @@ export default function PdfView(props: { path: string; url: string }) {
   let resizer: ResizeObserver | undefined;
 
   const [anns, setAnns] = createSignal<Annotation[]>([]);
-  const [tool, setTool] = createSignal<"select" | AnnKind>("select");
+  const [tool, setTool] = createSignal<"select" | "pan" | AnnKind>("select");
   const [color, setColor] = createSignal("yellow");
   const [page, setPage] = createSignal(1);
   const [pages, setPages] = createSignal(0);
@@ -253,11 +253,55 @@ export default function PdfView(props: { path: string; url: string }) {
   };
 
   // ------------------------------------------------------- mouse
+  let stopPan: (() => void) | undefined;
+  onCleanup(() => stopPan?.());
+  const startPan = (e: PointerEvent) => {
+    if ((tool() !== "pan" || e.button !== 0) && e.button !== 1) return;
+    e.preventDefault();
+    stopPan?.();
+    const startX = e.clientX, startY = e.clientY;
+    const left = container.scrollLeft, top = container.scrollTop;
+    const controller = new AbortController();
+    const options = { signal: controller.signal };
+    let frame = 0, point = e;
+    const apply = () => {
+      frame = 0;
+      container.scrollLeft = left + startX - point.clientX;
+      container.scrollTop = top + startY - point.clientY;
+    };
+    const finish = () => {
+      controller.abort();
+      cancelAnimationFrame(frame);
+      container.classList.remove("nz-pdf-panning");
+      if (container.hasPointerCapture(e.pointerId)) container.releasePointerCapture(e.pointerId);
+      stopPan = undefined;
+    };
+    stopPan = finish;
+    container.setPointerCapture(e.pointerId);
+    container.classList.add("nz-pdf-panning");
+    window.addEventListener("pointermove", ev => {
+      if (ev.pointerId !== e.pointerId) return;
+      point = ev;
+      if (!frame) frame = requestAnimationFrame(apply);
+    }, { ...options, capture: true });
+    window.addEventListener("pointerup", ev => {
+      if (ev.pointerId !== e.pointerId) return;
+      cancelAnimationFrame(frame);
+      point = ev;
+      apply();
+      finish();
+    }, { ...options, capture: true });
+    window.addEventListener("pointercancel", ev => {
+      if (ev.pointerId === e.pointerId) finish();
+    }, { ...options, capture: true });
+    container.addEventListener("lostpointercapture", ev => { if (!ev.buttons) finish(); }, options);
+    window.addEventListener("blur", finish, options);
+  };
   let down: { x: number; y: number; p: ReturnType<typeof pointIn> } | null = null;
   let box: HTMLDivElement | null = null;
 
   const onDown = (e: MouseEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || tool() === "pan") return;
     if ((e.target as HTMLElement).closest(".nz-pdf-pop")) return;
     setPop(null);
     const p = pointIn(e);
@@ -371,19 +415,25 @@ export default function PdfView(props: { path: string; url: string }) {
   onMount(async () => {
     try {
       const { pdfjs, ui } = await loadPdfjs();
+      if (!container.isConnected) return;
       eventBus = new ui.EventBus();
       const linkService = new ui.PDFLinkService({ eventBus, externalLinkTarget: ui.LinkTarget.BLANK });
       const findController = new ui.PDFFindController({ eventBus, linkService });
-      viewer = new ui.PDFViewer({ container, viewer: viewerEl, eventBus, linkService, findController, textLayerMode: 1, removePageBorders: false });
+      viewer = new ui.PDFViewer({
+        container, viewer: viewerEl, eventBus, linkService, findController, textLayerMode: 1, removePageBorders: false,
+        // NoteZ owns its annotations. Disable PDF.js's document-wide editor drag listeners.
+        annotationEditorMode: pdfjs.AnnotationEditorType.DISABLE,
+      });
       linkService.setViewer(viewer);
       // Keep "fit width" fitting when the pane resizes (panel, sidebar, window).
       let fit = true;
       resizer = new ResizeObserver(() => {
-        if (fit && pages()) viewer.currentScaleValue = "page-width";
+        if (fit && pages() && container.isConnected && container.offsetParent) viewer.currentScaleValue = "page-width";
       });
       resizer.observe(container);
       eventBus.on("scalechanging", (e: any) => (fit = e.presetValue === "page-width"));
       eventBus.on("pagesinit", () => {
+        if (!container.isConnected || !container.offsetParent) return;
         viewer.currentScaleValue = "page-width";
         setPages(doc.numPages);
         const last = Number(localStorage.getItem(`nz-pdf-page:${props.path}`) || 0);
@@ -407,7 +457,12 @@ export default function PdfView(props: { path: string; url: string }) {
         else if (e.matchesCount?.total) setFindInfo(`${e.matchesCount.current} / ${e.matchesCount.total}`);
       });
       setAnns(await loadAnnotations(props.path));
-      doc = await pdfjs.getDocument({ url: props.url, cMapUrl: "/pdfjs/cmaps/", cMapPacked: true, standardFontDataUrl: "/pdfjs/standard_fonts/", isEvalSupported: false }).promise;
+      const loaded = await pdfjs.getDocument({ url: props.url, cMapUrl: "/pdfjs/cmaps/", cMapPacked: true, standardFontDataUrl: "/pdfjs/standard_fonts/", isEvalSupported: false }).promise;
+      if (!container.isConnected) {
+        void loaded.destroy();
+        return;
+      }
+      doc = loaded;
       viewer.setDocument(doc);
       linkService.setDocument(doc, null);
     } catch (e) {
@@ -442,6 +497,7 @@ export default function PdfView(props: { path: string; url: string }) {
       e.preventDefault();
       remove(selected()!);
     } else if (e.key === "Escape") {
+      stopPan?.();
       setPop(null);
       setSelected(null);
       setTool("select");
@@ -487,7 +543,7 @@ export default function PdfView(props: { path: string; url: string }) {
     return p?.ann ? anns().find((a) => a.id === p.ann) : undefined;
   };
 
-  const Tool = (p: { t: "select" | AnnKind; title: string; children: any }) => (
+  const Tool = (p: { t: "select" | "pan" | AnnKind; title: string; children: any }) => (
     <button class="icon-btn" classList={{ active: tool() === p.t }} title={p.title} onClick={() => setTool(p.t)}>{p.children}</button>
   );
   const Swatches = (p: { value: string; onPick: (c: string) => void }) => (
@@ -500,6 +556,7 @@ export default function PdfView(props: { path: string; url: string }) {
     <div class="nz-pdf">
       <div class="nz-pdf-bar">
         <Tool t="select" title={t("Select text (V)")}><MousePointer2 size={15} /></Tool>
+        <Tool t="pan" title={t("Pan page")}><Hand size={15} /></Tool>
         <Tool t="highlight" title={t("Highlight text (H)")}><Highlighter size={15} /></Tool>
         <Tool t="note" title={t("Add a note (N)")}><StickyNote size={15} /></Tool>
         <Tool t="area" title={t("Select an area (A)")}><Square size={15} /></Tool>
@@ -532,7 +589,7 @@ export default function PdfView(props: { path: string; url: string }) {
       </Show>
       <div class="nz-pdf-main">
         <div class="nz-pdf-stage">
-          <div ref={container} class={`nz-pdf-scroll tool-${tool()}`} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
+          <div ref={container} class={`nz-pdf-scroll tool-${tool()}`} onPointerDown={startPan} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
             onWheel={(e) => {
               if (!e.ctrlKey) return;
               e.preventDefault();

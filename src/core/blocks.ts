@@ -14,7 +14,7 @@ export function newBlockId(): string {
 }
 
 /** Replace the text of open note `path` with `next`, as one small edit. */
-export function applyText(path: string, next: string) {
+export function applyText(path: string, next: string, userEvent = "input.blockid") {
   const view = editorView();
   if (view && state.active === path) {
     const cur = view.state.doc.toString();
@@ -23,7 +23,7 @@ export function applyText(path: string, next: string) {
     while (a < cur.length && a < next.length && cur[a] === next[a]) a++;
     let b = 0;
     while (b < cur.length - a && b < next.length - a && cur[cur.length - 1 - b] === next[next.length - 1 - b]) b++;
-    view.dispatch({ changes: { from: a, to: cur.length - b, insert: next.slice(a, next.length - b) }, userEvent: "input.blockid" });
+    view.dispatch({ changes: { from: a, to: cur.length - b, insert: next.slice(a, next.length - b) }, userEvent });
   } else if (state.buffers[path]) updateContent(path, next);
 }
 

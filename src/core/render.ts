@@ -110,18 +110,23 @@ async function withComments(path: string, text: string) {
 export async function runPreview() {
   const path = state.active;
   if (!path || viewLayout() === "editor") return;
+  const vault = root();
   const text = state.buffers[path]?.content ?? "";
   const my = ++seq;
+  const current = () => my === seq && root() === vault && state.active === path;
   setPreview((p) => ({ ...p, busy: true }));
   try {
     const blocks = await renderPluginBlocks(text);
+    if (!current()) return;
     // Pages we already have are not sent again: a long note is megabytes of
     // SVG, and typing changes one or two pages.
     const prev = preview();
     const have = new Map<string, string>();
     if (prev.path === path) prev.hashes.forEach((h, i) => prev.pages[i] && have.set(h, prev.pages[i]));
-    const r = await ipc.renderPreview(path, await withComments(path, text), blocks, [...have.keys()]);
-    if (my !== seq) return; // a newer render started
+    const source = await withComments(path, text);
+    if (!current()) return;
+    const r = await ipc.renderPreview(path, source, blocks, [...have.keys()]);
+    if (!current()) return;
     const pages = r.pages.map((p, i) => p ?? have.get(r.hashes[i]) ?? "");
     const errors = r.diagnostics.filter((d) => d.severity === "error").length;
     setPreview({
@@ -136,7 +141,7 @@ export async function runPreview() {
     });
     app.events.emit("preview:rendered", { path, pages: r.pages.length, millis: r.millis, errors });
   } catch (e) {
-    if (my !== seq) return;
+    if (!current()) return;
     setPreview((p) => ({ ...p, busy: false, diagnostics: [{ severity: "error", message: String(e), hints: [], line: null, column: null, file: null }] }));
   }
 }

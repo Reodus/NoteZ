@@ -3541,6 +3541,71 @@ body,
   border-radius: 3px;
   font-family: var(--font-editor);
 }
+.nz-column-grip {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 16px;
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-faint);
+  opacity: 0;
+  pointer-events: none;
+  cursor: grab;
+  touch-action: none;
+}
+.nz-column-grip::before {
+  content: "";
+  width: 12px;
+  height: 8px;
+  background: radial-gradient(circle, currentColor 1px, transparent 1.25px) 0 0 / 4px 4px;
+}
+.nz-column-rail:not(:has(.nz-column-grip:focus-visible)) .nz-column-grip.hovered:enabled,
+.nz-column-grip:focus-visible,
+.nz-column-grip.dragging {
+  opacity: 1;
+  pointer-events: auto;
+}
+.nz-dragging-column .nz-column-grip:not(.dragging) {
+  opacity: 0;
+  pointer-events: none;
+}
+.nz-column-grip:hover,
+.nz-column-grip:focus-visible,
+.nz-column-grip.dragging {
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+.nz-dragging-column,
+.nz-dragging-column * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+.nz-dragging-column :is(th, td) {
+  position: relative;
+  translate: var(--nz-column-shift, 0px) 0;
+  transition: translate 150ms var(--ease);
+}
+.cm-nz-lp-table.nz-edit-table.nz-dragging-column :is(th, td).nz-column-carried {
+  z-index: 2;
+  translate: var(--nz-column-drag-x, 0px) 0;
+  background: var(--surface);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .15);
+  transition: none;
+}
+.nz-column-drop {
+  position: absolute;
+  z-index: 1;
+  inset-block: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
 .cm-nz-lp-table.nz-edit-table tbody tr:hover td {
   background: transparent;
 }
@@ -4532,6 +4597,37 @@ button.link:hover {
 }
 .cm-nz-fn-peek .cm-nz-preview-head { margin-bottom: 4px; }
 .cm-nz-fn-peek.missing .cm-nz-preview-body { color: var(--fg-faint); font-style: italic; }
+.nz-footnote-compose {
+  position: fixed;
+  z-index: 80;
+  width: 292px;
+  visibility: hidden;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  overflow: auto;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg, 0 8px 28px rgba(0, 0, 0, 0.18));
+}
+.nz-footnote-compose.visible { visibility: visible; }
+.nz-footnote-compose textarea {
+  width: 100%;
+  min-width: 0;
+  resize: none;
+  padding: 6px 8px;
+  color: inherit;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font: 13px/1.5 var(--font-ui);
+  text-align: start;
+}
+.nz-footnote-compose textarea:focus-visible { outline: 1px solid var(--accent); }
+.nz-footnote-compose-keys { color: var(--fg-muted); font: 11px/1.4 var(--font-ui); text-align: end; }
+body:has(.nz-footnote-compose) .editor .cm-tooltip:has(> .cm-nz-fn-peek) { visibility: hidden; }
 .editor .cm-tooltip.cm-tooltip-hover:has(.cm-nz-link-preview) { border: none; background: transparent; box-shadow: none; }
 .cm-nz-link-preview {
   width: min(460px, 80vw);
@@ -4949,3 +5045,67 @@ body.nz-dragging-block, body.nz-dragging-block * { cursor: grabbing !important; 
 .comment-reply { border-inline-start: 2px solid var(--border); padding: 6px 10px; margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .comment-card form { display: flex; gap: 6px; margin-top: 8px; }
 .comment-card form input { min-width: 0; flex: 1; }
+
+/* Drag visuals sit outside the layout used for hit testing and editor measurements. */
+.nz-native-drag-source { opacity: .55; }
+.nz-drag-projected { opacity: 0 !important; }
+.nz-drag-float, .nz-drag-projection {
+  position: fixed;
+  z-index: 75;
+  pointer-events: none;
+}
+.nz-drag-projection > * {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  transition: translate 160ms var(--ease);
+}
+.nz-drag-float {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg);
+  background: var(--surface);
+  font: 12px var(--font-ui);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow-sm);
+}
+.tree-item, .tree, .base-column, .nz-pdf-scroll, .sidebar .resizer, .right-panel .resizer {
+  transition: background-color 160ms var(--ease), box-shadow 160ms var(--ease);
+}
+.cm-editor.nz-attachment-target { box-shadow: inset 0 0 0 2px var(--accent); transition: box-shadow 160ms var(--ease); }
+.cm-editor { transition: box-shadow 160ms var(--ease); }
+
+.nz-table-track { position: relative; width: max-content; min-width: 100%; }
+.nz-column-rail { position: relative; height: 18px; }
+.nz-column-rail .nz-column-grip { position: absolute; top: 0; translate: -50% 0; margin: 0; }
+.nz-column-rail .nz-column-grip.dragging { translate: calc(-50% + var(--nz-column-drag-x, 0px)) 0; }
+.nz-column-drop { transition: left 160ms var(--ease), opacity 120ms; }
+.editor .cm-nz-drop-line { transition: top 160ms var(--ease), left 160ms var(--ease), width 160ms var(--ease); }
+.nz-pdf-scroll.tool-pan, .nz-pdf-scroll.tool-pan .textLayer { cursor: grab; user-select: none; }
+.nz-pdf-scroll.tool-pan { touch-action: none; }
+.nz-pdf-scroll.nz-pdf-panning, .nz-pdf-scroll.nz-pdf-panning * { cursor: grabbing; user-select: none; }
+.nz-pdf-scroll.nz-pdf-panning { box-shadow: inset 0 0 0 1px var(--accent); }
+.nz-resize-active { background-color: var(--accent-softer); }
+html.no-anim .nz-drag-float, html.no-anim .nz-drag-projection { display: none; }
+html.no-anim .nz-drag-projected { opacity: 1 !important; }
+@media (prefers-reduced-motion: reduce) {
+  .nz-drag-float, .nz-drag-projection { display: none; }
+  .nz-drag-projected { opacity: 1 !important; }
+}
+
+
+.nz-drag-carry {
+  display: block;
+  padding: 0;
+  z-index: 76;
+  min-height: 0;
+  border: none;
+  white-space: inherit;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .22);
+}

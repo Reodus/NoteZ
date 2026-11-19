@@ -134,6 +134,17 @@ export function rtlCaptions(text: string): [number, number][] {
 
 const rtlRun = Decoration.mark({ bidiIsolate: Direction.RTL, class: "cm-nz-rtl-run", attributes: { dir: "rtl" } });
 
+function lineDirection(text: string, forced: "rtl" | "ltr" | null) {
+  return forced ?? (RTL.test(text) && rtlLine(text) ? "rtl" : "auto");
+}
+
+/** Uses the same rules as the line decorations without measuring the view. */
+export function editorLineDirection(doc: EditorView["state"]["doc"], pos: number) {
+  const line = doc.lineAt(pos);
+  const forced = mathBlockLines(doc, line.number).has(line.number) ? "ltr" : explicitDirs(doc, line.number)[line.number];
+  return lineDirection(line.text, forced);
+}
+
 interface Decos {
   lines: DecorationSet;
   runs: DecorationSet;
@@ -151,8 +162,9 @@ function build(view: EditorView): Decos {
     for (let pos = from; pos <= to; ) {
       const line = doc.lineAt(pos);
       const forced = math.has(line.number) ? "ltr" : dirs[line.number];
-      const rtl = forced ? forced === "rtl" : RTL.test(line.text) && rtlLine(line.text);
-      lines.add(line.from, line.from, rtl ? rtlDir : forced === "ltr" ? ltrDir : autoDir);
+      const dir = lineDirection(line.text, forced);
+      const rtl = dir === "rtl";
+      lines.add(line.from, line.from, rtl ? rtlDir : dir === "ltr" ? ltrDir : autoDir);
       const marks: [number, number, Decoration][] = rtl ? ltrRanges(line.text).map(([a, b]) => [a, b, ltrRun]) : [];
       if (RTL.test(line.text)) for (const [a, b] of rtlCaptions(line.text)) marks.push([a, b, rtlRun]);
       // Outer ranges first when two start together.

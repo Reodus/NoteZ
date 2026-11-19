@@ -1,6 +1,6 @@
 // Paste or drop files into a note: images (from disk or the clipboard, e.g.
 // a screenshot) are copied into the vault's attachment folder and linked.
-import { EditorView } from "@codemirror/view";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import { pathForFile } from "../core/native";
 import { ipc } from "../core/ipc";
 import { notify } from "../core/app";
@@ -97,7 +97,22 @@ function insertFiles(view: EditorView, files: File[], pos: number, to = pos) {
   void operation.finally(unregister).catch(e => notify(String(e), "error"));
 }
 
-export const attachmentDrop = EditorView.domEventHandlers({
+const attachmentTarget = ViewPlugin.define(view => {
+  const controller = new AbortController();
+  const options = { signal: controller.signal, capture: true };
+  const clear = () => view.dom.classList.remove("nz-attachment-target");
+  view.dom.addEventListener("dragover", ev => {
+    view.dom.classList.toggle("nz-attachment-target", !!ev.dataTransfer?.types.includes("Files"));
+  }, options);
+  view.dom.addEventListener("dragleave", ev => {
+    if (!view.dom.contains(ev.relatedTarget as Node | null)) clear();
+  }, options);
+  view.dom.addEventListener("drop", clear, options);
+  window.addEventListener("blur", clear, options);
+  return { destroy() { controller.abort(); clear(); } };
+});
+
+export const attachmentDrop = [attachmentTarget, EditorView.domEventHandlers({
   paste(e, view) {
     const files = [...(e.clipboardData?.files ?? [])];
     if (!files.length) return false;
@@ -124,4 +139,4 @@ export const attachmentDrop = EditorView.domEventHandlers({
     insertFiles(view, files, pos);
     return true;
   },
-});
+})];

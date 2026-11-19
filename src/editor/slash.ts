@@ -46,6 +46,8 @@ function size(a: string, b: string): [number, number] {
   return [r, c];
 }
 
+const footnoteCommand = { section: "Basic", id: "footnote", title: t("Footnote"), icon: "¹", keys: "note reference", run: (view: EditorView) => insertFootnote(view) };
+
 export const BUILTIN: (SlashCommand & { section: string; icon: string })[] = [
   { section: "Basic", id: "text", title: t("Text"), icon: "¶", keys: "paragraph normal plain", run: (v) => setBlockStyle(v, "p") },
   { section: "Basic", id: "h1", title: t("Heading 1"), icon: "H1", keys: "title heading", hint: "#", run: (v) => setBlockStyle(v, "h1") },
@@ -79,7 +81,7 @@ export const BUILTIN: (SlashCommand & { section: string; icon: string })[] = [
     } },
   { section: "Basic", id: "embed", title: t("Embed note or image"), icon: "⧉", keys: "transclude include image", hint: "/embed Note", mdOnly: true,
     args: [{ name: "note or file", options: notes }], run: (v, [t]) => insertText(v, `![[${t ?? ""}]]`, t ? undefined : 3) },
-  { section: "Basic", id: "footnote", title: t("Footnote"), icon: "¹", keys: "note reference", run: (v) => insertFootnote(v) },
+  footnoteCommand,
   {
     section: "Basic", id: "tag", title: t("Tag"), icon: "#", keys: "label category", hint: "/tag name", mdOnly: true,
     args: [{ name: "tag", options: () => allTags().map((t) => t.tag) }],
@@ -260,6 +262,7 @@ function inCode(ctx: CompletionContext): boolean {
 /** Remove the typed "/command args" and run the command. */
 function runner(c: SlashCommand, args: string[]) {
   return (view: EditorView, _c: Completion, from: number, to: number) => {
+    if (c === footnoteCommand) return insertFootnote(view, { from, to });
     view.dispatch({ changes: { from, to, insert: "" } });
     try {
       c.run(view, args);
