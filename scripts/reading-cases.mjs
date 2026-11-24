@@ -68,7 +68,23 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
    const target=await evaluate(`window.test.s.editorView().state.doc.line(${n}).from+20`);
    // Exercise one application jump, including its layout correction. Retrying
    // from the test could conceal a jump that leaves the target offscreen.
-   await evaluate(`window.test.s.goToLine(${n},20)`);
+   await evaluate(`(()=>{
+    const {s}=window.test,v=s.editorView(),doc=v.state.doc;
+    const raf=window.requestAnimationFrame,cancel=window.cancelAnimationFrame;
+    const trace=window.test.readingJump=[];
+    const snapshot=()=>[v.scrollDOM.scrollTop,v.viewport.from,v.viewport.to,v.state.selection.main.head,v.state.doc===doc];
+    const frames=new Set();
+    window.requestAnimationFrame=function(callback){
+     if(callback.name!=='settle')return raf.call(window,callback);
+     const id=raf.call(window,time=>{const before=snapshot();callback(time);trace.push([id,before,snapshot()]);});
+     frames.add(id);return id;
+    };
+    window.cancelAnimationFrame=function(id){if(frames.has(id))trace.push(['cancel',id,snapshot()]);cancel.call(window,id);};
+    trace.push(['start',document.visibilityState,snapshot()]);
+    s.goToLine(${n},20);
+    trace.push(['dispatch',snapshot()]);
+    window.test.stopReadingJump=()=>{window.requestAnimationFrame=raf;window.cancelAnimationFrame=cancel;return trace;};
+   })()`);
    let point=null,lastGeometry=null;
    const deadline=Date.now()+5000;
    while(Date.now()<deadline){
@@ -77,8 +93,10 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
     const {rect:r,coords:c,viewport}=lastGeometry;
     if(target>=viewport.from&&target<=viewport.to&&c&&c.top>=r.top&&c.bottom<=r.bottom&&c.left>=r.left&&c.left<r.right){point={x:c.left,y:(c.top+c.bottom)/2};break;}
    }
-   if(!point)writeFileSync(path.join(scratch,`editing-${width}-${n}.json`),JSON.stringify(lastGeometry,null,2));
-   assert.ok(point,`character ${target} on line ${n} must be reachable for editing: ${JSON.stringify(lastGeometry)}`);
+   const jump=await evaluate(`window.test.stopReadingJump()`);
+   if(!point)writeFileSync(path.join(scratch,`editing-${width}-${n}.json`),JSON.stringify({lastGeometry,jump},null,2));
+   const summary=jump.length>10?[...jump.slice(0,5),'…',...jump.slice(-5)]:jump;
+   assert.ok(point,`character ${target} on line ${n} must be reachable for editing: ${JSON.stringify({lastGeometry,jump:summary})}`);
    await evaluate(`window.test.s.editorView().dispatch({selection:{anchor:0}})`);await sleep(100);
    const clickGeometry=await evaluate(`(()=>{const v=window.test.s.editorView(),c=v.coordsAtPos(${target}),r=v.scrollDOM.getBoundingClientRect();return {c,r:r.toJSON()}})()`);
    assert.ok(clickGeometry.c&&clickGeometry.c.top>=clickGeometry.r.top&&clickGeometry.c.bottom<=clickGeometry.r.bottom,'target stays visible with caret elsewhere');
