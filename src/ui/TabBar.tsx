@@ -1,14 +1,14 @@
 import { noteIcon } from "../core/meta";
-import { createSignal, For, onCleanup, Show } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { X, FileText, FileCode2, FileImage, FileType2, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2, Table2 } from "lucide-solid";
-import { state, setState, openNote, isDirty, closeTab, prefs, setPrefs, setFocusMode } from "../core/store";
+import { state, setState, openNote, isDirty, closeTab, prefs, setPrefs, setFocusMode, setWorkspaceLayout, compactWorkspace, compactPanel, setCompactPanel, showRightPanel, rightTab } from "../core/store";
 import { stem, basename, fileKind, isNotePath } from "../core/ipc";
 import { fileMenu, entryFor } from "./fileMenu";
 import { openMenu } from "./primitives";
 import { NoteMenuButton } from "./NoteMenu";
 import { DragProjection, dragItems, endNativeDrag, nativeDropRect, settleDragItems, startNativeDrag } from "./dragMotion";
 
-import { t } from "../core/i18n";
+import { t, uiRtl } from "../core/i18n";
 export default function TabBar() {
   let dragged: string | null = null;
   let strip!: HTMLDivElement;
@@ -21,9 +21,20 @@ export default function TabBar() {
   });
   // The tab a dragged tab is over: the dropped tab lands on its far side.
   const [dropAt, setDropAt] = createSignal(-1);
+  createEffect(on(() => [state.active, prefs.showTabBar], () => {
+    if (!prefs.showTabBar) return;
+    strip?.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }));
   return (
     <div class="tabbar">
-      <div class="tabs" role="tablist" ref={strip} onDragLeave={(e) => { if (!strip.contains(e.relatedTarget as Node | null)) clear(); }}>
+      <div class="tabs" hidden={!prefs.showTabBar} role="tablist" ref={strip}
+        onDragLeave={(e) => { if (!strip.contains(e.relatedTarget as Node | null)) clear(); }}
+        onWheel={(e) => {
+          if (e.ctrlKey || e.deltaX || !e.deltaY || strip.scrollWidth <= strip.clientWidth) return;
+          e.preventDefault();
+          const delta = e.deltaY * (e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 18 : 1);
+          strip.scrollBy({ left: uiRtl ? -delta : delta });
+        }}>
         <For each={state.tabs}>
           {(path, i) => (
             <div
@@ -35,6 +46,7 @@ export default function TabBar() {
                 "drop-after": dropAt() === i() && dragged !== null && state.tabs.indexOf(dragged) < i(),
               }}
               role="tab"
+              tabindex={state.active === path ? 0 : -1}
               aria-selected={state.active === path}
               title={path}
               draggable={true}
@@ -79,12 +91,36 @@ export default function TabBar() {
                 requestAnimationFrame(() => { if (strip.isConnected) settleDragItems(before, items(), moved); });
               }}
               onMouseDown={(e) => {
-                if (e.button === 1) {
-                  e.preventDefault();
-                  void closeTab(path).catch(() => {});
-                }
+                if (e.button === 1) e.preventDefault();
+              }}
+              onMouseUp={(e) => {
+                // Chromium pastes the primary selection on middle-button release.
+                if (e.button === 1) e.preventDefault();
+              }}
+              onAuxClick={(e) => {
+                if (e.button !== 1) return;
+                e.preventDefault();
+                void closeTab(path).catch(() => {});
               }}
               onClick={() => void openNote(path)}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey || e.altKey) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  void openNote(path);
+                  return;
+                }
+                const step = uiRtl ? -1 : 1;
+                const last = state.tabs.length - 1;
+                const next = e.key === "Home" ? 0 : e.key === "End" ? last
+                  : e.key === "ArrowRight" ? i() + step : e.key === "ArrowLeft" ? i() - step : null;
+                if (next === null) return;
+                e.preventDefault();
+                const destination = state.tabs[Math.max(0, Math.min(last, next))];
+                if (destination === path) return;
+                items().get(destination)?.focus();
+                void openNote(destination, { keepFocus: true });
+              }}
               onContextMenu={(e) =>
                 openMenu(e, [
                   { label: t("Close"), run: () => closeTab(path).catch(() => {}) },
@@ -105,6 +141,7 @@ export default function TabBar() {
               <span class="tab-title" dir="auto">{fileKind(path) === "note" ? stem(path) : basename(path)}</span>
               <button
                 class="tab-close"
+                tabindex={state.active === path ? 0 : -1}
                 title={isDirty(path) ? t("Unsaved changes — close (saves first)") : t("Close")}
                 aria-label={t("Close")}
                 onClick={(e) => {
@@ -124,10 +161,10 @@ export default function TabBar() {
       </div>
       <Show when={prefs.layout !== "preview" && isNotePath(state.active) && !state.active!.endsWith(".typ")}>
         <div class="layout-switch mode-switch">
-          <button classList={{ active: prefs.editorMode === "live" }} title={t("Live preview (Ctrl+Shift+M)")} onClick={() => setPrefs("editorMode", "live")}>
+          <button classList={{ active: prefs.editorMode === "live" }} aria-pressed={prefs.editorMode === "live"} title={t("Live preview (Ctrl+Shift+M)")} onClick={() => setPrefs("editorMode", "live")}>
             <BookOpen size={15} />
           </button>
-          <button classList={{ active: prefs.editorMode === "source" }} title={t("Source mode (Ctrl+Shift+M)")} onClick={() => setPrefs("editorMode", "source")}>
+          <button classList={{ active: prefs.editorMode === "source" }} aria-pressed={prefs.editorMode === "source"} title={t("Source mode (Ctrl+Shift+M)")} onClick={() => setPrefs("editorMode", "source")}>
             <Code2 size={15} />
           </button>
         </div>
@@ -136,13 +173,23 @@ export default function TabBar() {
         <Maximize2 size={16} />
       </button>
       <div class="layout-switch">
-        <button classList={{ active: prefs.layout === "editor" }} title={t("Editor only")} onClick={() => setPrefs("layout", "editor")}>
+        <button classList={{ active: prefs.layout === "editor" && compactPanel() !== "right" }} title={t("Editor only")} onClick={() => setWorkspaceLayout("editor")}>
           <Square size={15} />
         </button>
-        <button classList={{ active: prefs.layout === "split" }} title={t("Editor + Preview (Ctrl+Shift+E)")} onClick={() => setPrefs("layout", "split")}>
-          <Columns2 size={15} />
-        </button>
-        <button classList={{ active: prefs.layout === "preview" }} title={t("Preview only")} onClick={() => setPrefs("layout", "preview")}>
+        <Show when={!compactWorkspace()} fallback={
+          <button class="workspace-panel-toggle" classList={{ active: compactPanel() === "right" }} aria-expanded={compactPanel() === "right"} aria-controls="workspace-tools" title={t("Toggle tools panel")} onClick={() => {
+            if (compactPanel() === "right") setCompactPanel(null);
+            else showRightPanel(rightTab());
+          }}><Columns2 size={15} /></button>
+        }>
+          <button class="workspace-panel-toggle" classList={{ active: prefs.layout === "split" }} aria-expanded={prefs.layout === "split"} aria-controls="workspace-tools" title={t("Show tools panel")} onClick={() => {
+            setWorkspaceLayout("split");
+            showRightPanel(rightTab());
+          }}>
+            <Columns2 size={15} />
+          </button>
+        </Show>
+        <button classList={{ active: prefs.layout === "preview" }} title={t("Preview only")} onClick={() => setWorkspaceLayout("preview")}>
           <PanelRight size={15} />
         </button>
       </div>

@@ -444,6 +444,11 @@ The language after the opening fence turns on syntax highlighting. `~~~`
 works as a fence too. A few language names are special and draw something
 instead, as covered in the next section.
 
+With auto-closing enabled in **Settings → Editor**, typing a backtick pairs
+it for inline code. Typing three backticks or tildes at the start of a line
+completes a code block and places the cursor inside. Typing a backtick over a
+selection wraps a single line as inline code and multiple lines as a code block.
+
 ### Assembly
 
 Assembly is highlighted in the editor and in the PDF. Mnemonics, registers,

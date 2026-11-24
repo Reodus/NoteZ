@@ -348,7 +348,7 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
               <Segmented value={String(prefs.tabSize)} onChange={(v) => setPrefs("tabSize", Number(v))}
                 options={[{ value: "2", label: "2" }, { value: "4", label: "4" }, { value: "8", label: "8" }]} />
             </Field>
-            <Check checked={prefs.autoPair} onChange={(v) => setPrefs("autoPair", v)}>{t("Auto-close brackets and quotes")}</Check>
+            <Check checked={prefs.autoPair} onChange={(v) => setPrefs("autoPair", v)}>{t("Auto-close brackets, quotes and code marks")}</Check>
             <Check checked={prefs.spellcheck} onChange={(v) => setPrefs("spellcheck", v)} hint={t("In the languages chosen under Languages; right-click a marked word for suggestions.")}>
               {t("Check spelling")}
             </Check>

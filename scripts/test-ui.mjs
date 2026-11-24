@@ -8,12 +8,37 @@ import electron from 'electron';
 import { createServer } from 'vite';
 import { readingFixture, checkReading } from './reading-cases.mjs';
 import { checkScroll } from './scroll-cases.mjs';
-import { checkEditor } from './editor-cases.mjs';
+import { checkAutoPair, checkEditor } from './editor-cases.mjs';
 import { checkDocumentThemes } from './theme-cases.mjs';
 import { checkTableColumns } from './column-cases.mjs';
 import { checkFootnoteComposer } from './footnote-cases.mjs';
 import { checkDragMotion } from './drag-motion-cases.mjs';
+import { checkWorkspace } from './workspace-cases.mjs';
 const readingOnly=process.argv.includes('--reading');
+
+async function checkMiddleClickTab({evaluate,rpc,until}) {
+ const before=await evaluate(`(async()=>{
+  const {s}=window.test;
+  await s.openNote('Other.md');
+  await s.openNote('Audit.md');
+  s.editorView().focus();
+  document.addEventListener('mouseup', e => {
+   window.test.tabReleasePrevented=e.defaultPrevented;
+  }, {once:true});
+  return s.editorView().state.doc.toString();
+ })()`);
+ const point=await evaluate(`(()=>{
+  const r=document.querySelector('.tab[title="Other.md"] .tab-title').getBoundingClientRect();
+  return {x:r.left+r.width/2,y:r.top+r.height/2};
+ })()`);
+ await rpc('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'middle',buttons:4,clickCount:1});
+ assert.equal(await evaluate("window.test.s.state.tabs.includes('Other.md')"),true,'the tab stays open until the middle button is released');
+ await rpc('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'middle',clickCount:1});
+ await until(()=>evaluate("!window.test.s.state.tabs.includes('Other.md')"),'middle-click closes the background tab');
+ assert.equal(await evaluate('window.test.s.editorView().state.doc.toString()'),before,'middle-clicking a tab must not paste into the focused editor');
+ assert.equal(await evaluate('window.test.tabReleasePrevented'),true,'the tab cancels the native middle-button release');
+}
+
 const scratch=mkdtempSync(path.join(process.env.RUNNER_TEMP||tmpdir(),'notez-ui-')),vault=path.join(scratch,'vault');
 mkdirSync(vault);mkdirSync(path.join(scratch,'second'));
 const fixture='---\ntitle: Audit\n---\n\n# English\n\nAlpha paragraph.\n\nBeta destination.\n\n- [ ] English task\n\n| Name | Value |\n| --- | --- |\n| A | B |\n\n# فارسی\n\nسلام دنیا، این یک پاراگراف است.\n\n- [ ] کار فارسی\n\n| نام | مقدار |\n| --- | --- |\n| یک | دو |\n';
@@ -65,20 +90,29 @@ try {
   await evaluate(`(()=>{const p=JSON.parse(localStorage.getItem('notez.prefs.v1')||'{}');localStorage.setItem('notez.prefs.v1',JSON.stringify({...p,uiLanguage:'fa'}))})()`);await rpc('Page.reload');
   await waitForEditor('fa');
  }
- await evaluate(`(async()=>{const s=await import('/src/core/store.ts'),c=await import('/src/core/comments.ts'),{ipc}=await import('/src/core/ipc.ts');window.test={s,c,ipc};window.testErrors=[];window.addEventListener('error',e=>window.testErrors.push(e.message));s.setPrefs('checkUpdates',false);s.setPrefs('snapshotDaily',false);s.setPrefs('updateLinks','always');s.setPrefs('confirmDelete',false);s.setPrefs('deleteToTrash',false);await c.loadComments(s.state.active)})()`);
+ const initializeTests = () => evaluate(`(async()=>{const s=await import('/src/core/store.ts'),c=await import('/src/core/comments.ts'),{ipc}=await import('/src/core/ipc.ts');window.test={s,c,ipc};window.testErrors=[];window.addEventListener('error',e=>window.testErrors.push(e.message));s.setPrefs('checkUpdates',false);s.setPrefs('snapshotDaily',false);s.setPrefs('updateLinks','always');s.setPrefs('confirmDelete',false);s.setPrefs('deleteToTrash',false);await c.loadComments(s.state.active)})()`);
+ await initializeTests();
  if(readingOnly){
   await checkReading({evaluate,rpc,sleep,scratch,vault,original:readingText});
   assert.deepEqual(await evaluate('window.testErrors'),[]);assert.equal(exceptions.length,0,JSON.stringify(exceptions));assert.deepEqual(layoutWarnings,[],'editor geometry must stabilize');
   console.log('Reading artifacts: '+scratch);
  } else {
- await rpc('Emulation.setDeviceMetricsOverride',{width:947,height:850,deviceScaleFactor:1,mobile:false});
+ await rpc('Emulation.setDeviceMetricsOverride',{width:1280,height:850,deviceScaleFactor:1,mobile:false});
+ await until(()=>evaluate("innerWidth===1280&&!window.test.s.compactWorkspace()"),'desktop workspace width');
+ await checkWorkspace({evaluate,rpc,until,vault,scratch,reload:async()=>{
+  await rpc('Page.reload');await waitForEditor();await initializeTests();
+ }});
  await sleep(150);
+ await checkMiddleClickTab({evaluate,rpc,until});
+ await checkAutoPair({evaluate,rpc,until});
  await checkEditor({evaluate,rpc,sleep});
  await checkScroll(evaluate,sleep);
  assert.deepEqual(layoutWarnings,[],'Source and Live scroll restores must stabilize');
  await checkDocumentThemes({evaluate,rpc,until,vault});
  await checkTableColumns({evaluate,rpc,until,sleep});
  await checkFootnoteComposer({evaluate,rpc,until,sleep});
+ await rpc('Emulation.setDeviceMetricsOverride',{width:1280,height:850,deviceScaleFactor:1,mobile:false});
+ await until(()=>evaluate("innerWidth===1280&&!window.test.s.compactWorkspace()"),'desktop width for sidebar resizing');
  await checkDragMotion({evaluate,rpc,until,sleep,vault});
  const before=readFileSync(path.join(vault,'Audit.md'),'utf8');
  await evaluate(`(async()=>{const {s,c}=window.test,v=s.editorView();const a=v.state.doc.toString().indexOf('Alpha');v.dispatch({selection:{anchor:a,head:a+5}});await c.addComment();const id=c.comments[s.state.active][0].id;window.test.id=id;const input=document.querySelector('.comment-body');input.value='Review فارسی';input.dispatchEvent(new Event('input',{bubbles:true}));await c.flushComments();s.setRightTab('preview');document.addEventListener('mousemove',e=>window.lastMouse={x:e.clientX,y:e.clientY,target:e.target.className})})()`);

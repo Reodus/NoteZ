@@ -32,7 +32,8 @@ command palette, which lists every command with its shortcut.
 | Tabs | Open notes, images and PDFs. **Ctrl+Tab** / **Ctrl+Shift+Tab** switch. |
 | Toolbar | Paragraph style, font, size, bold/italic/…, colors, alignment, direction, lists, insert. |
 | Editor | *Live preview* (Markdown hides away from the cursor) or *Source* (**Ctrl+Shift+M**). |
-| Right panel | PDF preview, styles, outline, links (backlinks) and the calendar. |
+| Vertical navigation | Files, search, tags, bookmarks, graph, today's note and settings. |
+| Tools panel | PDF preview, styles, outline, links (backlinks) and the calendar. Pin and reorder tabs with **+**. |
 | Status bar | Save state, words, characters, cursor position, theme, preview status. |
 
 **Ctrl+Shift+Enter** is focus mode: only the text.

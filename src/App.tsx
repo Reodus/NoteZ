@@ -1,10 +1,10 @@
 import { createEffect, createMemo, on, onCleanup, onMount, Show, Switch, Match } from "solid-js";
 import { initUpdates } from "./core/updates";
-import { Copy, Minimize2, PanelLeft } from "lucide-solid";
+import { Copy, Minimize2 } from "lucide-solid";
 import { app, notify } from "./core/app";
 import {
-  root, prefs, isDark, openVault, openNote, openOsPath, dialog, setDialog, sidebarOpen, setSidebarOpen, saveAll, state,
-  focusMode, setFocusMode, viewLayout, activeThemeKey, refreshActiveTheme,
+  root, prefs, isDark, openVault, openNote, openOsPath, dialog, setDialog, sidebarOpen, saveAll, state,
+  focusMode, setFocusMode, viewLayout, activeThemeKey, refreshActiveTheme, compactWorkspace, compactPanel, setCompactPanel, rightPanelOpen,
 } from "./core/store";
 import { fileKind, ipc } from "./core/ipc";
 import { onSaveRequest, setZoom, setSpellcheck, takeOpenedFiles, onOpenPath, onVaultFs, onCapture, setCaptureShortcut } from "./core/native";
@@ -20,7 +20,7 @@ import Welcome from "./ui/Welcome";
 import HistoryDialog from "./ui/HistoryDialog";
 import ReviewView from "./ui/ReviewView";
 import "./core/safety";
-import Sidebar from "./ui/Sidebar";
+import Sidebar, { WorkspaceRail } from "./ui/Sidebar";
 import TabBar from "./ui/TabBar";
 import Toolbar from "./ui/Toolbar";
 import RightPanel from "./ui/RightPanel";
@@ -88,6 +88,7 @@ function EmptyState() {
 }
 
 export default function App() {
+  const fullPreview = () => viewLayout() === "preview" && isNotePath(state.active) && !graphOpen();
   const documentThemeKey = createMemo(activeThemeKey);
   createEffect(on(documentThemeKey, (key) => {
     if (!key) return;
@@ -120,11 +121,23 @@ export default function App() {
   });
   createEffect(() => void setSpellcheck(prefs.spellcheck, [...prefs.spellcheckLanguages]).catch(() => {}));
 
+  const closeDrawer = () => {
+    const trigger = compactPanel() === "sidebar" ? '[data-sidebar-pane][aria-expanded="true"]' : ".workspace-panel-toggle";
+    const button = document.querySelector<HTMLElement>(trigger);
+    setCompactPanel(null);
+    button?.focus({ preventScroll: true });
+  };
+
   const onKey = (e: KeyboardEvent) => {
     if (e.defaultPrevented || dialog() || modalOpen()) return;
     if (e.key === "Escape" && focusMode()) {
       e.preventDefault();
       setFocusMode(false);
+      return;
+    }
+    if (e.key === "Escape" && compactPanel()) {
+      e.preventDefault();
+      closeDrawer();
       return;
     }
     app.commands.handleKey(e);
@@ -161,46 +174,45 @@ export default function App() {
   return (
     <>
       <Show when={root()} fallback={<Welcome />}>
-        <div class="shell" classList={{ "no-sidebar": !sidebarOpen() || focusMode(), focus: focusMode(), "no-tabbar": !prefs.showTabBar }}>
-          {/* Fixed in the top-left corner whether the sidebar is open or not. */}
+        <div class="shell" classList={{ focus: focusMode(), "compact-workspace": compactWorkspace() }}>
           <Show when={!focusMode()}>
-            <button
-              class="icon-btn sidebar-toggle"
-              classList={{ active: sidebarOpen() }}
-              title={sidebarOpen() ? t("Hide sidebar (Ctrl+\\)") : t("Show sidebar (Ctrl+\\)")}
-              aria-expanded={sidebarOpen()}
-              onClick={() => setSidebarOpen(!sidebarOpen())}
-            >
-              <PanelLeft size={17} />
-            </button>
+            <WorkspaceRail />
           </Show>
           <div
+            id="workspace-sidebar"
             class="sidebar-slot"
+            classList={{ "drawer-open": sidebarOpen() && !focusMode() }}
             style={{ width: sidebarOpen() && !focusMode() ? `${prefs.sidebarWidth}px` : "0px" }}
             inert={!sidebarOpen() || focusMode()}
           >
             <Sidebar />
           </div>
           <main class="workspace">
-            <Show when={!focusMode() && prefs.showTabBar}>
-              <TabBar />
-            </Show>
-            <Show when={!graphOpen() || focusMode()} fallback={<GraphView />}>
-            <Show when={state.active} fallback={<EmptyState />}>
-            <Show when={isNotePath(state.active)} fallback={fileKind(state.active!) === "base" ? <BaseFile path={state.active!} /> : <FileView path={state.active!} />}>
-              <Show when={viewLayout() !== "preview" && !focusMode()}>
-                <Toolbar />
-              </Show>
-              <div class="work-area" classList={{ [`layout-${viewLayout()}`]: true }}>
-                <Show when={viewLayout() !== "preview"}>
-                  <Editor />
+            <div class="work-area" classList={{ [`layout-${viewLayout()}`]: true, "full-preview-layout": fullPreview() }}>
+              <div class="workspace-content">
+                <Show when={!focusMode()}><TabBar /></Show>
+                <Show when={isNotePath(state.active) && !graphOpen() && viewLayout() !== "preview" && !focusMode()}>
+                  <Toolbar />
                 </Show>
-                <Show when={viewLayout() !== "editor"}>
-                  <RightPanel />
+                <Show when={!fullPreview()}>
+                  <Show when={!graphOpen() || focusMode()} fallback={<GraphView />}>
+                    <Show when={state.active} fallback={<EmptyState />}>
+                      <Show when={isNotePath(state.active)} fallback={fileKind(state.active!) === "base" ? <BaseFile path={state.active!} /> : <FileView path={state.active!} />}>
+                        <Editor />
+                      </Show>
+                    </Show>
+                  </Show>
                 </Show>
               </div>
-            </Show>
-            </Show>
+              <Show when={rightPanelOpen()}>
+                <RightPanel fullWidth={fullPreview()} onDismiss={closeDrawer} />
+              </Show>
+              <Show when={!focusMode() && !graphOpen() && compactPanel() === "right" && !fullPreview()}>
+                <div class="drawer-shade" aria-hidden="true" onClick={closeDrawer} />
+              </Show>
+            </div>
+            <Show when={!focusMode() && compactPanel() === "sidebar"}>
+              <div class="drawer-shade" aria-hidden="true" onClick={closeDrawer} />
             </Show>
             <Show when={!focusMode() && prefs.showStatusBar}>
               <StatusBar />

@@ -30,6 +30,9 @@ export async function checkScroll(evaluate, sleep) {
       await s.openNote('LongB.md');await s.openNote('LongA.md');s.goToLine(101);await wait(180);
       const jumpLine=v.state.doc.lineAt(v.state.selection.main.head).number;
       const scrollAfterJump=v.scrollDOM.scrollTop;
+      const jumpRect=v.coordsAtPos(v.state.selection.main.head);
+      const viewportRect=v.scrollDOM.getBoundingClientRect();
+      const jumpVisible=!!jumpRect&&jumpRect.top>=viewportRect.top&&jumpRect.bottom<=viewportRect.bottom;
       await s.openNote('LongA.md',{line:150});await s.openNote('LongB.md');await wait(120);
       const unexpectedLine=v.state.doc.lineAt(v.state.selection.main.head).number;
 
@@ -47,14 +50,14 @@ export async function checkScroll(evaluate, sleep) {
       // Restore the fixture for the next mode, after closing the mapped state.
       await s.closeTab('LongA.md');await ipc.write('LongA.md',original);
       await s.closeTab('LongB.md');await s.closeTab('pixel.png');
-      return {before,after,lineBefore,lineAfter,manualScrollTop,jumpLine,scrollAfterJump,unexpectedLine,remountBefore,remountAfter,editBefore,editAfter};
+      return {before,after,lineBefore,lineAfter,manualScrollTop,jumpLine,scrollAfterJump,jumpVisible,unexpectedLine,remountBefore,remountAfter,editBefore,editAfter};
     })()`);
     console.log('Scroll regression', mode, result);
     assert.ok(Math.abs(result.after - result.before) < 5, mode + ': tab return preserves the viewport');
     assert.equal(result.lineAfter, result.lineBefore, mode + ': tab return preserves visible text');
     assert.ok(result.manualScrollTop > 0 && result.manualScrollTop < result.before / 2, mode + ': user scroll takes priority');
     assert.equal(result.jumpLine, 101);
-    assert.ok(result.scrollAfterJump > result.before + 500, mode + ': explicit line jump takes priority');
+    assert.ok(result.jumpVisible && result.scrollAfterJump > result.before, mode + ': explicit line jump brings its target into view');
     assert.equal(result.unexpectedLine, 1, 'a delayed jump must never affect another note');
     assert.equal(result.remountAfter, result.remountBefore, mode + ': image remount preserves visible text');
     assert.equal(result.editAfter, result.editBefore, mode + ': hidden disk edit preserves visible text');

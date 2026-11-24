@@ -2,7 +2,7 @@ import { createSignal } from 'solid-js';
 import { createStore } from 'solid-js/store';
 import { app, notify } from './app';
 import { ipc, isNotePath } from './ipc';
-import { editorView, state, setPrefs, setRightTab } from './store';
+import { editorView, state, showRightPanel } from './store';
 import { t } from './i18n';
 import { onVaultFs } from './native';
 import { NoteComment, point, reanchor } from './commentAnchors';
@@ -67,7 +67,7 @@ export async function loadComments(path: string, refresh = false) {
 export function showComments(id?: string) {
   if (id) setFocusedComment(id);
   if (!app.panels.items().some(p => p.id === COMMENTS_PANEL)) return;
-  setPrefs('layout', 'split'); setRightTab(COMMENTS_PANEL);
+  showRightPanel(COMMENTS_PANEL);
 }
 export async function addComment(reattach?: string) {
   const path = state.active, view = editorView();

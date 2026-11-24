@@ -1,15 +1,17 @@
 // Built-in plugin: daily notes and the calendar panel.
 // A daily note is <folder>/<date in the chosen format>.md, created from the
 // daily template on first open (Obsidian's Daily notes conventions).
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { render } from "solid-js/web";
+import { ChevronLeft, ChevronRight } from "lucide-solid";
 import type { BuiltinPlugin } from "../core/plugins";
 import { ipc, stem } from "../core/ipc";
-import { prefs, notesList, openNote, refreshTree, state, setPrefs, setRightTab, editorView, updateContent } from "../core/store";
+import { CALENDAR_PANEL, root, prefs, notesList, openNote, refreshTree, state, editorView, updateContent, showRightPanel, setWorkspaceLayout, setGraphOpen, setCompactPanel } from "../core/store";
+import { registerSaveParticipant } from "../core/saveParticipants";
 import { notify } from "../core/app";
 import { fillTemplate, formatDate, parseDate, isoWeek } from "./templates";
 
-import { t } from "../core/i18n";
+import { num, t, uiLang } from "../core/i18n";
 const ICON = (paths: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 
@@ -44,10 +46,17 @@ const existing = () => {
 };
 
 /** Open the daily note for `d`, creating it (from the template) if needed. */
-export async function openDaily(d = new Date()) {
+const opening = new Map<string, Promise<boolean>>();
+export function openDaily(d = new Date()): Promise<boolean> {
+  const vault = root();
+  if (!vault) return Promise.resolve(false);
   const path = dailyPath(d);
-  if (!notesList().includes(path)) {
-    try {
+  const key = `${vault}\u0000${path}`;
+  const pending = opening.get(key);
+  if (pending) return pending;
+
+  const operation = (async () => {
+    if (!notesList().includes(path)) {
       let text = "";
       if (prefs.dailyTemplate.trim()) {
         try {
@@ -60,14 +69,40 @@ export async function openDaily(d = new Date()) {
           notify(t("Daily note template \"{dailyTemplate}\" not found", { dailyTemplate: prefs.dailyTemplate }), "error");
         }
       }
-      await ipc.createNote(path);
-      await ipc.write(path, text);
+      if (root() !== vault) return false;
+      let created = false;
+      try {
+        await ipc.createNote(path);
+        created = true;
+      } catch (error) {
+        // A note that appeared before the file list refreshed should be opened as-is.
+        await ipc.read(path).catch(() => { throw error; });
+      }
+      if (created && text) await ipc.write(path, text);
       await refreshTree();
-    } catch (e) {
-      return notify(String(e), "error");
     }
-  }
-  await openNote(path);
+    if (root() !== vault) return false;
+    await openNote(path);
+    return root() === vault && state.active === path;
+  })().catch((error) => {
+    notify(String(error), "error");
+    return false;
+  });
+  opening.set(key, operation);
+  const unregister = registerSaveParticipant(async () => { await operation; });
+  return operation.finally(() => {
+    unregister();
+    opening.delete(key);
+  });
+}
+
+async function editDaily(date?: Date) {
+  if (!await openDaily(date)) return false;
+  setGraphOpen(false);
+  setCompactPanel(null);
+  if (prefs.layout === "preview") setWorkspaceLayout("split");
+  editorView()?.focus();
+  return true;
 }
 
 /** The nearest existing daily note before (-1) or after (+1) the active one. */
@@ -125,11 +160,18 @@ export async function captureText(text: string) {
 // --------------------------------------------------------------- calendar
 
 export function Calendar() {
-  const today = new Date();
-  const [month, setMonth] = createSignal(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [today, setToday] = createSignal(new Date(), { equals: (a, b) => dayKey(a) === dayKey(b) });
+  const clock = window.setInterval(() => setToday(new Date()), 60_000);
+  onCleanup(() => window.clearInterval(clock));
   const notes = createMemo(existing);
   const activeDay = () => (state.active ? dailyDate(state.active) : null);
-  const locale = undefined; // the system locale names months and weekdays
+  const firstOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
+  const [month, setMonth] = createSignal(firstOfMonth(activeDay() ?? today()));
+  const format = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(uiLang === "fa" ? "fa-IR" : "en", { calendar: "gregory", ...opts });
+  const monthName = format({ month: "long", year: "numeric" });
+  const fullDate = format({ dateStyle: "full" });
+  const weekday = format({ weekday: "short" });
+  const weekdayLong = format({ weekday: "long" });
 
   /** 6 rows × 7 days, starting on the configured weekday. */
   const weeks = createMemo(() => {
@@ -140,49 +182,56 @@ export function Calendar() {
       Array.from({ length: 7 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + w * 7 + i)),
     );
   });
-  const dayNames = () =>
-    Array.from({ length: 7 }, (_, i) => new Date(2024, 0, 7 + ((prefs.weekStart + i) % 7)).toLocaleDateString(locale, { weekday: "narrow" }));
+  const weekdays = () => Array.from({ length: 7 }, (_, i) => new Date(2024, 0, 7 + ((prefs.weekStart + i) % 7)));
   const move = (n: number) => setMonth((m) => new Date(m.getFullYear(), m.getMonth() + n, 1));
-  const count = () => [...notes().keys()].filter((k) => k.startsWith(`${month().getFullYear()}-${month().getMonth()}-`)).length;
+  const select = async (date: Date) => {
+    if (await editDaily(date)) setMonth(firstOfMonth(date));
+  };
 
   return (
     <div class="calendar-pane">
       <div class="cal-head">
-        <button class="icon-btn small" title={t("Previous month")} onClick={() => move(-1)}>‹</button>
-        <div class="cal-title" title={`${count()} daily notes this month`}>
-          {month().toLocaleDateString(locale, { month: "long", year: "numeric" })}
+        <button class="icon-btn small" title={t("Previous month")} onClick={() => move(-1)}><ChevronLeft size={17} /></button>
+        <div class="cal-title" aria-live="polite">
+          {monthName.format(month())}
         </div>
-        <button class="icon-btn small" title={t("Next month")} onClick={() => move(1)}>›</button>
+        <button class="icon-btn small" title={t("Next month")} onClick={() => move(1)}><ChevronRight size={17} /></button>
       </div>
       <table class="cal-grid">
         <thead>
           <tr>
             <th class="cal-week" title={t("Week")}>#</th>
-            <For each={dayNames()}>{(n) => <th>{n}</th>}</For>
+            <For each={weekdays()}>{(d) => <th scope="col" title={weekdayLong.format(d)}>{weekday.format(d)}</th>}</For>
           </tr>
         </thead>
         <tbody>
           <For each={weeks()}>
             {(week) => (
               <tr>
-                <td class="cal-week">{isoWeek(week[3])}</td>
+                <td class="cal-week">{num(isoWeek(week[3]))}</td>
                 <For each={week}>
                   {(d) => {
                     const path = () => notes().get(dayKey(d));
+                    const current = () => dayKey(d) === dayKey(today());
+                    const active = () => activeDay() !== null && dayKey(d) === dayKey(activeDay()!);
                     return (
                       <td>
                         <button
                           class="cal-day"
                           classList={{
                             other: d.getMonth() !== month().getMonth(),
-                            today: dayKey(d) === dayKey(today),
-                            active: !!activeDay() && dayKey(d) === dayKey(activeDay()!),
+                            today: current(),
+                            active: active(),
                             has: !!path(),
                           }}
                           title={path() ?? t("Create {x}", { x: dailyPath(d) })}
-                          onClick={() => openDaily(d)}
+                          data-note-path={dailyPath(d)}
+                          aria-current={current() ? "date" : undefined}
+                          aria-pressed={active()}
+                          aria-label={t(path() ? "Open daily note for {date}" : "Create daily note for {date}", { date: fullDate.format(d) })}
+                          onClick={() => void select(d)}
                         >
-                          {d.toLocaleDateString(locale, { day: "numeric" })}
+                          {num(d.getDate())}
                         </button>
                       </td>
                     );
@@ -194,10 +243,10 @@ export function Calendar() {
         </tbody>
       </table>
       <div class="cal-foot">
-        <button class="btn small" onClick={() => (setMonth(new Date(today.getFullYear(), today.getMonth(), 1)), openDaily(today))}>
+        <button class="btn small" onClick={() => void select(new Date())}>
           {t("Today")}
         </button>
-        <Show when={!notesList().some((p) => dailyDate(p))}>
+        <Show when={!notes().size}>
           <span class="muted">{t("Notes go to")} <code>{folder() || "/"}</code></span>
         </Show>
       </div>
@@ -205,12 +254,10 @@ export function Calendar() {
   );
 }
 
-export const CALENDAR_PANEL = "core.daily-notes.calendar";
-
 export const dailyNotesPlugin: BuiltinPlugin = {
   id: "core.daily-notes",
   name: t("Daily notes"),
-  description: t("One note per day (Ctrl+Alt+D) and a calendar in the right panel."),
+  description: t("One note per day (Ctrl+Alt+D) and a calendar in the tools panel."),
   optional: true,
   onload(api) {
     api.panels.add({
@@ -219,7 +266,7 @@ export const dailyNotesPlugin: BuiltinPlugin = {
       icon: ICON('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/>'),
       mount: (el) => render(() => <Calendar />, el),
     });
-    api.commands.register({ id: "daily.today", title: t("Open today's daily note"), key: "Mod-Alt-d", run: () => openDaily() });
+    api.commands.register({ id: "daily.today", title: t("Open today's daily note"), key: "Mod-Alt-d", run: () => editDaily() });
     api.commands.register({
       id: "daily.yesterday",
       title: t("Open yesterday's daily note"),
@@ -232,6 +279,6 @@ export const dailyNotesPlugin: BuiltinPlugin = {
     });
     api.commands.register({ id: "daily.prev", title: t("Previous daily note"), key: "Mod-Alt-ArrowLeft", run: () => step(-1) });
     api.commands.register({ id: "daily.next", title: t("Next daily note"), key: "Mod-Alt-ArrowRight", run: () => step(1) });
-    api.commands.register({ id: "daily.calendar", title: t("Show calendar"), run: () => (setPrefs("layout", "split"), setRightTab(CALENDAR_PANEL)) });
+    api.commands.register({ id: "daily.calendar", title: t("Show calendar"), run: () => showRightPanel(CALENDAR_PANEL) });
   },
 };

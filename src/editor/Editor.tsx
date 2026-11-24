@@ -19,7 +19,7 @@ import { app } from "../core/app";
 import {
   state, prefs, updateContent, setEditorView, setCursor, activeTheme,
   isDark, notesList, openNote, root,
-  editorView, allFiles, setPdfJump,
+  editorView, allFiles, setPdfJump, keepFocusOnOpen,
 } from "../core/store";
 import { ipc, stem, LinkInfo } from "../core/ipc";
 import { preview, schedulePreview } from "../core/render";
@@ -28,7 +28,7 @@ import { typst } from "./typst-lang";
 import { styling, themeCss } from "./styling";
 import { blockPreviews } from "./widgets";
 import { livePreview } from "./livepreview";
-import { mathAutoPair, mathPairBackspace, wrapSelection } from "./autopair";
+import { delimiterBackspace, markdownCodeAutoPair, mathAutoPair, wrapSelection } from "./autopair";
 import { richPaste } from "./paste";
 import { pointerHold } from "./pointer";
 import { slashCompletion, slashIconRender, slashKeymap, slashGhost } from "./slash";
@@ -60,7 +60,7 @@ function editorPrefs(): Extension {
   return [
     EditorState.tabSize.of(prefs.tabSize),
     indentUnit.of(" ".repeat(prefs.tabSize)),
-    prefs.autoPair ? [closeBrackets(), wrapSelection] : [],
+    prefs.autoPair ? [markdownCodeAutoPair, closeBrackets(), wrapSelection] : [],
     EditorView.contentAttributes.of({ spellcheck: prefs.spellcheck ? "true" : "false" }),
   ];
 }
@@ -308,7 +308,7 @@ export default function Editor() {
         indentOnInput(),
         bracketMatching(),
         mathAutoPair,
-        Prec.high(mathPairBackspace),
+        Prec.high(delimiterBackspace),
         EditorView.lineWrapping,
         autocompletion({ override: [wikilinkCompletion, blockRefCompletion, slashCompletion, ...COMPLETION_SOURCES], icons: false, addToOptions: [slashIconRender], maxRenderedOptions: 80 }),
         slashKeymap,
@@ -390,7 +390,9 @@ export default function Editor() {
     const sel = view.state.selection.main;
     const line = view.state.doc.lineAt(sel.head);
     setCursor({ line: line.number, col: sel.head - line.from + 1, selected: 0 });
-    focusFrame = requestAnimationFrame(() => { if (current === path && state.active === path) view?.focus(); });
+    if (!keepFocusOnOpen(path)) {
+      focusFrame = requestAnimationFrame(() => { if (current === path && state.active === path) view?.focus(); });
+    }
   }
 
   onMount(() => {

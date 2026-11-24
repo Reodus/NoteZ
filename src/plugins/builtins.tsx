@@ -4,7 +4,7 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from
 import { render } from "solid-js/web";
 import type { BuiltinPlugin } from "../core/plugins";
 import { ipc, Backlink, Mention, stem, dirname } from "../core/ipc";
-import { state, goToLine, openNote, setDialog, setPrefs, setRightTab, prefs, saveAll, reloadFromDisk, notesList } from "../core/store";
+import { state, goToLine, openNote, setDialog, showRightPanel, prefs, saveAll, reloadFromDisk, notesList } from "../core/store";
 import { app, notify } from "../core/app";
 import { linkName } from "../core/blocks";
 import { exportNote, exportPdf, showGeneratedTypst } from "../core/render";
@@ -178,7 +178,7 @@ export const outlinePlugin: BuiltinPlugin = {
       icon: ICON('<path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>'),
       mount: (el) => render(() => <OutlinePane />, el),
     });
-    api.commands.register({ id: "doc.outline", title: t("Show outline"), run: () => (setPrefs("layout", "split"), setRightTab(OUTLINE_PANEL)) });
+    api.commands.register({ id: "doc.outline", title: t("Show outline"), run: () => showRightPanel(OUTLINE_PANEL) });
   },
 };
 
@@ -195,7 +195,7 @@ export const backlinksPlugin: BuiltinPlugin = {
       icon: ICON('<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/>'),
       mount: (el) => render(() => <LinksPane />, el),
     });
-    api.commands.register({ id: "doc.backlinks", title: t("Show backlinks"), run: () => (setPrefs("layout", "split"), setRightTab(LINKS_PANEL)) });
+    api.commands.register({ id: "doc.backlinks", title: t("Show backlinks"), run: () => showRightPanel(LINKS_PANEL) });
   },
 };
 

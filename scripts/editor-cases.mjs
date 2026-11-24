@@ -1,5 +1,54 @@
 import assert from 'node:assert/strict';
 
+export async function checkAutoPair({evaluate,rpc,until}) {
+ const ui=code=>evaluate(`(async()=>{const {s,ipc}=window.test;${code}})()`);
+ const reset=(doc,anchor=doc.length,head=anchor)=>ui(`const v=s.editorView();v.dispatch({changes:{from:0,to:v.state.doc.length,insert:${JSON.stringify(doc)}},selection:{anchor:${anchor},head:${head}}});v.focus();`);
+ const read=()=>ui('const {state}=s.editorView(),{anchor,head}=state.selection.main;return {doc:state.doc.toString(),anchor,head};');
+ const type=async(text,count=1)=>{
+  for(let i=0;i<count;i++)await rpc('Input.insertText',{text});
+ };
+ const key=async(key,windowsVirtualKeyCode,modifiers=0)=>{
+  const params={key,code:key==='z'?'KeyZ':key,windowsVirtualKeyCode,modifiers};
+  await rpc('Input.dispatchKeyEvent',{type:'keyDown',...params});
+  await rpc('Input.dispatchKeyEvent',{type:'keyUp',...params});
+ };
+ const expect=async(doc,anchor=doc.length,head=anchor)=>assert.deepEqual(await read(),{doc,anchor,head});
+ const tick='`';
+ await ui(`await ipc.write('Delimiters.md','');await s.openNote('Delimiters.md');s.setPrefs('autoPair',true);`);
+ await reset('');await type(tick);await expect('``',1);
+ await key('z',90,process.platform==='darwin'?4:2);await expect('');
+ for(const mode of ['source','live']) {
+  await ui(`s.setPrefs('editorMode',${JSON.stringify(mode)});`);
+  await reset('');await type(tick);await expect('``',1);
+  await key('Backspace',8);await expect('');
+  await type(tick,3);await expect('```\n\n```\n',4);
+  await type('$');await type(tick);await expect('```\n$`\n```\n',6);
+  await reset('```\n``');await type(tick);await expect('```\n```\n',7);
+  await reset('> - ');await type(tick,3);await expect('> - ```\n>   \n>   ```\n',12);
+  await reset('');await type('~',3);await expect('~~~\n\n~~~\n',4);
+  await reset('سلام x',6,0);await type(tick);await expect('`سلام x`',7,1);
+  await type(tick);await expect('``سلام x``',8,2);
+  await reset('سلام `x`',0,8);await type(tick);await expect('`` سلام `x` ``',3,11);
+  await reset('> alpha\n> بتا',2,13);await type(tick);await expect('> ```\n> alpha\n> بتا\n> ```\n',8,19);
+  await reset('before alpha\nbeta after',7,17);await type(tick);await expect('before \n```\nalpha\nbeta\n```\n after',12,22);
+  await reset('`x`',2);await type(tick);await expect('`x`',3);
+  await reset('``x``',3);await type(tick);await expect('``x``',5);
+  await reset('\\');await type(tick);await expect('\\`');
+  await reset('');await type('$');await expect('$$\n',1);
+  await type('$');await expect('$$\n\n$$\n',3);
+  await reset('x',0,1);await type('$');await expect('$x$',1,2);
+  await reset('x',0,1);await type('*',2);await expect('**x**',2,3);
+  await reset('US');await type('$');await expect('US$');
+ }
+ await ui(`s.setPrefs('autoPair',false);`);
+ await reset('');await type(tick,3);await expect('```\n',3);
+ await ui(`s.setPrefs('autoPair',true);await s.closeTab('Delimiters.md');await ipc.write('Delimiters.typ','');await s.openNote('Delimiters.typ');`);
+ await until(()=>ui('return !!s.editorView()&&s.state.active.endsWith(".typ");'),'Typst editor ready');
+ await reset('');await type(tick,3);await expect('```');
+ await ui(`await s.closeTab('Delimiters.typ');await s.openNote('Audit.md');`);
+ console.log('Auto-close: inline code, fences, RTL and multiline selection, math, literal code, settings and Typst');
+}
+
 export async function checkEditor({evaluate,rpc,sleep}) {
  const click=async p=>{
   await rpc('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',buttons:1,clickCount:1});

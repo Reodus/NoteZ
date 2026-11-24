@@ -39,12 +39,15 @@ in source mode use Ctrl+click. Typing `#` and a letter suggests existing tags.
 
 A daily note is one note per day, for journaling, logs and to-dos.
 
-- **Ctrl+Alt+D** opens today's note, creating it if needed.
+- **Today's note** in the vertical navigation bar, or **Ctrl+Alt+D**, opens
+  today's note and creates it if needed.
 - **Ctrl+Alt+←** / **Ctrl+Alt+→** go to the previous / next existing daily note.
 - The command palette also has *Open yesterday's / tomorrow's daily note*.
-- The **Calendar** (calendar icon in the right panel) shows the month: a dot
-  marks days that have a note, the open note's day is filled. Click a day to
-  open or create its note. Week numbers are ISO weeks.
+- **Calendar** in the tools panel shows the Gregorian month. A dot marks days
+  with a note and the open note's day is filled. Click a day to open or create
+  its note. The **Show calendar** command opens the panel directly. Use **+**
+  in the panel to pin or reorder tabs, and **More panels** to open other tabs.
+  Week numbers are ISO weeks.
 
 **Settings → Daily notes & capture**:
 

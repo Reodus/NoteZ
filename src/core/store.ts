@@ -1,5 +1,5 @@
 // Global app state: vault, open tabs, buffers, layout and preferences.
-import { createSignal, createRoot, createEffect } from "solid-js";
+import { batch, createSignal, createRoot, createEffect } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { EditorView } from "@codemirror/view";
 import { ask, onVaultFs, openPath, trashPath } from "./native";
@@ -15,6 +15,7 @@ import { t, tn } from "./i18n";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type Layout = "editor" | "split" | "preview";
+export const CALENDAR_PANEL = "core.daily-notes.calendar";
 
 export interface Prefs {
   themeMode: ThemeMode;
@@ -37,6 +38,7 @@ export interface Prefs {
   sidebarWidth: number;
   sidebarOpen: boolean;
   previewWidth: number;
+  pinnedPanels: string[];
   recentVaults: string[];
   lastVault: string | null;
   enabledPlugins: string[];
@@ -153,6 +155,7 @@ const DEFAULT_PREFS: Prefs = {
   sidebarWidth: 264,
   sidebarOpen: true,
   previewWidth: 520,
+  pinnedPanels: ["preview", CALENDAR_PANEL],
   recentVaults: [],
   lastVault: null,
   enabledPlugins: [],
@@ -230,6 +233,8 @@ function loadPrefs(): Prefs {
       }
       // Before 0.6 the accent was always set; the old default now means "the theme's accent".
       if (saved.accent === "#6d5efc" && !("uiThemeLight" in saved)) saved.accent = "";
+      if (Array.isArray(saved.pinnedPanels)) saved.pinnedPanels = [...new Set(saved.pinnedPanels.filter((id: unknown) => typeof id === "string"))];
+      else delete saved.pinnedPanels;
       return { ...DEFAULT_PREFS, ...saved };
     }
   } catch {
@@ -390,9 +395,16 @@ export async function openOsPath(p: string) {
 export const [fileRev, setFileRev] = createSignal(0);
 
 let noteOpenSeq = 0;
+let keepFocusFor: string | null = null;
+
+export function keepFocusOnOpen(path: string) {
+  if (keepFocusFor !== path) return false;
+  keepFocusFor = null;
+  return true;
+}
 
 /** Open a vault file: notes in the editor, images and PDFs in a viewer tab, anything else in its default app. */
-export async function openNote(path: string, opts: { line?: number } = {}) {
+export async function openNote(path: string, opts: { line?: number; keepFocus?: boolean } = {}) {
   const request = ++noteOpenSeq, vault = root();
   const kind = fileKind(path);
   if (kind === "other") {
@@ -409,6 +421,7 @@ export async function openNote(path: string, opts: { line?: number } = {}) {
       return;
     }
   }
+  keepFocusFor = opts.keepFocus && state.active !== path && kind === "note" ? path : null;
   setState(
     produce((s) => {
       if (!s.tabs.includes(path)) {
@@ -711,13 +724,65 @@ export function setSidebarTab(id: string) {
     /* storage unavailable */
   }
   if (focusMode()) setFocusMode(false);
-  if (!prefs.sidebarOpen) setPrefs("sidebarOpen", true);
+  setSidebarOpen(true);
   setPaneRequest((n) => n + 1);
 }
 export const [rightTab, setRightTab] = createSignal<string>("preview");
-export const sidebarOpen = () => prefs.sidebarOpen;
-export const setSidebarOpen = (v: boolean) => setPrefs("sidebarOpen", v);
+export const [graphOpen, setGraphOpen] = createSignal(false);
+const compactMedia = window.matchMedia("(max-width: 1000px)");
+const [compactWorkspace, setCompactWorkspace] = createSignal(compactMedia.matches);
+export { compactWorkspace };
+const [compactPanel, setDrawer] = createSignal<"sidebar" | "right" | null>(null);
+const [panelFile, setPanelFile] = createSignal<string | null>(null);
+export { compactPanel };
+export function setCompactPanel(panel: ReturnType<typeof compactPanel>) {
+  if (compactPanel() === "right" && panel !== "right" && prefs.layout === "preview") setRightTab("preview");
+  setDrawer(panel);
+}
+compactMedia.addEventListener("change", (event) => {
+  batch(() => {
+    setCompactPanel(null);
+    setCompactWorkspace(event.matches);
+  });
+});
+
+export const sidebarOpen = () => compactWorkspace() ? compactPanel() === "sidebar" : prefs.sidebarOpen;
+export function setSidebarOpen(open: boolean) {
+  if (!compactWorkspace()) setPrefs("sidebarOpen", open);
+  else if (open || compactPanel() === "sidebar") setCompactPanel(open ? "sidebar" : null);
+}
+
+export function showRightPanel(id: string) {
+  if (!root()) return;
+  batch(() => {
+    setFocusMode(false);
+    setGraphOpen(false);
+    setRightTab(id);
+    if (compactWorkspace()) {
+      setCompactPanel(id === "preview" && prefs.layout === "preview" && isNotePath(state.active) ? null : "right");
+    } else {
+      setPanelFile(state.active && !isNotePath(state.active) ? state.active : null);
+      if (prefs.layout !== "split" && (prefs.layout !== "preview" || id !== "preview")) setPrefs("layout", "split");
+    }
+  });
+}
+
+export function setWorkspaceLayout(layout: Layout) {
+  batch(() => {
+    if (layout === "preview") setRightTab("preview");
+    setCompactPanel(null);
+    setPanelFile(null);
+    setPrefs("layout", layout);
+  });
+}
 /** Focus mode: only the text — no sidebar, tabs, toolbar or preview. */
 export const [focusMode, setFocusMode] = createSignal(false);
 /** Layout actually shown (focus mode forces the editor alone). */
-export const viewLayout = (): Layout => (focusMode() ? "editor" : prefs.layout);
+export const viewLayout = (): Layout => {
+  if (focusMode()) return "editor";
+  if (prefs.layout === "preview" && compactPanel() === "right" && rightTab() !== "preview") return "split";
+  return prefs.layout;
+};
+export const rightPanelOpen = () => !focusMode() && !graphOpen() && (compactWorkspace()
+  ? compactPanel() === "right" || (viewLayout() === "preview" && isNotePath(state.active))
+  : viewLayout() !== "editor" && (state.active === null || isNotePath(state.active) || panelFile() === state.active || rightTab() !== "preview"));

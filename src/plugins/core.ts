@@ -4,10 +4,9 @@ import type { BuiltinPlugin } from "../core/plugins";
 import { activeWords } from "../core/words";
 import {
   state, openNote, setDialog, closeTab, saveAll, prefs, setPrefs, setSidebarOpen, sidebarOpen, createNote,
-  setRightTab, focusMode, setFocusMode, newNoteDir,
+  showRightPanel, setWorkspaceLayout, compactWorkspace, compactPanel, setCompactPanel, rightPanelOpen, rightTab, focusMode, setFocusMode, newNoteDir, graphOpen, setGraphOpen,
 } from "../core/store";
 import { chooseVault } from "../ui/Welcome";
-import { graphOpen, setGraphOpen } from "../ui/GraphView";
 import { runSync, syncConfigured, takeSnapshot } from "../core/safety";
 
 import { t } from "../core/i18n";
@@ -47,7 +46,12 @@ export const corePlugin: BuiltinPlugin = {
       id: "layout.preview",
       title: t("Toggle PDF preview"),
       key: "Mod-Shift-e",
-      run: () => setPrefs("layout", prefs.layout === "editor" ? "split" : "editor"),
+      run: () => {
+        if (rightPanelOpen() && rightTab() === "preview") {
+          if (compactWorkspace() && compactPanel() === "right" && prefs.layout !== "preview") setCompactPanel(null);
+          else setWorkspaceLayout("editor");
+        } else showRightPanel("preview");
+      },
     });
     c({ id: "layout.sidebar", title: t("Toggle sidebar"), key: "Mod-\\", run: () => setSidebarOpen(!sidebarOpen()) });
     const zoom = (f: number) => setPrefs("uiZoom", Math.round(Math.min(1.5, Math.max(0.75, f)) * 100) / 100);
@@ -55,7 +59,10 @@ export const corePlugin: BuiltinPlugin = {
     c({ id: "view.zoomOut", title: t("Zoom out"), key: "Mod-minus", run: () => zoom(prefs.uiZoom - 0.05) });
     c({ id: "view.zoomReset", title: t("Reset zoom"), run: () => zoom(1) });
     c({ id: "layout.focus", title: t("Toggle focus mode (text only)"), key: "Mod-Shift-Enter", run: () => setFocusMode(!focusMode()) });
-    c({ id: "graph.toggle", title: t("Toggle graph view"), key: "Mod-g", run: () => setGraphOpen(!graphOpen()) });
+    c({ id: "graph.toggle", title: t("Toggle graph view"), key: "Mod-g", run: () => {
+      setCompactPanel(null);
+      setGraphOpen(!graphOpen());
+    } });
     c({ id: "settings.open", title: t("Settings"), key: "Mod-,", run: () => setDialog({ kind: "settings" }) });
     c({ id: "help.open", title: t("Help: user guide"), key: "F1", run: () => setDialog({ kind: "help" }) });
     c({ id: "help.markdown", title: t("Help: Markdown syntax"), run: () => setDialog({ kind: "help", doc: "MARKDOWN" }) });
@@ -77,7 +84,7 @@ export const corePlugin: BuiltinPlugin = {
     c({ id: "help.history", title: t("Help: history, snapshots & sync"), run: () => setDialog({ kind: "help", doc: "HISTORY" }) });
     c({ id: "doc.themes", title: t("Choose document theme…"), run: () => setDialog({ kind: "themes" }) });
     c({ id: "doc.page", title: t("Page setup…"), run: () => setDialog({ kind: "page" }) });
-    c({ id: "doc.styles", title: t("Show styles panel"), run: () => (setPrefs("layout", "split"), setRightTab("styles")) });
+    c({ id: "doc.styles", title: t("Show styles panel"), run: () => showRightPanel("styles") });
     c({
       id: "editor.mode",
       title: t("Toggle live preview / source mode"),

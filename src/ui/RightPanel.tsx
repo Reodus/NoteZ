@@ -1,18 +1,19 @@
-import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { startResize } from "./resize";
 import {
   Eye, Palette, ZoomIn, ZoomOut, AlertTriangle, CheckCircle2, Loader2, FileDown,
-  FileCode, Pencil,
+  FileCode, Pencil, Plus, Ellipsis, ArrowUp, ArrowDown, X,
 } from "lucide-solid";
 import { app, Panel } from "../core/app";
 import {
-  state, rightTab, setRightTab, goToLine, activeTheme, setDialog, prefs, setPrefs,
+  state, rightTab, setRightTab, goToLine, activeTheme, setDialog, prefs, setPrefs, compactWorkspace, showRightPanel, CALENDAR_PANEL,
 } from "../core/store";
 import { preview, exportPdf, showGeneratedTypst, runPreview } from "../core/render";
 import { isTypst } from "../editor/format";
 import { previewCss } from "./Toolbar";
-import { SvgIcon, openMenuAt } from "./primitives";
+import { Modal, SvgIcon, openMenuAt } from "./primitives";
 import { exportItems } from "./fileMenu";
+import { isNotePath } from "../core/ipc";
 
 import { t, tn } from "../core/i18n";
 // --------------------------------------------------------------- preview
@@ -193,15 +194,60 @@ function PluginPanel(props: { panel: Panel }) {
   return <div class="plugin-panel" ref={el} />;
 }
 
-export default function RightPanel() {
+export default function RightPanel(props: { fullWidth: boolean; onDismiss: () => void }) {
   const builtins = [
-    { id: "preview", title: t("Preview"), icon: () => <Eye size={16} /> },
-    { id: "styles", title: t("Styles"), icon: () => <Palette size={16} /> },
+    { id: "preview", title: t("Preview"), label: true, icon: () => <Eye size={16} /> },
+    { id: "styles", title: t("Styles"), label: true, icon: () => <Palette size={16} /> },
   ];
   const plugins = () => app.panels.items();
+  const tabs = createMemo(() => [...builtins, ...plugins().map((panel) => ({
+    id: panel.id, title: panel.title, label: panel.label || panel.id === CALENDAR_PANEL, icon: () => <SvgIcon svg={panel.icon} size={16} />,
+  }))]);
+  const pinned = createMemo(() => prefs.pinnedPanels.flatMap((id) => tabs().find((tab) => tab.id === id) ?? []));
+  const [visibleCount, setVisibleCount] = createSignal(0);
+  const [managing, setManaging] = createSignal(false);
+  let strip!: HTMLDivElement;
+  let measure!: HTMLDivElement;
+  const measureTabs = () => {
+    const gap = parseFloat(getComputedStyle(strip).columnGap) || 0;
+    let width = 0;
+    let count = 0;
+    for (const tab of measure.children) {
+      width += tab.getBoundingClientRect().width + (count ? gap : 0);
+      if (width > strip.clientWidth) break;
+      count++;
+    }
+    setVisibleCount(count);
+  };
+  onMount(() => {
+    const observer = new ResizeObserver(measureTabs);
+    observer.observe(strip);
+    observer.observe(measure);
+    measureTabs();
+    onCleanup(() => observer.disconnect());
+  });
+  createEffect(() => {
+    if (!tabs().some((tab) => tab.id === rightTab())) setRightTab("preview");
+  });
+  const shown = createMemo(() => pinned().slice(0, visibleCount()));
+  const overflow = createMemo(() => [...pinned().slice(visibleCount()), ...tabs().filter((tab) => !prefs.pinnedPanels.includes(tab.id))]);
+  const togglePin = (id: string) => setPrefs("pinnedPanels", (ids) => ids.includes(id) ? ids.filter((p) => p !== id) : [...ids, id]);
+  const movePin = (id: string, direction: -1 | 1) => {
+    const ordered = pinned();
+    const neighbor = ordered[ordered.findIndex((tab) => tab.id === id) + direction];
+    if (!neighbor) return;
+    setPrefs("pinnedPanels", (ids) => ids.map((p) => p === id ? neighbor.id : p === neighbor.id ? id : p));
+  };
+  const selectTab = (id: string) => prefs.layout === "preview" ? showRightPanel(id) : setRightTab(id);
+  const openOverflow = (e: MouseEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    openMenuAt(r.left, r.bottom + 4, overflow().map((tab) => ({
+      label: tab.title, icon: rightTab() === tab.id ? "✓" : undefined, run: () => selectTab(tab.id),
+    })));
+  };
   return (
-    <section class="right-panel" style={prefs.layout === "split" ? { width: `${prefs.previewWidth}px` } : {}}>
-      <Show when={prefs.layout === "split"}>
+    <section id="workspace-tools" class="right-panel" classList={{ "full-preview": props.fullWidth }} aria-label={t("Tools panel")} style={{ width: `${prefs.previewWidth}px` }}>
+      <Show when={!props.fullWidth && !compactWorkspace()}>
         <div
           class="resizer"
           onPointerDown={(e) =>
@@ -213,27 +259,52 @@ export default function RightPanel() {
         />
       </Show>
       <div class="panel-tabs">
-        <For each={builtins}>
-          {(t) => (
-            <button classList={{ active: rightTab() === t.id }} onClick={() => setRightTab(t.id)} title={t.title}>
-              {t.icon()} <span>{t.title}</span>
-            </button>
-          )}
-        </For>
-        <For each={plugins()}>
-          {(p) => (
-            <button classList={{ active: rightTab() === p.id }} onClick={() => setRightTab(p.id)} title={p.title}>
-              <SvgIcon svg={p.icon} size={16} />
-              <Show when={p.label}><span>{p.title}</span></Show>
-            </button>
-          )}
-        </For>
+        <div class="panel-tab-strip" ref={strip} role="group" aria-label={t("Panel tabs")}>
+          <For each={shown()}>{(tab) => (
+            <button data-panel-tab={tab.id} classList={{ active: rightTab() === tab.id }} aria-pressed={rightTab() === tab.id}
+              onClick={() => selectTab(tab.id)} title={tab.title}>{tab.icon()} <Show when={tab.label}><span>{tab.title}</span></Show></button>
+          )}</For>
+        </div>
+        <div class="panel-tab-measure" ref={measure} aria-hidden="true" inert>
+          <For each={pinned()}>{(tab) => <button>{tab.icon()} <Show when={tab.label}><span>{tab.title}</span></Show></button>}</For>
+        </div>
+        <button class="panel-more icon-btn" title={t("More panels")} aria-haspopup="menu" disabled={!overflow().length}
+          classList={{ active: overflow().some((tab) => tab.id === rightTab()) }} onClick={openOverflow}><Ellipsis size={17} /></button>
+        <button class="panel-manage icon-btn" title={t("Manage panel tabs")} aria-haspopup="dialog" onClick={() => setManaging(true)}><Plus size={17} /></button>
+        <Show when={compactWorkspace() && !props.fullWidth}>
+          <button class="icon-btn" title={t("Close tools panel")} onClick={props.onDismiss}><X size={16} /></button>
+        </Show>
       </div>
       <div class="panel-body">
-        <Show when={rightTab() === "preview"}><PreviewPane /></Show>
-        <Show when={rightTab() === "styles"}><StylesPane /></Show>
+        <Show when={rightTab() === "preview"}>
+          <Show when={isNotePath(state.active)} fallback={<div class="pane-empty">{t("Open a note to see its PDF preview")}</div>}><PreviewPane /></Show>
+        </Show>
+        <Show when={rightTab() === "styles"}>
+          <Show when={isNotePath(state.active)} fallback={<div class="pane-empty">{t("Open a note to edit its styles")}</div>}><StylesPane /></Show>
+        </Show>
         <For each={plugins()}>{(p) => <Show when={rightTab() === p.id}><PluginPanel panel={p} /></Show>}</For>
       </div>
+      <Show when={managing()}>
+        <Modal title={t("Manage panel tabs")} width="430px" onClose={() => setManaging(false)}>
+          <div class="panel-manager">
+            <For each={[...pinned(), ...tabs().filter((tab) => !prefs.pinnedPanels.includes(tab.id))]}>{(tab) => {
+              const index = () => pinned().findIndex((item) => item.id === tab.id);
+              return (
+                <div class="panel-manager-row">
+                  <label>
+                    <input type="checkbox" data-panel-pin={tab.id} checked={index() >= 0} onChange={() => togglePin(tab.id)} />
+                    {tab.icon()} <span>{tab.title}</span>
+                  </label>
+                  <Show when={index() >= 0}>
+                    <button class="icon-btn" title={t("Move {name} up", { name: tab.title })} disabled={index() === 0} onClick={() => movePin(tab.id, -1)}><ArrowUp size={15} /></button>
+                    <button class="icon-btn" title={t("Move {name} down", { name: tab.title })} disabled={index() === pinned().length - 1} onClick={() => movePin(tab.id, 1)}><ArrowDown size={15} /></button>
+                  </Show>
+                </div>
+              );
+            }}</For>
+          </div>
+        </Modal>
+      </Show>
     </section>
   );
 }

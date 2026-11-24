@@ -4,17 +4,16 @@ import { DragProjection, dragItems, endNativeDrag, nativeDropRect, pulseDrop, se
 import {
   Files, Search, FilePlus, FolderPlus, ChevronRight, ChevronDown, Folder, FolderOpen, FileText, FileCode2,
   FolderInput, Settings, Sun, Moon, Monitor, ArrowLeftRight, ChevronsDownUp, Waypoints, File, FileImage, FileType2,
-  Hash, Bookmark, Table2,
+  Hash, Bookmark, Table2, CalendarPlus,
 } from "lucide-solid";
 import { noteIcon } from "../core/meta";
 import { SearchPane, TagsPane, BookmarksPane, newBookmarkGroup, searchFor, openReplace } from "./SidebarPanes";
 import { fileMenu, newNoteIn, newFolderIn } from "./fileMenu";
-import { graphOpen, setGraphOpen } from "./GraphView";
 import { app } from "../core/app";
 import { Entry, stem, fileKind, dirname } from "../core/ipc";
 import {
   tree, root, state, openNote, moveEntry,
-  sidebarTab, setSidebarTab, setDialog, prefs, setPrefs, closeVault, newNoteDir,
+  sidebarTab, sidebarOpen, setSidebarTab, setSidebarOpen, prefs, setPrefs, closeVault, newNoteDir, graphOpen,
 } from "../core/store";
 import { openMenu, openMenuAt, Popover } from "./primitives";
 import { Logo } from "./Logo";
@@ -353,14 +352,45 @@ function FilesPane() {
   );
 }
 
-export default function Sidebar() {
-  const vaultName = () => root()?.split(/[\\/]/).filter(Boolean).pop() ?? "";
-  const panes = () => [
+export function WorkspaceRail() {
+  const panes = [
     { id: "files", title: t("Files"), icon: <Files size={17} /> },
     { id: "search", title: t("Search (Ctrl+Shift+F)"), icon: <Search size={17} /> },
     { id: "tags", title: t("Tags"), icon: <Hash size={17} /> },
     { id: "bookmarks", title: t("Bookmarks"), icon: <Bookmark size={17} /> },
   ];
+  return (
+    <nav class="workspace-rail" aria-label={t("Workspace navigation")}>
+      <div class="rail-logo" title="NoteZ"><Logo size={26} /></div>
+      <div class="rail-actions">
+        <For each={panes}>
+          {(pane) => (
+            <button class="rail-button" classList={{ active: sidebarOpen() && sidebarTab() === pane.id }}
+              data-sidebar-pane={pane.id} title={pane.title} aria-controls="workspace-sidebar"
+              aria-expanded={sidebarOpen() && sidebarTab() === pane.id}
+              onClick={() => {
+                if (sidebarOpen() && sidebarTab() === pane.id) setSidebarOpen(false);
+                else setSidebarTab(pane.id);
+              }}>
+              {pane.icon}
+            </button>
+          )}
+        </For>
+        <button class="rail-button" classList={{ active: graphOpen() }} aria-pressed={graphOpen()}
+          title={t("Graph view (Ctrl+G)")} onClick={() => app.commands.run("graph.toggle")}><Waypoints size={18} /></button>
+        <Show when={app.commands.has("daily.today")}>
+          <button class="rail-button rail-today" title={t("Open today's daily note")} onClick={() => app.commands.run("daily.today")}>
+            <CalendarPlus size={18} /><span>{t("Today's note")}</span>
+          </button>
+        </Show>
+      </div>
+      <button class="rail-button rail-settings" title={t("Settings (Ctrl+,)")} onClick={() => app.commands.run("settings.open")}><Settings size={18} /></button>
+    </nav>
+  );
+}
+
+export default function Sidebar() {
+  const vaultName = () => root()?.split(/[\\/]/).filter(Boolean).pop() ?? "";
   return (
     <aside class="sidebar" style={{ width: `${prefs.sidebarWidth}px` }}>
       <div
@@ -377,7 +407,6 @@ export default function Sidebar() {
           title={root() ?? ""}
           trigger={() => (
             <>
-              <Logo size={22} />
               <span class="vault-name" dir="auto">{vaultName()}</span>
               <ChevronDown size={14} class="muted" />
             </>
@@ -408,17 +437,8 @@ export default function Sidebar() {
         </Popover>
       </div>
 
-      <div class="sidebar-tabs">
-        <For each={panes()}>
-          {(p) => (
-            <button class="tab-icon" classList={{ active: sidebarTab() === p.id }} title={p.title} onClick={() => setSidebarTab(p.id)}>
-              {p.icon}
-            </button>
-          )}
-        </For>
-        <button class="tab-icon" classList={{ active: graphOpen() }} title={t("Graph view (Ctrl+G)")} onClick={() => setGraphOpen(!graphOpen())}>
-          <Waypoints size={17} />
-        </button>
+      <div class="sidebar-tools">
+        <span class="sidebar-section-name">{t(({ files: "Files", search: "Search", tags: "Tags", bookmarks: "Bookmarks" } as Record<string, string>)[sidebarTab()] ?? "Files")}</span>
         <div class="spacer" />
         <Show when={sidebarTab() === "files"}>
           <button class="icon-btn" title={t("New note (Ctrl+N)")} onClick={() => newNoteIn(newNoteDir())}><FilePlus size={16} /></button>
@@ -448,9 +468,6 @@ export default function Sidebar() {
       </div>
 
       <div class="sidebar-foot">
-        <button class="icon-btn" title={t("Settings (Ctrl+,)")} onClick={() => setDialog({ kind: "settings" })}>
-          <Settings size={17} />
-        </button>
         <div class="spacer" />
         <div class="theme-switch" title={t("Appearance")}>
           <button classList={{ active: prefs.themeMode === "light" }} onClick={() => setPrefs("themeMode", "light")} title={t("Light")}><Sun size={14} /></button>

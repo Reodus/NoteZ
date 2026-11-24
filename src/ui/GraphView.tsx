@@ -7,12 +7,12 @@ import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "s
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, Simulation, SimulationNodeDatum } from "d3-force";
 import { Waypoints, X, Maximize2, Search, SlidersHorizontal, RotateCcw, FolderTree, FolderOpen, FileText, ChevronsDownUp, ChevronsUpDown, Crosshair } from "lucide-solid";
 import { basename, dirname, Entry, fileKind, ipc, stem } from "../core/ipc";
-import { isDark, notesList, openNote, root, state, prefs, setPrefs, tree } from "../core/store";
+import { isDark, notesList, openNote, root, state, prefs, setPrefs, tree, setGraphOpen } from "../core/store";
 import { modalOpen, openMenuAt } from "./primitives";
 import { revealInTree } from "./Sidebar";
 
 import { t } from "../core/i18n";
-export const [graphOpen, setGraphOpen] = createSignal(false);
+export { graphOpen, setGraphOpen } from "../core/store";
 
 type Kind = "root" | "folder" | "note" | "file" | "tag";
 

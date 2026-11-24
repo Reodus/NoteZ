@@ -4,7 +4,7 @@ import { createSignal } from "solid-js";
 import { saveDialog, openPath } from "./native";
 import { app, notify } from "./app";
 import { ipc, Diagnostic, RenderedBlock, stem, dirname } from "./ipc";
-import { root, state, viewLayout, prefs } from "./store";
+import { root, state, rightPanelOpen, rightTab, prefs } from "./store";
 
 import { comments, loadComments } from "./comments";
 import { injectComments } from "./commentPdf";
@@ -109,7 +109,7 @@ async function withComments(path: string, text: string) {
 
 export async function runPreview() {
   const path = state.active;
-  if (!path || viewLayout() === "editor") return;
+  if (!path || !rightPanelOpen() || rightTab() !== "preview") return;
   const vault = root();
   const text = state.buffers[path]?.content ?? "";
   const my = ++seq;

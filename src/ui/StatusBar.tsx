@@ -4,7 +4,7 @@ import { runSync, syncConfigured, syncState } from "../core/safety";
 import { when } from "./HistoryDialog";
 import { app } from "../core/app";
 import { isNotePath } from "../core/ipc";
-import { state, cursor, isDirty, setRightTab, prefs, setPrefs, root, setDialog, activeTheme } from "../core/store";
+import { state, cursor, isDirty, rightTab, rightPanelOpen, showRightPanel, prefs, root, setDialog, activeTheme } from "../core/store";
 import { ipc as ipc2 } from "../core/ipc";
 import { srsSettings } from "../core/srs";
 import { preview } from "../core/render";
@@ -76,8 +76,8 @@ export default function StatusBar() {
         <span class="sb-item click" title={t("Document theme — click to change")} onClick={() => setDialog({ kind: "themes" })}>
           {t("Theme: {name}", { name: activeTheme()?.name || docThemeId() })}
         </span>
-        <Show when={prefs.layout !== "editor"}>
-          <span class="sb-item click" classList={{ err: errors() > 0 }} onClick={() => setRightTab("preview")}>
+        <Show when={rightPanelOpen() && rightTab() === "preview"}>
+          <span class="sb-item click" classList={{ err: errors() > 0 }} onClick={() => showRightPanel("preview")}>
             <Show when={!preview().busy} fallback={<><Loader2 size={12} class="spin" /> {t("Typesetting")}</>}>
               <Show when={errors()} fallback={<><CheckCircle2 size={12} /> {t("{pages} pp · {ms} ms", { pages: preview().pages.length, ms: preview().millis })}</>}>
                 <AlertTriangle size={12} /> {tn(errors(), "{n} error", "{n} errors")}
@@ -85,8 +85,8 @@ export default function StatusBar() {
             </Show>
           </span>
         </Show>
-        <Show when={prefs.layout === "editor"}>
-          <span class="sb-item click" onClick={() => setPrefs("layout", "split")}>{t("Show preview")}</span>
+        <Show when={!rightPanelOpen() || rightTab() !== "preview"}>
+          <span class="sb-item click" onClick={() => showRightPanel("preview")}>{t("Show preview")}</span>
         </Show>
       </Show>
     </footer>
