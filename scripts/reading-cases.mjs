@@ -20,7 +20,7 @@ export function readingFixture(vault) {
  return text;
 }
 
-export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) {
+export async function checkReading({evaluate,rpc,sleep,until,scratch,vault,original}) {
  const mode=process.env.NOTEZ_READING_MODE==='source'?'source':'live';
  await evaluate(`(async()=>{const {s}=window.test;s.setRightTab('core.outline.pane');await s.openNote('Reading.md');s.setPrefs('editorMode',${JSON.stringify(mode)})})()`);
  if(process.env.NOTEZ_READING_FONT_SIZE)await evaluate(`window.test.s.setPrefs('editorFontSize',${Math.max(10,Math.min(40,Number(process.env.NOTEZ_READING_FONT_SIZE)||16))})`);
@@ -68,23 +68,7 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
    const target=await evaluate(`window.test.s.editorView().state.doc.line(${n}).from+20`);
    // Exercise one application jump, including its layout correction. Retrying
    // from the test could conceal a jump that leaves the target offscreen.
-   await evaluate(`(()=>{
-    const {s}=window.test,v=s.editorView(),doc=v.state.doc;
-    const raf=window.requestAnimationFrame,cancel=window.cancelAnimationFrame;
-    const trace=window.test.readingJump=[];
-    const snapshot=()=>[v.scrollDOM.scrollTop,v.viewport.from,v.viewport.to,v.state.selection.main.head,v.state.doc===doc];
-    const frames=new Set();
-    window.requestAnimationFrame=function(callback){
-     if(callback.name!=='settle')return raf.call(window,callback);
-     const id=raf.call(window,time=>{const before=snapshot();callback(time);trace.push([id,before,snapshot()]);});
-     frames.add(id);return id;
-    };
-    window.cancelAnimationFrame=function(id){if(frames.has(id))trace.push(['cancel',id,snapshot()]);cancel.call(window,id);};
-    trace.push(['start',document.visibilityState,snapshot()]);
-    s.goToLine(${n},20);
-    trace.push(['dispatch',snapshot()]);
-    window.test.stopReadingJump=()=>{window.requestAnimationFrame=raf;window.cancelAnimationFrame=cancel;return trace;};
-   })()`);
+   await evaluate(`window.test.s.goToLine(${n},20)`);
    let point=null,lastGeometry=null;
    const deadline=Date.now()+5000;
    while(Date.now()<deadline){
@@ -93,10 +77,8 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
     const {rect:r,coords:c,viewport}=lastGeometry;
     if(target>=viewport.from&&target<=viewport.to&&c&&c.top>=r.top&&c.bottom<=r.bottom&&c.left>=r.left&&c.left<r.right){point={x:c.left,y:(c.top+c.bottom)/2};break;}
    }
-   const jump=await evaluate(`window.test.stopReadingJump()`);
-   if(!point)writeFileSync(path.join(scratch,`editing-${width}-${n}.json`),JSON.stringify({lastGeometry,jump},null,2));
-   const summary=jump.length>10?[...jump.slice(0,5),'…',...jump.slice(-5)]:jump;
-   assert.ok(point,`character ${target} on line ${n} must be reachable for editing: ${JSON.stringify({lastGeometry,jump:summary})}`);
+   if(!point)writeFileSync(path.join(scratch,`editing-${width}-${n}.json`),JSON.stringify(lastGeometry,null,2));
+   assert.ok(point,`character ${target} on line ${n} must be reachable for editing at width ${width}: ${JSON.stringify(lastGeometry)}`);
    await evaluate(`window.test.s.editorView().dispatch({selection:{anchor:0}})`);await sleep(100);
    const clickGeometry=await evaluate(`(()=>{const v=window.test.s.editorView(),c=v.coordsAtPos(${target}),r=v.scrollDOM.getBoundingClientRect();return {c,r:r.toJSON()}})()`);
    assert.ok(clickGeometry.c&&clickGeometry.c.top>=clickGeometry.r.top&&clickGeometry.c.bottom<=clickGeometry.r.bottom,'target stays visible with caret elsewhere');
@@ -116,12 +98,21 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
   const shot=await rpc('Page.captureScreenshot',{format:'png'});writeFileSync(path.join(scratch,`reading-${width}.png`),Buffer.from(shot.data,'base64'));
  }
  if(!process.env.NOTEZ_SCROLL_FILE && mode==='live') {
-  await evaluate(`(()=>{const v=window.test.s.editorView(),p=v.state.doc.toString().indexOf('![[missing-scroll-image.png]]');v.dispatch({selection:{anchor:0},effects:v.constructor.scrollIntoView(p,{y:'center'})})})()`);await sleep(300);
-  assert.ok(await evaluate(`Array.from(document.querySelectorAll('.cm-nz-lp-image.missing')).some(e=>e.textContent.includes('missing-scroll-image.png'))`),'missing asset has a visible placeholder');
+  // Keep the cursor on the preceding line so Live mode can render the image.
+  await evaluate(`(()=>{const {s}=window.test,d=s.editorView().state.doc,p=d.toString().indexOf('![[missing-scroll-image.png]]');s.goToLine(d.lineAt(p).number-1)})()`);
+  const visibleAsset=(selector,ready)=>evaluate(`(()=>{
+   const view=window.test.s.editorView(),bounds=view.scrollDOM.getBoundingClientRect();
+   return [...view.dom.querySelectorAll(${JSON.stringify(selector)})].some(el=>{
+    const box=el.getBoundingClientRect();
+    return box.top<bounds.bottom&&box.bottom>bounds.top&&box.left<bounds.right&&box.right>bounds.left&&(${ready});
+   });
+  })()`);
+  await until(()=>visibleAsset('.cm-nz-lp-image.missing',`el.textContent.includes('missing-scroll-image.png')`),'missing asset has a visible placeholder');
   writeFileSync(path.join(vault,'missing-scroll-image.png'),readFileSync('build/icon.png'));
-  await evaluate(`window.test.s.setPrefs('editorMode','source')`);await sleep(50);
-  await evaluate(`window.test.s.setPrefs('editorMode','live')`);await sleep(500);
-  assert.ok(await evaluate(`Array.from(document.querySelectorAll('.cm-nz-lp-image img')).some(i=>i.src.includes('missing-scroll-image.png')&&i.complete&&i.naturalWidth>0&&!i.closest('.missing'))`),'a previously missing asset must recover after it is added');
+  await evaluate(`window.test.s.setPrefs('editorMode','source')`);
+  await until(()=>evaluate(`!document.querySelector('.cm-nz-lp-image')`),'Source mode removes Live image widgets');
+  await evaluate(`window.test.s.setPrefs('editorMode','live')`);
+  await until(()=>visibleAsset('.cm-nz-lp-image img[src*="missing-scroll-image.png"]',`el.complete&&el.naturalWidth>0&&!el.closest('.missing')`),'a previously missing asset must recover in view after it is added');
  }
  await evaluate(`window.test.s.saveAll()`);
  assert.equal(readFileSync(path.join(vault,'Reading.md'),'utf8'),original,'reading/edit/undo must preserve the saved source');

@@ -230,7 +230,7 @@ try {
  const initializeTests = () => evaluate(`(async()=>{const s=await import('/src/core/store.ts'),c=await import('/src/core/comments.ts'),{ipc}=await import('/src/core/ipc.ts');window.test={s,c,ipc};window.testErrors=[];window.addEventListener('error',e=>window.testErrors.push(e.message));s.setPrefs('checkUpdates',false);s.setPrefs('snapshotDaily',false);s.setPrefs('updateLinks','always');s.setPrefs('confirmDelete',false);s.setPrefs('deleteToTrash',false);await c.loadComments(s.state.active)})()`);
  await initializeTests();
  if(readingOnly){
-  await checkReading({evaluate,rpc,sleep,scratch,vault,original:readingText});
+  await checkReading({evaluate,rpc,sleep,until,scratch,vault,original:readingText});
   assert.deepEqual(await evaluate('window.testErrors'),[]);assert.equal(exceptions.length,0,JSON.stringify(exceptions));assert.deepEqual(layoutWarnings,[],'editor geometry must stabilize');
   console.log('Reading artifacts: '+scratch);
  } else {
