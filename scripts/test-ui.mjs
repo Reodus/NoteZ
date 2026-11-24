@@ -329,6 +329,10 @@ try {
 } catch(error) {
  writeFileSync(path.join(scratch,'failure.txt'),String(error.stack??error)+'\nElectron stderr:\n'+stderr+'\nRenderer exceptions:\n'+JSON.stringify(exceptions,null,2));
  console.error(error);
+ if(process.env.GITHUB_ACTIONS==='true') {
+  const message=String(error.message??error).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');
+  console.error(`::error title=Electron regression::${message}`);
+ }
  if(ws?.readyState===1){const id=++seq;await Promise.race([sleep(3000),new Promise(resolve=>{pending.set(id,m=>{if(m.result?.data)writeFileSync(path.join(scratch,'failure.png'),Buffer.from(m.result.data,'base64'));resolve();});ws.send(JSON.stringify({id,method:'Page.captureScreenshot',params:{format:'png'}}));})]);}
  console.error('Failed artifacts: '+scratch);throw error;
 } finally {
