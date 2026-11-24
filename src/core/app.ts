@@ -229,7 +229,7 @@ let toastId = 0;
 export function notify(message: string, kind: Toast["kind"] = "info", action?: Toast["action"], ms?: number) {
   const id = ++toastId;
   setToasts((t) => [...t, { id, message, kind, action }]);
-  setTimeout(() => dismissToast(id), ms ?? (kind === "error" ? 8000 : 4500));
+  if (ms !== 0) setTimeout(() => dismissToast(id), ms ?? (kind === "error" ? 8000 : 4500));
 }
 
 export function dismissToast(id: number) {

@@ -7,7 +7,8 @@ import path from 'node:path';
 export function readingFixture(vault) {
  const paragraph = 'این یک متن آزمایشی فارسی برای بررسی حرکت صفحه است. Reading a mixed direction paragraph with `ObjectName` and **bold text** should keep its position. '.repeat(5);
  const section = n => `## Section ${n}\n\n${Array.from({length:6},(_,i)=>`${n}.${i} ${paragraph}\n`).join('\n')}\n![[scroll-image-${n}.png]]\n\n\`\`\`cpp\n${Array.from({length:45},(_,i)=>`unsigned value_${i} = ${i};`).join('\n')}\n\`\`\`\n\n![[missing-scroll-image.png]]\n\n`;
- const text = process.env.NOTEZ_SCROLL_FILE ? readFileSync(process.env.NOTEZ_SCROLL_FILE,'utf8') : '::: {align=justify}\n![[tall-scroll.svg]]\n\n'+Array.from({length:4},(_,i)=>section(i)).join('')+'::: \n';
+ const multiline = '![Multiline image caption\nادامهٔ توضیح](tall-scroll.svg)\n\n[Multiline destination](\ntall-scroll.svg)\n\n';
+ const text = process.env.NOTEZ_SCROLL_FILE ? readFileSync(process.env.NOTEZ_SCROLL_FILE,'utf8') : '::: {align=justify}\n![[tall-scroll.svg]]\n\n'+Array.from({length:4},(_,i)=>section(i)).join(multiline)+'::: \n';
  writeFileSync(path.join(vault,'Reading.md'),text);
  if(!process.env.NOTEZ_SCROLL_FILE)writeFileSync(path.join(vault,'tall-scroll.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="300" height="1200"><rect width="300" height="1200" fill="#6c5ce7"/></svg>');
  if(!process.env.NOTEZ_SCROLL_FILE || process.env.NOTEZ_SCROLL_IMAGES==='1') {
@@ -32,14 +33,20 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
   const initialStyle=await cursorStyle();
   for(const direction of [1,-1]) {
    for(let i=0;i<500;i++) {
-    const before=await evaluate(`(()=>{const v=window.test.s.editorView(),r=v.scrollDOM.getBoundingClientRect(),x=(r.left+r.right)/2,y=r.top+r.height/2,p=v.posAtCoords({x,y},false),c=v.coordsAtPos(p);return {x,y,p,cy:c?.top,top:v.scrollDOM.scrollTop,height:v.scrollDOM.scrollHeight,client:v.scrollDOM.clientHeight,line:v.state.doc.lineAt(p).number}})()`);
+    const before=await evaluate(`(()=>{const v=window.test.s.editorView(),r=v.scrollDOM.getBoundingClientRect(),x=(r.left+r.right)/2,y=r.top+r.height/2,p=v.posAtCoords({x,y},false),c=v.coordsAtPos(p);return {x,y,p,cy:c?.top,edge:r.top,top:v.scrollDOM.scrollTop,height:v.scrollDOM.scrollHeight,client:v.scrollDOM.clientHeight,line:v.state.doc.lineAt(p).number}})()`);
     if(direction===1 ? before.top>=before.height-before.client-2 : before.top<=1)break;
-    const delta=400*direction;
+    const delta=(i%2===0 ? 230 : 400)*direction;
     await rpc('Input.dispatchMouseEvent',{type:'mouseWheel',x:before.x,y:before.y,deltaX:0,deltaY:delta});await sleep(100);
     const after=await evaluate(`(()=>{const v=window.test.s.editorView(),c=v.coordsAtPos(${before.p});return {cy:c?.top,top:v.scrollDOM.scrollTop,height:v.scrollDOM.scrollHeight}})()`);
     const expected=Math.max(-before.top,Math.min(delta,before.height-before.client-before.top));
     const error=after.cy==null||before.cy==null ? null : after.cy-before.cy+expected;
     rows.push({direction,i,before,after,error});
+    const expectedY=before.cy==null ? null : before.cy-expected;
+    const shouldStayVisible=expectedY!==null && expectedY>before.edge+24 && expectedY<before.edge+before.client-24;
+    if(shouldStayVisible && after.cy==null) {
+     writeFileSync(path.join(scratch,`reading-${width}.json`),JSON.stringify(rows,null,2));
+     assert.fail(`${mode} text on line ${before.line} disappeared at width ${width}`);
+    }
     // Compare the SAME text position on screen, not scrollTop: CM adjusts
     // offscreen height estimates as it renders, which legitimately changes it.
     if(error!==null && Math.abs(error)>24) {

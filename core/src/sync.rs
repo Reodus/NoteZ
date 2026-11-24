@@ -49,6 +49,9 @@ pub trait Store {
     fn list(&self, dir: &str) -> Result<Vec<String>, String>;
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>, String>;
     fn put(&self, key: &str, bytes: &[u8]) -> Result<(), String>;
+    fn get_versioned(&self, key: &str) -> Result<Option<(Vec<u8>, String)>, String>;
+    /// Replace only the revision read by this client. None means create if absent.
+    fn put_if(&self, key: &str, bytes: &[u8], revision: Option<&str>) -> Result<bool, String>;
     fn delete(&self, key: &str) -> Result<(), String>;
 }
 
@@ -71,6 +74,23 @@ impl Store for FolderStore {
     }
     fn put(&self, key: &str, bytes: &[u8]) -> Result<(), String> {
         write_atomic(&self.0.join(key), bytes)
+    }
+    fn get_versioned(&self, key: &str) -> Result<Option<(Vec<u8>, String)>, String> {
+        Ok(self.get(key)?.map(|bytes| {
+            let revision = history::hash(&bytes);
+            (bytes, revision)
+        }))
+    }
+    fn put_if(&self, key: &str, bytes: &[u8], revision: Option<&str>) -> Result<bool, String> {
+        fs::create_dir_all(&self.0).map_err(|e| e.to_string())?;
+        let lock = fs::OpenOptions::new().read(true).write(true).create(true).truncate(false)
+            .open(self.0.join(".notez-publish.lock")).map_err(|e| e.to_string())?;
+        lock.lock().map_err(|e| e.to_string())?;
+        if self.get_versioned(key)?.as_ref().map(|(_, tag)| tag.as_str()) != revision {
+            return Ok(false);
+        }
+        self.put(key, bytes)?;
+        Ok(true)
     }
     fn delete(&self, key: &str) -> Result<(), String> {
         match fs::remove_file(self.0.join(key)) {
@@ -96,6 +116,24 @@ fn http_err(e: ureq::Error) -> String {
         }
         ureq::Error::Transport(t) => format!("cannot reach the server: {t}"),
     }
+}
+
+fn read_versioned(response: Result<ureq::Response, ureq::Error>) -> Result<Option<(Vec<u8>, String)>, String> {
+    match response {
+        Ok(r) => {
+            let tag = r.header("ETag").filter(|s| s.starts_with('"') && s.ends_with('"'))
+                .ok_or("the sync server did not return a strong ETag")?.to_string();
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut r.into_reader(), &mut bytes).map_err(|e| e.to_string())?;
+            Ok(Some((bytes, tag)))
+        }
+        Err(ureq::Error::Status(404, _)) => Ok(None),
+        Err(e) => Err(http_err(e)),
+    }
+}
+
+fn conditional_header(revision: Option<&str>) -> (&str, &str) {
+    revision.map_or(("if-none-match", "*"), |tag| ("if-match", tag))
 }
 
 /// Percent-encode everything but unreserved characters (and `/` when `slash`).
@@ -209,6 +247,25 @@ impl Store for WebDav {
             Err(e) => Err(http_err(e)),
         }
     }
+    fn get_versioned(&self, key: &str) -> Result<Option<(Vec<u8>, String)>, String> {
+        read_versioned(self.req("GET", key).call())
+    }
+    fn put_if(&self, key: &str, bytes: &[u8], revision: Option<&str>) -> Result<bool, String> {
+        let (name, value) = conditional_header(revision);
+        let send = || self.req("PUT", key).set(name, value).send_bytes(bytes);
+        let result = match send() {
+            Err(ureq::Error::Status(409 | 404, _)) if revision.is_none() => {
+                self.mkdirs(key)?;
+                send()
+            }
+            other => other,
+        };
+        match result {
+            Ok(_) => Ok(true),
+            Err(ureq::Error::Status(412 | 404, _)) => Ok(false),
+            Err(e) => Err(http_err(e)),
+        }
+    }
     fn delete(&self, key: &str) -> Result<(), String> {
         match self.req("DELETE", key).call() {
             Ok(_) | Err(ureq::Error::Status(404, _)) => Ok(()),
@@ -300,25 +357,34 @@ impl S3 {
         })
     }
     fn send(&self, method: &str, key: Option<&str>, query: &[(String, String)], body: &[u8]) -> Result<ureq::Response, ureq::Error> {
+        self.send_with_condition(method, key, query, body, None)
+    }
+    fn send_with_condition(&self, method: &str, key: Option<&str>, query: &[(String, String)], body: &[u8], condition: Option<(&str, &str)>) -> Result<ureq::Response, ureq::Error> {
         let uri = match key {
             Some(k) => format!("/{}/{}", uri_encode(&self.bucket, false), uri_encode(&format!("{}{k}", self.prefix), true)),
             None => format!("/{}", uri_encode(&self.bucket, false)),
         };
         let date = amz_now();
         let payload = hex(&Sha256::digest(body));
-        let headers = vec![("host".to_string(), self.host.clone()), ("x-amz-content-sha256".to_string(), payload.clone()), ("x-amz-date".to_string(), date.clone())];
+        let mut headers = vec![("host".to_string(), self.host.clone()), ("x-amz-content-sha256".to_string(), payload.clone()), ("x-amz-date".to_string(), date.clone())];
+        if let Some((name, value)) = condition {
+            headers.push((name.to_string(), value.to_string()));
+        }
         let auth = sigv4(method, &uri, query, &headers, &payload, &self.region, "s3", &self.access, &self.secret, &date);
         let mut url = format!("{}{uri}", self.endpoint);
         if !query.is_empty() {
             let q: Vec<String> = query.iter().map(|(k, v)| format!("{}={}", uri_encode(k, false), uri_encode(v, false))).collect();
             url = format!("{url}?{}", q.join("&"));
         }
-        self.agent
+        let request = self.agent
             .request(method, &url)
             .set("x-amz-content-sha256", &payload)
             .set("x-amz-date", &date)
-            .set("Authorization", &auth)
-            .send_bytes(body)
+            .set("Authorization", &auth);
+        match condition {
+            Some((name, value)) => request.set(name, value),
+            None => request,
+        }.send_bytes(body)
     }
 }
 
@@ -363,6 +429,17 @@ impl Store for S3 {
     }
     fn put(&self, key: &str, bytes: &[u8]) -> Result<(), String> {
         self.send("PUT", Some(key), &[], bytes).map(|_| ()).map_err(http_err)
+    }
+    fn get_versioned(&self, key: &str) -> Result<Option<(Vec<u8>, String)>, String> {
+        read_versioned(self.send("GET", Some(key), &[], b""))
+    }
+    fn put_if(&self, key: &str, bytes: &[u8], revision: Option<&str>) -> Result<bool, String> {
+        match self.send_with_condition("PUT", Some(key), &[], bytes, Some(conditional_header(revision))) {
+            Ok(_) => Ok(true),
+            Err(ureq::Error::Status(409 | 412, _)) => Ok(false),
+            Err(ureq::Error::Status(404, _)) if revision.is_some() => Ok(false),
+            Err(e) => Err(http_err(e)),
+        }
     }
     fn delete(&self, key: &str) -> Result<(), String> {
         match self.send("DELETE", Some(key), &[], b"") {
@@ -461,8 +538,11 @@ fn keys_for(store: &dyn Store, pass: &str) -> Result<(Keys, String), String> {
             let (m, t, p) = (64 * 1024, 3, 1);
             let k = derive(pass, &salt, m, t, p)?;
             let cfg = RemoteConfig { format: 1, salt: B64.encode(salt), m, t, p, check: B64.encode(seal(&k, b"notez")) };
-            store.put("notez-sync.json", &serde_json::to_vec_pretty(&cfg).map_err(|e| e.to_string())?)?;
-            return Ok((k, cfg.salt));
+            if store.put_if("notez-sync.json", &serde_json::to_vec_pretty(&cfg).map_err(|e| e.to_string())?, None)? {
+                return Ok((k, cfg.salt));
+            }
+            let bytes = store.get("notez-sync.json")?.ok_or("RETRY")?;
+            serde_json::from_slice(&bytes).map_err(|_| "the remote has a damaged notez-sync.json".to_string())?
         }
     };
     if cfg.format != 1 {
@@ -526,6 +606,8 @@ pub struct Report {
     pub conflicts: Vec<String>,
     /// Local paths whose content changed (for the UI to reload).
     pub changed: Vec<String>,
+    /// Local files that changed again while the sync was running.
+    pub deferred: Vec<String>,
     pub t: u64,
     pub millis: u64,
 }
@@ -574,27 +656,31 @@ pub fn sync(root: &Path, store: &dyn Store, pass: &str, cfg: &history::Config) -
         st.remote = salt.clone();
         st.base.clear();
     }
-    let head: Head = match store.get("head")? {
-        Some(b) => serde_json::from_slice(&inflate(&unseal(&keys, &b)?)?).map_err(|_| "damaged remote file list".to_string())?,
+    let remote_head = store.get_versioned("head")?;
+    let head: Head = match &remote_head {
+        Some((bytes, _)) => serde_json::from_slice(&inflate(&unseal(&keys, bytes)?)?).map_err(|_| "damaged remote file list".to_string())?,
         None => Head::default(),
     };
-    let local = history::manifest(root, false)?;
+    let (local, large) = history::manifest_and_large_files(root, false)?;
+    if head.files.keys().any(|path| !safe(root, path)) {
+        return Err("the remote contains an invalid vault path".into());
+    }
     let mut remote_objects: HashSet<String> = store.list("objects")?.into_iter().collect();
     let mut report = Report::default();
     let mut result: BTreeMap<String, RemoteFile> = BTreeMap::new();
 
-    let upload = |path: &str, objs: &mut HashSet<String>| -> Result<Option<RemoteFile>, String> {
-        let bytes = match fs::read(root.join(path)) {
-            Ok(b) => b,
-            Err(_) => return Ok(None), // gone meanwhile
-        };
+    let upload = |path: &str, local: &FileEntry, objs: &mut HashSet<String>| -> Result<RemoteFile, String> {
+        let bytes = fs::read(root.join(path)).map_err(|e| format!("cannot read {path}: {e}"))?;
         let h = history::hash(&bytes);
+        if h != local.h {
+            return Err("RETRY".into());
+        }
         let id = object_id(&keys, &h);
         if !objs.contains(&id) {
             store.put(&format!("objects/{id}"), &seal(&keys, &deflate(&bytes)))?;
             objs.insert(id.clone());
         }
-        Ok(Some(RemoteFile { h, id, size: bytes.len() as u64 }))
+        Ok(RemoteFile { h, id, size: bytes.len() as u64 })
     };
     let download = |f: &RemoteFile| -> Result<Vec<u8>, String> {
         let data = store.get(&format!("objects/{}", f.id))?.ok_or("a file is missing on the remote; sync from the device that has it")?;
@@ -604,19 +690,30 @@ pub fn sync(root: &Path, store: &dyn Store, pass: &str, cfg: &history::Config) -
         }
         Ok(bytes)
     };
-    let write_here = |rel: &str, bytes: &[u8]| -> Result<(), String> {
-        let p = crate::vault::resolve(root, rel)?;
-        if p.exists() {
-            history::keep(root, cfg, rel, "before-sync")?;
-        }
-        write_atomic(&p, bytes)
+    // Stage downloads before publishing. A revision conflict can then retry
+    // without treating its own incomplete downloads as local edits.
+    let sync_dir = root.join(".notez/sync");
+    fs::create_dir_all(&sync_dir).map_err(|e| e.to_string())?;
+    let staging = tempfile::tempdir_in(sync_dir).map_err(|e| e.to_string())?;
+    let mut planned: Vec<(String, Option<PathBuf>)> = Vec::new();
+    let stage = |plan: &mut Vec<(String, Option<PathBuf>)>, path: &str, file: &RemoteFile| -> Result<(), String> {
+        let staged = staging.path().join(plan.len().to_string());
+        fs::write(&staged, download(file)?).map_err(|e| e.to_string())?;
+        plan.push((path.to_string(), Some(staged)));
+        Ok(())
     };
 
     let paths: BTreeSet<String> = local.keys().chain(head.files.keys()).chain(st.base.keys()).cloned().collect();
     let mut taken: HashSet<String> = paths.clone().into_iter().collect();
     for path in paths {
         let l: Option<&FileEntry> = local.get(&path);
-        let r: Option<&RemoteFile> = head.files.get(&path).filter(|_| safe(root, &path));
+        let r: Option<&RemoteFile> = head.files.get(&path);
+        if large.contains(&path) {
+            if let Some(r) = r {
+                result.insert(path, r.clone());
+            }
+            continue;
+        }
         let b: Option<&String> = st.base.get(&path);
         let (lh, rh) = (l.map(|f| &f.h), r.map(|f| &f.h));
         if lh == rh {
@@ -629,56 +726,48 @@ pub fn sync(root: &Path, store: &dyn Store, pass: &str, cfg: &history::Config) -
             // Changed (or removed) only on the remote.
             match r {
                 Some(r) => {
-                    write_here(&path, &download(r)?)?;
+                    stage(&mut planned, &path, r)?;
                     report.downloaded.push(path.clone());
-                    report.changed.push(path.clone());
                     result.insert(path.clone(), r.clone());
                 }
                 None => {
-                    history::keep(root, cfg, &path, "before-sync")?;
-                    let _ = fs::remove_file(root.join(&path));
+                    planned.push((path.clone(), None));
                     report.deleted_here.push(path.clone());
-                    report.changed.push(path.clone());
                 }
             }
         } else if rh == b {
             // Changed (or removed) only here.
             match l {
-                Some(_) => {
-                    if let Some(f) = upload(&path, &mut remote_objects)? {
-                        report.uploaded.push(path.clone());
-                        result.insert(path.clone(), f);
-                    }
+                Some(l) => {
+                    let file = upload(&path, l, &mut remote_objects)?;
+                    report.uploaded.push(path.clone());
+                    result.insert(path, file);
                 }
                 None => report.deleted_there.push(path.clone()),
             }
         } else {
             // Changed on both sides.
             match (l, r) {
-                (Some(_), Some(r)) => {
+                (Some(l), Some(r)) => {
                     let copy = conflict_name(&path, started, &|c| taken.contains(c) || root.join(c).exists());
                     taken.insert(copy.clone());
-                    write_here(&copy, &download(r)?)?;
+                    stage(&mut planned, &copy, r)?;
                     result.insert(copy.clone(), r.clone());
                     report.conflicts.push(copy.clone());
-                    report.changed.push(copy);
-                    if let Some(f) = upload(&path, &mut remote_objects)? {
-                        report.uploaded.push(path.clone());
-                        result.insert(path.clone(), f);
-                    }
+                    let file = upload(&path, l, &mut remote_objects)?;
+                    report.uploaded.push(path.clone());
+                    result.insert(path, file);
                 }
-                (Some(_), None) => {
+                (Some(l), None) => {
                     // Removed there, edited here: keep the edit.
-                    if let Some(f) = upload(&path, &mut remote_objects)? {
-                        report.uploaded.push(path.clone());
-                        result.insert(path.clone(), f);
-                    }
+                    let file = upload(&path, l, &mut remote_objects)?;
+                    report.uploaded.push(path.clone());
+                    result.insert(path, file);
                 }
                 (None, Some(r)) => {
                     // Removed here, edited there: keep the edit.
-                    write_here(&path, &download(r)?)?;
+                    stage(&mut planned, &path, r)?;
                     report.downloaded.push(path.clone());
-                    report.changed.push(path.clone());
                     result.insert(path.clone(), r.clone());
                 }
                 (None, None) => {}
@@ -691,17 +780,46 @@ pub fn sync(root: &Path, store: &dyn Store, pass: &str, cfg: &history::Config) -
         let generation = head.generation + 1;
         let new_head = Head { generation, t: now_ms(), device: st.device.clone(), files: result.clone() };
         let sealed = seal(&keys, &deflate(&serde_json::to_vec(&new_head).map_err(|e| e.to_string())?));
-        // Someone else synced since we read the head: start over (their
-        // changes would be lost otherwise).
-        if let Some(b) = store.get("head")? {
-            let now: Head = serde_json::from_slice(&inflate(&unseal(&keys, &b)?)?).map_err(|_| "damaged remote file list".to_string())?;
-            if now.generation != head.generation {
-                return Err("RETRY".into());
-            }
+        let revision = remote_head.as_ref().map(|(_, tag)| tag.as_str());
+        if !store.put_if("head", &sealed, revision)? {
+            return Err("RETRY".into());
         }
-        store.put("head", &sealed)?;
     }
-    st.base = result.into_iter().map(|(p, f)| (p, f.h)).collect();
+    for (path, staged) in planned {
+        let disk = crate::vault::resolve(root, &path)?;
+        let on_disk = match fs::read(&disk) {
+            Ok(bytes) => Some(history::hash(&bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(format!("cannot read {path}: {e}")),
+        };
+        if on_disk.as_ref() != local.get(&path).map(|file| &file.h) {
+            report.deferred.push(path);
+            continue;
+        }
+        if on_disk.is_some() {
+            history::keep(root, cfg, &path, "before-sync")?;
+        }
+        if let Some(staged) = staged {
+            write_atomic(&disk, &fs::read(staged).map_err(|e| e.to_string())?)?;
+        } else {
+            fs::remove_file(&disk).map_err(|e| format!("cannot remove {path}: {e}"))?;
+        }
+        report.changed.push(path);
+    }
+    if !report.deferred.is_empty() {
+        report.downloaded.retain(|p| !report.deferred.contains(p));
+        report.deleted_here.retain(|p| !report.deferred.contains(p));
+        report.conflicts.retain(|p| !report.deferred.contains(p));
+    }
+    let mut base: BTreeMap<_, _> = result.into_iter().map(|(p, f)| (p, f.h)).collect();
+    for path in large.iter().chain(&report.deferred) {
+        if let Some(old) = st.base.remove(path) {
+            base.insert(path.clone(), old);
+        } else {
+            base.remove(path);
+        }
+    }
+    st.base = base;
     st.last = now_ms();
     write_atomic(&state_path(root), &serde_json::to_vec(&st).map_err(|e| e.to_string())?)?;
     report.t = st.last;
@@ -813,7 +931,7 @@ mod tests {
         put(&a, "secret.md", "the launch code is 1234");
         run_folder(&a, &remote, "correct horse").unwrap();
         // Nothing readable on the remote.
-        for f in crate::vault::every_file(&remote, &remote) {
+        for f in crate::vault::every_file(&remote, &remote, &|_| false).unwrap() {
             let b = fs::read(remote.join(&f)).unwrap();
             assert!(!String::from_utf8_lossy(&b).contains("launch code"), "{f} leaks");
             assert!(!f.contains("secret"), "{f} leaks a name");
@@ -896,6 +1014,37 @@ mod tests {
     }
 
     #[test]
+    fn stale_folder_revision_cannot_overwrite_a_new_head() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = FolderStore(temp.path().to_path_buf());
+        let second = FolderStore(temp.path().to_path_buf());
+        assert!(first.put_if("head", b"base", None).unwrap());
+        assert!(!second.put_if("head", b"late first write", None).unwrap());
+        let (_, revision) = second.get_versioned("head").unwrap().unwrap();
+        assert!(first.put_if("head", b"first device", Some(&revision)).unwrap());
+        assert!(!second.put_if("head", b"second device", Some(&revision)).unwrap());
+        assert_eq!(second.get("head").unwrap().unwrap(), b"first device");
+    }
+
+    #[test]
+    fn oversized_local_file_does_not_delete_the_remote_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        let remote = temp.path().join("remote");
+        let a = temp.path().join("a");
+        let b = temp.path().join("b");
+        fs::create_dir(&a).unwrap();
+        fs::create_dir(&b).unwrap();
+        put(&a, "attachment.bin", "previous");
+        run_folder(&a, &remote, "pw").unwrap();
+        run_folder(&b, &remote, "pw").unwrap();
+        fs::OpenOptions::new().write(true).open(a.join("attachment.bin")).unwrap().set_len(201 * 1024 * 1024).unwrap();
+        let report = run_folder(&a, &remote, "pw").unwrap();
+        assert!(report.deleted_there.is_empty());
+        run_folder(&b, &remote, "pw").unwrap();
+        assert_eq!(read(&b, "attachment.bin").as_deref(), Some("previous"));
+    }
+
+    #[test]
     fn rejects_unsafe_remote_paths() {
         let root = Path::new("/vault");
         assert!(safe(root, "a/b.md"));
@@ -926,6 +1075,8 @@ mod tests {
                         let (method, path) = (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string());
                         let mut len = 0usize;
                         let mut auth = false;
+                        let mut if_match = None;
+                        let mut create_only = false;
                         loop {
                             let mut h = String::new();
                             r.read_line(&mut h).unwrap();
@@ -939,11 +1090,18 @@ mod tests {
                             if lower.starts_with("authorization: basic") {
                                 auth = true;
                             }
+                            if lower.starts_with("if-match:") {
+                                if_match = Some(h.split_once(':').unwrap().1.trim().to_string());
+                            }
+                            if lower.trim() == "if-none-match: *" {
+                                create_only = true;
+                            }
                         }
                         let mut body = vec![0; len];
                         r.read_exact(&mut body).unwrap();
                         let path = crate::render::percent_decode(&path);
                         let mut f = files.lock().unwrap();
+                        let tag = f.get(&path).map(|b| format!("\"{}\"", history::hash(b)));
                         let (code, out): (u16, Vec<u8>) = if !auth {
                             (401, vec![])
                         } else {
@@ -952,6 +1110,8 @@ mod tests {
                                     let parent = path.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
                                     if parent != "/dav/" && !f.contains_key(&parent) {
                                         (409, vec![])
+                                    } else if create_only && tag.is_some() || if_match.is_some() && if_match != tag {
+                                        (412, vec![])
                                     } else {
                                         f.insert(path, body);
                                         (201, vec![])
@@ -988,7 +1148,10 @@ mod tests {
                             }
                         };
                         drop(f);
-                        let _ = write!(s, "HTTP/1.1 {code} X\r\nContent-Length: {}\r\n\r\n", out.len());
+                        let etag = if code == 200 && method == "GET" {
+                            tag.map(|v| format!("ETag: {v}\r\n")).unwrap_or_default()
+                        } else { String::new() };
+                        let _ = write!(s, "HTTP/1.1 {code} X\r\nContent-Length: {}\r\n{etag}\r\n", out.len());
                         let _ = s.write_all(&out);
                     }
                 });
@@ -1011,6 +1174,13 @@ mod tests {
         let b = tmp("dav-b");
         run(&b, &remote, "pass", &history::Config::default()).unwrap();
         assert_eq!(read(&b, "d/m.md").as_deref(), Some("nested"));
+        let first = open_store(&remote).unwrap();
+        let (_, revision) = first.get_versioned("head").unwrap().unwrap();
+        put(&b, "d/m.md", "updated");
+        run(&b, &remote, "pass", &history::Config::default()).unwrap();
+        assert!(!first.put_if("head", b"stale", Some(&revision)).unwrap());
+        run(&a, &remote, "pass", &history::Config::default()).unwrap();
+        assert_eq!(read(&a, "d/m.md").as_deref(), Some("updated"));
         let bad = Remote { password: "nope".into(), user: String::new(), ..remote.clone() };
         assert!(run(&b, &bad, "pass", &history::Config::default()).unwrap_err().contains("access denied"));
         for d in [a, b] {

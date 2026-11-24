@@ -4,7 +4,7 @@
 import { createEffect, createRoot, createSignal, on } from "solid-js";
 import { app, notify } from "./app";
 import { ipc, SyncRemote, SyncReport } from "./ipc";
-import { prefs, root, state, reloadFromDisk, refreshTree, saveAll, setDialog } from "./store";
+import { prefs, root, reloadFromDisk, refreshTree, saveAll, setDialog, pauseNoteSaves, acceptDiskDeletion, vaultChanging } from "./store";
 import { secretGet, secretSet } from "./native";
 
 import { t, tn } from "./i18n";
@@ -71,21 +71,29 @@ const [settings, setSettingsRaw] = createSignal<SyncSettings>({ ...EMPTY });
 export const syncSettings = settings;
 /** Passphrase typed this session (when not remembered). */
 let sessionPass = "";
+let settingsVault: string | null = null;
 const secretKey = (what: string) => `sync:${root()}:${what}`;
 
 async function loadSyncSettings() {
+  const vault = root();
+  let next = EMPTY;
   try {
-    setSettingsRaw({ ...EMPTY, ...JSON.parse(await ipc.read(SETTINGS)) });
-  } catch {
-    setSettingsRaw({ ...EMPTY });
-  }
+    next = { ...EMPTY, ...JSON.parse(await ipc.read(SETTINGS)) };
+  } catch { /* no saved settings */ }
+  const status = await ipc.syncStatus().catch(() => ({ last: 0 }));
+  if (root() !== vault) return;
+  settingsVault = vault;
+  setSettingsRaw(next);
   sessionPass = "";
-  setSyncState({ status: "idle", last: (await ipc.syncStatus().catch(() => ({ last: 0 }))).last });
+  setSyncState({ status: "idle", last: status.last });
   schedule();
 }
 
 export async function saveSyncSettings(s: SyncSettings, secrets: { password?: string; passphrase?: string }) {
+  const vault = root();
   await ipc.write(SETTINGS, JSON.stringify(s, null, 2) + "\n");
+  if (root() !== vault) return;
+  settingsVault = vault;
   setSettingsRaw(s);
   if (secrets.password !== undefined) await secretSet(secretKey("password"), secrets.password || null);
   if (secrets.passphrase !== undefined) {
@@ -95,7 +103,7 @@ export async function saveSyncSettings(s: SyncSettings, secrets: { password?: st
   schedule();
 }
 
-export const syncConfigured = () => !!settings().kind && !!settings().url;
+export const syncConfigured = () => !!root() && settingsVault === root() && !!settings().kind && !!settings().url;
 
 /** The remote with its password from the keychain. */
 export async function syncRemote(s = settings(), password?: string): Promise<SyncRemote> {
@@ -116,23 +124,33 @@ export { syncState };
 
 /** Sync now. `loud`: report the result (a manual sync). */
 export async function runSync(loud = true): Promise<SyncReport | null> {
-  if (!root() || !syncConfigured() || syncState().status === "syncing") return null;
-  const pass = await syncPassphrase();
-  if (!pass) {
-    setSyncState((s) => ({ ...s, status: "needs-passphrase", error: t("Enter the sync passphrase in Settings → Sync.") }));
-    if (loud) notify(t("Sync needs its passphrase: Settings → Sync."), "error");
-    return null;
-  }
+  const vault = root();
+  if (!vault || vaultChanging() || !syncConfigured() || syncState().status === "syncing") return null;
   setSyncState((s) => ({ ...s, status: "syncing", error: undefined }));
+  let resume: (() => void) | undefined;
   try {
-    await saveAll();
-    const r = await ipc.syncRun(await syncRemote(), pass);
-    setSyncState({ status: "idle", last: r.t, report: r });
+    const pass = await syncPassphrase();
+    if (root() !== vault) return null;
+    if (!pass) {
+      setSyncState((s) => ({ ...s, status: "needs-passphrase", error: t("Enter the sync passphrase in Settings → Sync.") }));
+      if (loud) notify(t("Sync needs its passphrase: Settings → Sync."), "error");
+      return null;
+    }
+    const remote = await syncRemote();
+    resume = await pauseNoteSaves();
+    if (root() !== vault || vaultChanging()) return null;
+    const r = await ipc.syncRun(remote, pass);
     if (r.changed.length) {
-      for (const p of r.changed) if (state.buffers[p]) await reloadFromDisk(p).catch(() => {});
+      const deleted = new Set(r.deleted_here);
+      for (const p of r.changed) {
+        if (deleted.has(p)) acceptDiskDeletion(p);
+        else await reloadFromDisk(p).catch(e => notify(String(e), "error"));
+      }
       await refreshTree();
       app.events.emit("vault:changed", undefined);
     }
+    setSyncState({ status: "idle", last: r.t, report: r });
+    if (r.deferred?.length) notify(t("Some files changed during sync. Sync again to include the latest edits."), "error");
     if (r.conflicts.length) notify(tn(r.conflicts.length, "Sync: {n} conflict — both versions were kept (“… (conflict …)”).", "Sync: {n} conflicts — both versions were kept (“… (conflict …)”)."), "error", undefined, 15000);
     else if (loud) {
       const n = r.uploaded.length + r.downloaded.length + r.deleted_here.length + r.deleted_there.length;
@@ -141,10 +159,14 @@ export async function runSync(loud = true): Promise<SyncReport | null> {
     }
     return r;
   } catch (e) {
+    if (root() !== vault) return null;
     const msg = String(e);
     setSyncState((s) => ({ ...s, status: /passphrase/i.test(msg) ? "needs-passphrase" : "error", error: msg }));
     if (loud) notify(t("Sync failed: {error}", { error: msg }), "error", undefined, 12000);
     return null;
+  } finally {
+    resume?.();
+    if (root() === vault && syncState().status === "syncing") setSyncState((s) => ({ ...s, status: "idle" }));
   }
 }
 

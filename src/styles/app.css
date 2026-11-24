@@ -2871,6 +2871,18 @@ input[type="range"] {
   opacity: 0;
   height: 6px;
 }
+.cm-nz-lp-chip.div-end:hover,
+.cm-nz-lp-chip.div-end:focus-visible {
+  opacity: 1;
+}
+.cm-nz-lp-chip[role="button"],
+.cm-nz-lp-chip.div-warning {
+  cursor: pointer;
+}
+.cm-nz-lp-chip.div-warning {
+  border: 1px solid var(--border-strong);
+  color: var(--fg);
+}
 .cm-nz-lp-chip.pagebreak {
   display: flex;
   justify-content: center;

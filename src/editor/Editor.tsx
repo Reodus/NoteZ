@@ -21,7 +21,8 @@ import {
   isDark, notesList, openNote, root,
   editorView, allFiles, setPdfJump, keepFocusOnOpen,
 } from "../core/store";
-import { ipc, stem, LinkInfo } from "../core/ipc";
+import { dirname, ipc, isNotePath, stem, LinkInfo } from "../core/ipc";
+import { frontmatterRange } from "../core/frontmatter";
 import { preview, schedulePreview } from "../core/render";
 import { bidi } from "./bidi";
 import { typst } from "./typst-lang";
@@ -128,7 +129,7 @@ async function wikilinkCompletion(ctx: CompletionContext) {
 }
 
 /** Open a link target: a note name/path (with `#Heading` or `#^block`), or an external URL. */
-export function openLinkTarget(target: string): boolean {
+export function openLinkTarget(target: string, markdown = false): boolean {
   if (/^(https?:|mailto:)/i.test(target)) {
     void openUrl(target);
     return true;
@@ -137,24 +138,44 @@ export function openLinkTarget(target: string): boolean {
   let name = clean.split("#")[0];
   const sub = clean.includes("#") ? clean.slice(clean.indexOf("#") + 1) : "";
   try {
-    name = decodeURI(name);
+    name = decodeURIComponent(name);
   } catch {
     /* keep as typed */
   }
   if (!name) return sub ? revealInOpenNote(sub) : false;
-  const hit =
+  const files = allFiles();
+  const local = dirname(state.active ?? "");
+  const resolvePath = (path: string) => {
+    const parts: string[] = [];
+    for (const part of path.split("/")) {
+      if (!part || part === ".") continue;
+      if (part === "..") {
+        if (!parts.length) return null;
+        parts.pop();
+      } else parts.push(part);
+    }
+    return parts.join("/");
+  };
+  const relative = resolvePath(`${local}/${name}`);
+  const absolute = resolvePath(name);
+  const explicit = name.startsWith("/") || /^\.\.?\//.test(name);
+  const candidates = name.startsWith("/") ? [absolute]
+    : explicit ? [relative] : markdown ? [relative, absolute] : [absolute, relative];
+  const exact = candidates.flatMap((p) => p ? [p, `${p}.md`, `${p}.typ`] : [])
+    .map((p) => files.find((f) => f === p) ?? notesList().find((f) => f === p))
+    .find(Boolean);
+  const hit = exact ?? (explicit ? undefined :
     notesList().find((p) => p === name) ??
     notesList().find((p) => p.replace(/\.(md|typ)$/, "") === name.replace(/\.(md|typ)$/, "")) ??
     notesList().find((p) => stem(p) === name.replace(/\.(md|typ)$/, "")) ??
-    notesList().find((p) => p.endsWith("/" + name));
-  if (hit) {
+    notesList().find((p) => p.endsWith("/" + name)));
+  if (hit && isNotePath(hit)) {
     void openNote(hit).then(() => sub && whenShown(hit, () => revealInOpenNote(sub)));
     return true;
   }
   // A PDF, image or other file: [[paper.pdf#page=3&annotation=id]]
   const lower = name.toLowerCase();
-  const files = allFiles();
-  const file = files.find((p) => p === name) ?? files.find((p) => p.toLowerCase() === lower) ?? files.find((p) => p.toLowerCase().endsWith("/" + lower));
+  const file = hit ?? (!explicit ? files.find((p) => p.toLowerCase() === lower) ?? files.find((p) => p.toLowerCase().endsWith("/" + lower)) : undefined);
   if (!file) return false;
   void openNote(file).then(() => {
     if (!/\.pdf$/i.test(file) || !sub) return;
@@ -173,7 +194,7 @@ function whenShown(path: string, fn: () => void, tries = 20) {
   const check = () => {
     const view = editorView();
     if (state.active !== path) { cancel(); return; }
-    if (view && view.state.doc.toString() === state.buffers[path]?.content) { cancel(); fn(); }
+    if (view && view.state.doc.toString() === editorText(state.buffers[path]?.content ?? "")) { cancel(); fn(); }
     else if (tries-- > 0) timer = setTimeout(check, 25);
     else cancel();
   };
@@ -190,7 +211,7 @@ const linkClick = EditorView.domEventHandlers({
     const off = pos - line.from;
     for (const m of line.text.matchAll(/\[\[([^\]]+)\]\]|\]\(([^)\s]+)[^)]*\)/g)) {
       if (off >= m.index! && off <= m.index! + m[0].length) {
-        if (openLinkTarget(m[1] ?? m[2])) {
+        if (openLinkTarget(m[1] ?? m[2], m[1] === undefined)) {
           e.preventDefault();
           return true;
         }
@@ -233,6 +254,8 @@ const scrolls = new Map<string, ReadingPosition>();
 app.events.on("vault:opened", () => { states.clear(); scrolls.clear(); });
 
 /** Patch disk changes without resetting the cursor, history or viewport anchor. */
+const editorText = (text: string) => text.replace(/\r\n?/g, "\n");
+
 function textChange(before: string, after: string) {
   let from = 0;
   while (from < before.length && from < after.length && before[from] === after[from]) from++;
@@ -281,7 +304,7 @@ export default function Editor() {
   const live = (path: string) => [
     prefs.editorMode === "live" && !path.endsWith(".typ") ? liveEmbeds : [],
     livePreview(prefs.editorMode === "live", path.endsWith(".typ"), {
-      openLink: (t) => void openLinkTarget(t),
+      openLink: (target, markdown) => void openLinkTarget(target, markdown),
       notePath: () => current,
       vaultRoot: () => root(),
       resolveAsset: (note, url) => ipc.resolveAsset(note, url),
@@ -292,7 +315,7 @@ export default function Editor() {
     EditorState.create({
       doc,
       // Start below the frontmatter so it shows as the Properties card.
-      selection: { anchor: Math.min(doc.length, /^---\r?\n[\s\S]*?\r?\n(---|\.\.\.)[ \t]*(\r?\n|$)/.exec(doc)?.[0].length ?? 0) },
+      selection: { anchor: path.toLowerCase().endsWith(".md") ? frontmatterRange(doc)?.bodyStart ?? 0 : 0 },
       extensions: [
         vimComp.of(vimExt && prefs.vimMode ? vimExt : []),
         prefsComp.of(editorPrefs()),
@@ -337,7 +360,11 @@ export default function Editor() {
         pluginComp.of(app.editorExtensions.items()),
         EditorView.updateListener.of((u) => {
           if (u.selectionSet || u.transactions.some((tr) => tr.scrollIntoView)) cancelRestore();
-          if (u.docChanged) updateContent(path, u.state.doc.toString());
+          if (u.docChanged && !u.transactions.some((tr) => tr.annotation(Transaction.userEvent) === "notez.reload")) {
+            const text = u.state.doc.toString();
+            const b = state.buffers[path];
+            updateContent(path, /\r\n/.test(b?.content ?? "") || /\r\n/.test(b?.saved ?? "") ? text.replace(/\n/g, "\r\n") : text);
+          }
           if (u.docChanged || u.selectionSet) {
             const sel = u.state.selection.main;
             const line = u.state.doc.lineAt(sel.head);
@@ -349,7 +376,7 @@ export default function Editor() {
 
   function show(path: string | null) {
     if (!view) return;
-    if (path && current === path && view.state.doc.toString() === state.buffers[path]?.content) return;
+    if (path && current === path && view.state.doc.toString() === editorText(state.buffers[path]?.content ?? "")) return;
     cancelAnimationFrame(focusFrame);
     if (current && current !== path) {
       states.set(current, view.state);
@@ -360,11 +387,11 @@ export default function Editor() {
     for (const p of [...states.keys()]) if (!state.tabs.includes(p)) { states.delete(p); scrolls.delete(p); }
     current = path;
     if (!path) return;
-    const buf = state.buffers[path];
+    const doc = editorText(state.buffers[path]?.content ?? "");
     let st = states.get(path);
-    if (!st) st = makeState(path, buf?.content ?? "");
-    else if (st.doc.toString() !== buf?.content) {
-      const tr = st.update({ changes: textChange(st.doc.toString(), buf?.content ?? ""), effects: refreshComments.of(), annotations: Transaction.addToHistory.of(false) });
+    if (!st) st = makeState(path, doc);
+    else if (st.doc.toString() !== doc) {
+      const tr = st.update({ changes: textChange(st.doc.toString(), doc), effects: refreshComments.of(), annotations: Transaction.addToHistory.of(false) });
       const reading = scrolls.get(path);
       if (reading) scrolls.set(path, { ...reading, pos: tr.changes.mapPos(reading.pos, 1) });
       st = tr.state;
@@ -408,8 +435,10 @@ export default function Editor() {
   onCleanup(app.events.on("note:reloaded", ({ path, content }) => {
     if (!view || path !== current) return;
     const old = view.state.doc.toString();
-    if (old === content) return;
-    const tr = view.state.update({ changes: textChange(old, content), effects: refreshComments.of(), annotations: Transaction.addToHistory.of(false) });
+    const doc = editorText(content);
+    if (old === doc) return;
+    const tr = view.state.update({ changes: textChange(old, doc), effects: refreshComments.of(),
+      annotations: [Transaction.addToHistory.of(false), Transaction.userEvent.of("notez.reload")] });
     const reading = readingPosition(view);
     view.dispatch(tr);
     restoreReadingPosition(view, { ...reading, pos: tr.changes.mapPos(reading.pos, 1) });

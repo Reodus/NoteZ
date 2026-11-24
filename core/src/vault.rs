@@ -292,25 +292,35 @@ pub fn all_files(root: &Path) -> Vec<String> {
 
 /// Every file under `dir` (hidden ones too), vault-relative, sorted.
 /// Symbolic links to folders are not followed.
-pub fn every_file(root: &Path, dir: &Path) -> Vec<String> {
-    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
-        let Ok(rd) = fs::read_dir(dir) else { return };
-        for item in rd.flatten() {
-            let Ok(ft) = item.file_type() else { continue };
+pub fn every_file(root: &Path, dir: &Path, skip: &impl Fn(&str) -> bool) -> std::io::Result<Vec<String>> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>, skip: &impl Fn(&str) -> bool) -> std::io::Result<()> {
+        for item in fs::read_dir(dir)? {
+            let item = item?;
             let p = item.path();
+            let rel = p.strip_prefix(root).expect("vault scan stays under its root").to_string_lossy().replace('\\', "/");
+            if skip(&rel) {
+                continue;
+            }
+            let ft = item.file_type()?;
             if ft.is_dir() {
-                walk(root, &p, out);
-            } else if ft.is_file() || (ft.is_symlink() && p.is_file()) {
-                if let Ok(rel) = p.strip_prefix(root) {
-                    out.push(rel.to_string_lossy().replace('\\', "/"));
+                walk(root, &p, out, skip)?;
+            } else if ft.is_file() {
+                out.push(rel);
+            } else if ft.is_symlink() {
+                match fs::metadata(&p) {
+                    Ok(m) if m.is_file() => out.push(rel),
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e),
                 }
             }
         }
+        Ok(())
     }
     let mut v = Vec::new();
-    walk(root, dir, &mut v);
+    walk(root, dir, &mut v, skip)?;
     v.sort();
-    v
+    Ok(v)
 }
 
 pub fn all_notes(root: &Path) -> Vec<String> {

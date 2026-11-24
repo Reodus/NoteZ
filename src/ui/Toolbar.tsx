@@ -3,10 +3,10 @@ import { openDialog as pickFile } from "../core/native";
 import {
   Bold, Italic, Underline, Strikethrough, Code, AlignLeft, AlignCenter, AlignRight, AlignJustify,
   List, ListOrdered, ListChecks, Link, Image, Table, Sigma, Shapes, ChevronDown, ChevronsRight, Highlighter,
-  Baseline, Palette, SeparatorHorizontal, Footprints, ListTree, PilcrowLeft, PilcrowRight, Type, MessageSquareQuote,
+  Baseline, Palette, SeparatorHorizontal, Footprints, ListTree, PilcrowLeft, PilcrowRight, Type, MessageSquareQuote, Braces, RotateCcw,
 } from "lucide-solid";
 import { app, notify } from "../core/app";
-import { editorView, cursor, activeTheme, setDialog, state, prefs } from "../core/store";
+import { editorView, cursor, activeTheme, setDialog, state, prefs, setPrefs } from "../core/store";
 import { attachmentDir } from "../editor/attachments";
 import { alignTableColumn, onTableCellFocus, tableCellAlign } from "../editor/tables";
 import { ipc, TextStyle } from "../core/ipc";
@@ -14,7 +14,7 @@ import { fontList, FONT_SIZES } from "../core/fonts";
 import {
   toggleInline, inlineActive, InlineKind, setBlockStyle, setTitle, blockStyleAt, BlockStyle, blockAttr, setBlockAttr, applySpan, toggleList,
   insertLink, insertImage, insertTable, insertMath, insertPageBreak, insertFootnote, insertToc, isTypst, insertCallout,
-  spanAttrsAt, listKindAt,
+  spanAttrsAt, listKindAt, blockFormattingAt, revealBlockFormatting,
 } from "../editor/format";
 import { editorLineDirection } from "../editor/bidi";
 import { platformKeys } from "../core/keys";
@@ -117,7 +117,7 @@ export default function Toolbar() {
   // The side a paragraph starts on (left for LTR text, right for RTL).
   const startSide = () => (ctx().rtl ? "right" : "left");
   const sideActive = (side: "left" | "right") => alignNow() === side || (!alignNow() && startSide() === side);
-  const alignSide = (side: "left" | "right") => () => align(side === startSide() || alignNow() === side ? null : side)();
+  const alignSide = (side: "left" | "right") => () => align(alignNow() === side || (!alignNow() && side === startSide()) ? null : side)();
 
   // Recompute on cursor moves / edits.
   const ctx = createMemo(() => {
@@ -130,6 +130,7 @@ export default function Toolbar() {
       return {
         style: "p" as BlockStyle, align: null as string | null, dir: null as string | null, rtl: false, marks: none,
         list: null as ReturnType<typeof listKindAt>, span: {} as ReturnType<typeof spanAttrsAt>,
+        formatting: null,
       };
     const pos = v.state.selection.main.head;
     const direction = editorLineDirection(v.state.doc, pos);
@@ -137,6 +138,7 @@ export default function Toolbar() {
     return {
       style: blockStyleAt(v.state, pos),
       align: blockAttr(v.state, pos, "align"),
+      formatting: isTypst() ? null : blockFormattingAt(v.state, pos, "align") ?? blockFormattingAt(v.state, pos),
       dir: blockAttr(v.state, pos, "dir"),
       // The paragraph's actual direction (set, or detected from its text).
       rtl: direction === "rtl" || (direction === "auto" && uiRtl && !/\p{L}/u.test(v.state.doc.lineAt(pos).text)),
@@ -314,7 +316,15 @@ export default function Toolbar() {
           <Btn title={t("Center")} active={alignNow() === "center"} onClick={align(alignNow() === "center" ? null : "center")}><AlignCenter size={16} /></Btn>
           <Btn title={t("Align right")} active={sideActive("right")} onClick={alignSide("right")}><AlignRight size={16} /></Btn>
           <Btn title={cellAlign() !== null ? t("Justify (not available in tables)") : t("Justify")} disabled={cellAlign() !== null} active={alignNow() === "justify"} onClick={align(alignNow() === "justify" ? null : "justify")}><AlignJustify size={16} /></Btn>
+          <Show when={alignNow() || ctx().align}>
+            <Btn title={t("Reset alignment")} onClick={align(null)}><RotateCcw size={15} /></Btn>
+          </Show>
           <Show when={!isTypst()}>
+            <Show when={ctx().formatting} keyed>
+              {(block) => <Btn
+                title={t("Show block markup (lines {from}–{to})", { from: block.open, to: block.close ?? view()?.state.doc.lines ?? block.open })}
+                onClick={run(revealBlockFormatting)}><Braces size={16} /></Btn>}
+            </Show>
             <Btn title={t("Right-to-left paragraph")} active={ctx().dir === "rtl"} onClick={run((v) => setBlockAttr(v, "dir", ctx().dir === "rtl" ? null : "rtl"))}><PilcrowLeft size={16} /></Btn>
             <Btn title={t("Left-to-right paragraph")} active={ctx().dir === "ltr"} onClick={run((v) => setBlockAttr(v, "dir", ctx().dir === "ltr" ? null : "ltr"))}><PilcrowRight size={16} /></Btn>
           </Show>
@@ -460,6 +470,14 @@ export default function Toolbar() {
             </div>
           )}
         </Popover>
+      </Show>
+      <Show when={!isTypst()}>
+        <Btn title={prefs.editorMode === "live" ? t("Show Markdown source") : t("Show live preview")}
+          active={prefs.editorMode === "source"}
+          onClick={() => {
+            setPrefs("editorMode", prefs.editorMode === "live" ? "source" : "live");
+            view()?.focus();
+          }}><Code size={16} /></Btn>
       </Show>
       <Show when={!prefs.showTabBar}>
         <NoteMenuButton class="tb-btn" />

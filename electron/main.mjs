@@ -248,21 +248,25 @@ ipcMain.handle("dialog-ask", wrap(async (message, o = {}) => {
 let watcher = null;
 let changed = new Set();
 let flushTimer = null;
+let watchGeneration = 0;
 
 /** Hidden paths are ignored, except NoteZ's own styles, plugins and comments. */
 const watched = (rel) => !rel.split("/").some((s) => s.startsWith(".")) || /^\.notez\/(styles|plugins|themes|snippets|comments)\//.test(rel);
 
 function watchVault(dir) {
+  const generation = ++watchGeneration;
   watcher?.close();
   watcher = null;
+  clearTimeout(flushTimer);
+  changed.clear();
   try {
     watcher = watch(dir, { recursive: true }, (_ev, name) => {
-      if (!name) return;
+      if (!name || generation !== watchGeneration) return;
       const rel = name.toString().split(path.sep).join("/");
       if (!watched(rel)) return;
       changed.add(rel);
       clearTimeout(flushTimer);
-      flushTimer = setTimeout(flushChanges, 150);
+      flushTimer = setTimeout(() => flushChanges(generation, dir), 150);
     });
     watcher.on("error", (e) => console.error("vault watcher:", e));
   } catch (e) {
@@ -270,11 +274,13 @@ function watchVault(dir) {
   }
 }
 
-async function flushChanges() {
+async function flushChanges(generation, vault) {
+  if (generation !== watchGeneration) return;
   const paths = [...changed];
   changed = new Set();
   const notes = paths.filter((p) => !p.startsWith("."));
-  if (notes.length) await call("index_update", { paths: notes }).catch(() => {});
+  if (notes.length) await call("index_update", { paths: notes, vault }).catch(() => {});
+  if (generation !== watchGeneration) return;
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send("vault-fs", paths);
 }
 

@@ -85,6 +85,8 @@ Everything is encrypted on your device before it is uploaded. The remote only ev
 - `head`: the encrypted list of files.
 - `objects/…`: one encrypted object per file version, named by a keyed hash that reveals nothing about the content or the name.
 
+Sync uses conditional writes to update the remote file list. WebDAV must provide a strong ETag for the list, and an S3-compatible service must support conditional PUT. Folder sync coordinates writes on a shared filesystem. If a third-party service mirrors separate local copies of that folder, let one device finish uploading before starting sync on another.
+
 The key is derived from your passphrase with Argon2id (64 MiB, 3 passes), and data is encrypted with XChaCha20-Poly1305. Nobody with access to the storage, including its provider, can read your notes or even their names. **If you forget the passphrase, the remote copy can't be decrypted.** Your local notes are not affected; set up a new remote folder with a new passphrase.
 
 The storage password and the passphrase (when *Remember the passphrase* is on) are kept in your system keychain: Keychain on macOS, Credential Manager (DPAPI) on Windows, and the Secret Service (GNOME Keyring or KWallet) on Linux. If no keychain is available, Settings says so. Then a remembered secret is stored unencrypted in the app's settings folder; turn *Remember* off to type the passphrase once per session instead.

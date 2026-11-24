@@ -6,7 +6,7 @@ import {
 } from "lucide-solid";
 import { dirname, ipc, SearchHit, stem, FileChanges } from "../core/ipc";
 import { notify } from "../core/app";
-import { prefs, openNote, sidebarTab, setSidebarTab, sidebarPaneRequest, saveAll, state, setDialog, reloadFromDisk } from "../core/store";
+import { prefs, openNote, sidebarTab, setSidebarTab, sidebarPaneRequest, saveAll, state, setDialog, reloadFromDisk, root, pauseNoteSaves, vaultChanging } from "../core/store";
 import { tagTree, TagNode } from "../core/meta";
 import {
   bookmarks, isBookmarked, Bookmark, bookmarkLabel, removeBookmark, addGroup, renameBookmark, moveBookmark, toggleBookmark,
@@ -196,41 +196,58 @@ function ReplacePanel() {
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   let timer: number | undefined;
+  let request = 0;
+  const [preview, setPreview] = createSignal<{ options: ReturnType<typeof opts>; vault: string | null; request: number }>();
 
   const opts = () => ({ find: find(), replace: repl(), regex: regex(), case: matchCase(), word: word(), scope: scope() });
 
   const refresh = () => {
     clearTimeout(timer);
+    const id = ++request;
+    const options = opts(), vault = root();
+    setPreview(undefined);
+    setError("");
+    setFiles([]);
+    if (!vault || !options.find) return;
     timer = window.setTimeout(async () => {
-      setError("");
-      if (!find()) return setFiles([]);
       try {
         // Unsaved edits first, so the preview matches what is replaced.
         await saveAll();
-        setFiles(await ipc.replacePreview(opts(), [...prefs.excludedFolders]));
+        if (id !== request || root() !== vault || vaultChanging()) return;
+        const result = await ipc.replacePreview(options, [...prefs.excludedFolders]);
+        if (id !== request || root() !== vault || vaultChanging()) return;
+        setFiles(result);
+        setPreview({ options, vault, request: id });
       } catch (e) {
+        if (id !== request || root() !== vault) return;
         setFiles([]);
         setError(String(e));
       }
     }, 200);
   };
-  createEffect(on([find, repl, scope, regex, matchCase, word], refresh));
+  createEffect(on([find, repl, scope, regex, matchCase, word, root, () => prefs.excludedFolders], refresh));
+  onCleanup(() => { request++; clearTimeout(timer); });
 
   const total = () => files().filter((f) => !skip().has(f.path)).reduce((n, f) => n + f.count, 0);
-  const chosen = () => files().filter((f) => !skip().has(f.path)).map((f) => f.path);
+  const chosen = () => files().filter((f) => !skip().has(f.path));
 
   const apply = async () => {
-    const paths = chosen();
-    if (!paths.length) return;
+    const shown = preview();
+    const selection = chosen();
+    const paths = selection.map((file) => file.path);
+    if (!shown || !paths.length || busy()) return;
+    const expected = Object.fromEntries(selection.map((file) => [file.path, file.hash]));
     const n = total();
-    const ok = await ask(t("Replace {matches} in {notes}?", { matches: tn(n, "{n} match", "{n} matches"), notes: tn(paths.length, "{n} note", "{n} notes") }), {
-      title: t("Replace in vault"), okLabel: t("Replace"), cancelLabel: t("Cancel"),
-    });
-    if (!ok) return;
     setBusy(true);
+    let resume: (() => void) | undefined;
     try {
-      await saveAll();
-      const done = await ipc.replaceApply(opts(), paths);
+      const ok = await ask(t("Replace {matches} in {notes}?", { matches: tn(n, "{n} match", "{n} matches"), notes: tn(paths.length, "{n} note", "{n} notes") }), {
+        title: t("Replace in vault"), okLabel: t("Replace"), cancelLabel: t("Cancel"),
+      });
+      if (!ok) return;
+      resume = await pauseNoteSaves();
+      if (shown.request !== request || root() !== shown.vault || vaultChanging()) return;
+      const done = await ipc.replaceApply(shown.options, paths, expected);
       // Open notes take the new text (the buffers were saved above).
       for (const p of done.filter((p) => state.buffers[p])) {
         await reloadFromDisk(p);
@@ -240,7 +257,9 @@ function ReplacePanel() {
       refresh();
     } catch (e) {
       notify(String(e), "error");
+      refresh();
     } finally {
+      resume?.();
       setBusy(false);
     }
   };

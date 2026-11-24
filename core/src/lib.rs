@@ -12,22 +12,23 @@ mod srs;
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Mutex, RwLock};
 use serde_json::{json, Value};
 
-use render::compile::{self, Diagnostic, SourceMap};
+use render::compile::{self, Diagnostic};
 use render::md::Rendered;
 use render::styles::{self, Theme};
 use render::world::NoteWorld;
 
 pub struct AppState {
+    vault_session: RwLock<()>,
     vault: Mutex<Option<PathBuf>>,
-    /// Text of every note (search, backlinks, graph); built when a vault opens.
-    index: Arc<Mutex<Option<vault::Index>>>,
+    /// Text of every note (search, backlinks, graph); built on first use.
+    index: Mutex<Option<vault::Index>>,
     /// Long-lived world for the open note: incremental compiles are fast.
-    world: Arc<Mutex<NoteWorld>>,
+    world: Mutex<NoteWorld>,
     /// Separate world for small snippets (inline diagram previews).
-    snippets: Arc<Mutex<NoteWorld>>,
+    snippets: Mutex<NoteWorld>,
     /// File history settings (from the UI's preferences).
     history: Mutex<history::Config>,
     /// Sync runs one at a time.
@@ -74,20 +75,7 @@ fn open_vault(state: &AppState, path: String) -> Res<Vec<vault::Entry>> {
     let root = PathBuf::from(path);
     let tree = vault::tree(&root)?;
     *state.vault.lock().unwrap() = Some(root.clone());
-    // Build the index in the background; queries before it is done wait for it.
-    {
-        let index = state.index.clone();
-        let mut guard = index.lock().unwrap();
-        *guard = None;
-        drop(guard);
-        let r = root.clone();
-        std::thread::spawn(move || {
-            let mut g = index.lock().unwrap();
-            if g.is_none() {
-                *g = Some(vault::Index::build(&r));
-            }
-        });
-    }
+    *state.index.lock().unwrap() = None;
     state.world.lock().unwrap().set_vault(Some(root.clone()));
     state.snippets.lock().unwrap().set_vault(Some(root));
     Ok(tree)
@@ -105,8 +93,11 @@ fn read_note(state: &AppState, path: String) -> Res<String> {
     vault::read(&state.root()?, &path)
 }
 
-fn write_note(state: &AppState, path: String, content: String) -> Res<()> {
+fn write_note(state: &AppState, path: String, content: String, vault: Option<String>) -> Res<()> {
     let root = state.root()?;
+    if vault.is_some_and(|path| Path::new(&path) != root) {
+        return Err("the vault changed before the write could be saved".into());
+    }
     if history::tracked(&path) {
         let old = vault::resolve(&root, &path).ok().and_then(|p| std::fs::read(p).ok());
         if let Err(e) = history::on_save(&root, &state.hist(), &path, old.as_deref(), content.as_bytes()) {
@@ -239,9 +230,21 @@ fn rename_tag(state: &AppState, from: String, to: String) -> Res<Vec<String>> {
 }
 
 /// Replace in `paths` and write them; returns the paths changed.
-fn replace_apply(state: &AppState, opts: query::ReplaceOpts, paths: Vec<String>) -> Res<Vec<String>> {
+fn replace_apply(state: &AppState, opts: query::ReplaceOpts, paths: Vec<String>, expected: Option<std::collections::BTreeMap<String, String>>) -> Res<Vec<String>> {
     let root = state.root()?;
-    let writes = state.with_index(|i, _| query::replace_apply(i, &opts, &paths))??;
+    let writes = state.with_index(|i, _| {
+        // Validate the full preview selection before changing any file.
+        if let Some(expected) = expected {
+            for path in &paths {
+                let text = vault::read(&root, path)?;
+                if expected.get(path) != Some(&history::hash(text.as_bytes())) {
+                    return Err(format!("{} changed since the replace preview", path));
+                }
+                i.put(path, &text);
+            }
+        }
+        query::replace_apply(i, &opts, &paths)
+    })??;
     let mut done = vec![];
     for (p, text) in writes {
         state.rewrite(&root, &p, &text, "before-replace")?;
@@ -444,14 +447,11 @@ fn data_blocks(state: &AppState, path: &str, text: &str, map: &mut Rendered) {
     });
 }
 
-fn prepare(state: &AppState, path: &str, text: &str, blocks: Vec<RenderedBlock>) -> Res<(Arc<Mutex<NoteWorld>>, SourceMap, Vec<String>)> {
+fn build_document(state: &AppState, path: &str, text: &str, blocks: Vec<RenderedBlock>) -> render::Built {
     let root = state.root_opt();
     let mut map = rendered_map(blocks);
     data_blocks(state, path, text, &mut map);
-    let built = render::build(root.as_deref(), path, text, &map);
-    let world = state.world.clone();
-    world.lock().unwrap().prepare(&built.main_path, built.source, vec![])?;
-    Ok((world, built.map, built.notes))
+    render::build(root.as_deref(), path, text, &map)
 }
 
 #[derive(Serialize)]
@@ -468,9 +468,10 @@ fn render_preview(
     blocks: Vec<RenderedBlock>,
     known: Vec<String>,
 ) -> Res<PreviewResult> {
-    let (world, map, notes) = prepare(state, &path, &text, blocks)?;
-    let w = world.lock().unwrap();
-    Ok(PreviewResult { preview: compile::preview_diff(&w, &map, &known), notes })
+    let built = build_document(state, &path, &text, blocks);
+    let mut world = state.world.lock().unwrap();
+    world.prepare(&built.main_path, built.source, vec![])?;
+    Ok(PreviewResult { preview: compile::preview_diff(&world, &built.map, &known), notes: built.notes })
 }
 
 fn export_pdf(
@@ -481,9 +482,12 @@ fn export_pdf(
     output: String,
 ) -> Result<(), Vec<Diagnostic>> {
     let err = |m: String| vec![Diagnostic { severity: "error", message: m, hints: vec![], line: None, column: None, file: None }];
-    let (world, map, _) = prepare(state, &path, &text, blocks).map_err(err)?;
-    let w = world.lock().unwrap();
-    let bytes = compile::pdf(&w, &map)?;
+    let built = build_document(state, &path, &text, blocks);
+    let bytes = {
+        let mut world = state.world.lock().unwrap();
+        world.prepare(&built.main_path, built.source, vec![]).map_err(err)?;
+        compile::pdf(&world, &built.map)?
+    };
     std::fs::write(&output, bytes).map_err(|e| err(e.to_string()))
 }
 
@@ -741,10 +745,11 @@ impl AppState {
     pub fn new(packages: Option<PathBuf>) -> Self {
         let bundled = packages.filter(|d| d.is_dir()).unwrap_or_else(render::world::dev_packages_dir);
         AppState {
+            vault_session: RwLock::new(()),
             vault: Mutex::new(None),
-            index: Arc::new(Mutex::new(None)),
-            world: Arc::new(Mutex::new(NoteWorld::new(bundled.clone()))),
-            snippets: Arc::new(Mutex::new(NoteWorld::new(bundled))),
+            index: Mutex::new(None),
+            world: Mutex::new(NoteWorld::new(bundled.clone())),
+            snippets: Mutex::new(NoteWorld::new(bundled)),
             history: Mutex::new(history::Config::default()),
             sync_lock: Mutex::new(()),
         }
@@ -777,12 +782,16 @@ fn ok<T: Serialize>(v: T) -> Result<Value, Value> {
 
 /// Run one command from the UI.
 pub fn dispatch(state: &AppState, cmd: &str, a: &Value) -> Result<Value, Value> {
+    if cmd == "open_vault" {
+        let _session = state.vault_session.write().unwrap();
+        return out(open_vault(state, arg(a, "path")?));
+    }
+    let _session = state.vault_session.read().unwrap();
     match cmd {
-        "open_vault" => out(open_vault(state, arg(a, "path")?)),
         "list_tree" => out(list_tree(state)),
         "list_notes" => out(list_notes(state)),
         "read_note" => out(read_note(state, arg(a, "path")?)),
-        "write_note" => out(write_note(state, arg(a, "path")?, arg(a, "content")?)),
+        "write_note" => out(write_note(state, arg(a, "path")?, arg(a, "content")?, opt(a, "vault"))),
         "create_note" => out(create_note(state, arg(a, "path")?)),
         "create_folder" => out(create_folder(state, arg(a, "path")?)),
         "rename_entry" => out(rename_entry(state, arg(a, "from")?, arg(a, "to")?, opt(a, "update_links"))),
@@ -792,7 +801,7 @@ pub fn dispatch(state: &AppState, cmd: &str, a: &Value) -> Result<Value, Value> 
         "duplicate_entry" => out(duplicate_entry(state, arg(a, "path")?)),
         "search" => out(search(state, arg(a, "query")?, opt(a, "exclude"))),
         "replace_preview" => out(replace_preview(state, arg(a, "opts")?, opt(a, "exclude"))),
-        "replace_apply" => out(replace_apply(state, arg(a, "opts")?, arg(a, "paths")?)),
+        "replace_apply" => out(replace_apply(state, arg(a, "opts")?, arg(a, "paths")?, opt(a, "expected"))),
         "rename_tag" => out(rename_tag(state, arg(a, "from")?, arg(a, "to")?)),
         "list_tags" => out(state.with_index(|i, _| query::list_tags(i, &opt::<Vec<String>>(a, "exclude")))),
         "note_meta" => out(state.with_index(|i, _| query::note_meta(i))),
@@ -823,7 +832,14 @@ pub fn dispatch(state: &AppState, cmd: &str, a: &Value) -> Result<Value, Value> 
         "property_names" => out(state.with_index(|i, _| bases::property_names(i, &opt::<Vec<String>>(a, "exclude")))),
         "property_values" => out(state.with_index(|i, _| bases::property_values(i, &opt::<String>(a, "name"), &opt::<Vec<String>>(a, "exclude")))),
         "graph_links" => out(state.with_index(|i, r| links::graph(i, r, &opt::<Vec<String>>(a, "exclude")))),
-        "index_update" => out(index_update(state, arg(a, "paths")?)),
+        "index_update" => {
+            if let Some(vault) = opt::<Option<String>>(a, "vault") {
+                if state.root_opt().as_deref() != Some(Path::new(&vault)) {
+                    return ok(());
+                }
+            }
+            out(index_update(state, arg(a, "paths")?))
+        },
         "history_config" => {
             *state.history.lock().unwrap() = arg(a, "config")?;
             ok(true)

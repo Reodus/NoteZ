@@ -3,7 +3,8 @@
 // run by `cargo test table_direction`), so a table's columns are in the same
 // order in the editor and in the PDF. Run: npm run test:dir
 import { readFileSync } from "node:fs";
-import { explicitDirAt, tableDir } from "../src/editor/dirrules.ts";
+import assert from "node:assert/strict";
+import { explicitDirAt, markdownDivs, tableDir } from "../src/editor/dirrules.ts";
 
 const cases: [string, "rtl" | "ltr"][] = JSON.parse(
   readFileSync(new URL("../core/src/render/dir_cases.json", import.meta.url), "utf8"),
@@ -23,4 +24,13 @@ for (const [md, want] of cases) {
   }
 }
 console.log(failed ? `${failed} of ${cases.length} failed` : `table direction: ${cases.length} cases ok`);
+const nested = [
+  "::: {align=center dir=rtl}", "~~~", ":::", "~~~", "::: {font=Inter}", "text", ":::", "more", ":::", "::: {align=right}", "end",
+];
+const parsed = markdownDivs({ lines: nested.length, line: (n) => ({ text: nested[n - 1] }) });
+assert.equal(parsed.markers.has(3), false);
+assert.equal(parsed.markers.get(1)?.close, 9);
+assert.equal(parsed.markers.get(5)?.close, 7);
+assert.deepEqual(parsed.at[6]?.effective, { align: "center", dir: "rtl", font: "Inter" });
+assert.equal(parsed.at[11]?.close, null);
 process.exit(failed ? 1 : 0);

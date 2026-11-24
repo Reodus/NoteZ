@@ -12,7 +12,7 @@
 //! versions are dropped after `keep_days` (the newest one of each note stays)
 //! or beyond `max_versions`.
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -60,9 +60,24 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     }
     tmp.write_all(bytes).map_err(|e| e.to_string())?;
     tmp.as_file().sync_all().map_err(|e| e.to_string())?;
-    // NamedTempFile::persist replaces existing files on Unix and Windows.
-    tmp.persist(path).map_err(|e| e.error.to_string())?;
-    Ok(())
+    // Windows can briefly deny replacement while another writer or scanner
+    // has the destination open. Retry with the same complete temporary file.
+    let mut delays = [2, 5, 10, 20, 40].into_iter();
+    loop {
+        match tmp.persist(path) {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                if cfg!(windows) && matches!(error.error.raw_os_error(), Some(5 | 32 | 33)) {
+                    if let Some(ms) = delays.next() {
+                        tmp = error.file;
+                        std::thread::sleep(std::time::Duration::from_millis(ms));
+                        continue;
+                    }
+                }
+                return Err(error.error.to_string());
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------ objects
@@ -207,7 +222,7 @@ pub fn on_save(root: &Path, cfg: &Config, rel: &str, old: Option<&[u8]>, new: &[
 pub fn keep(root: &Path, cfg: &Config, rel: &str, reason: &str) -> Result<(), String> {
     let path = crate::vault::resolve(root, rel)?;
     if path.is_dir() {
-        for f in crate::vault::every_file(root, &path) {
+        for f in crate::vault::every_file(root, &path, &|_| false).map_err(|e| e.to_string())? {
             if tracked(&f) {
                 if let Ok(b) = fs::read(root.join(&f)) {
                     record(root, cfg, &f, &b, reason)?;
@@ -401,18 +416,13 @@ fn read_snapshot(root: &Path, id: &str) -> Option<Snapshot> {
 
 /// Files that belong in a snapshot or a sync: everything but NoteZ's own
 /// history and sync state, version control and trash folders.
-pub fn vault_files(root: &Path) -> Vec<String> {
-    crate::vault::every_file(root, root)
-        .into_iter()
-        .filter(|p| {
-            !(p.starts_with(".notez/history/")
-                || p.starts_with(".notez/sync/")
-                || p.starts_with(".git/")
-                || p.starts_with(".trash/")
-                || p.ends_with(".DS_Store")
-                || p.contains(".tmp"))
-        })
-        .collect()
+fn vault_files(root: &Path) -> Result<Vec<String>, String> {
+    crate::vault::every_file(root, root, &|p| {
+        matches!(p, ".notez/history" | ".notez/sync" | ".git" | ".trash")
+            || p.ends_with(".DS_Store")
+            || p.contains(".tmp")
+            || p.rsplit('/').next().is_some_and(|name| name.starts_with(".notez-write-"))
+    }).map_err(|e| format!("cannot scan the vault: {e}"))
 }
 
 /// path → (mtime, size, hash) of files already hashed, so unchanged files
@@ -425,23 +435,29 @@ fn mtime(m: &fs::Metadata) -> u64 {
 
 /// The vault as path → hash (storing new contents as objects when `store`).
 pub fn manifest(root: &Path, store: bool) -> Result<BTreeMap<String, FileEntry>, String> {
+    manifest_and_large_files(root, store).map(|(files, _)| files)
+}
+
+pub fn manifest_and_large_files(root: &Path, store: bool) -> Result<(BTreeMap<String, FileEntry>, BTreeSet<String>), String> {
     let cache_path = dir(root).join("hashes.json");
     let mut cache: HashCache = fs::read(&cache_path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let mut out = BTreeMap::new();
+    let mut large = BTreeSet::new();
     let mut fresh = HashCache::new();
     let scan = now_ms();
-    for rel in vault_files(root) {
+    for rel in vault_files(root)? {
         let p = root.join(&rel);
-        let Ok(meta) = fs::metadata(&p) else { continue };
+        let meta = fs::metadata(&p).map_err(|e| format!("cannot inspect {rel}: {e}"))?;
         if meta.len() > 200 * 1024 * 1024 {
-            continue; // huge files are left out
+            large.insert(rel);
+            continue;
         }
         let (mt, size) = (mtime(&meta), meta.len());
         let cached = cache.remove(&rel).filter(|(m, s, h)| *m == mt && *s == size && (!store || has_object(root, h)));
         let h = match cached {
             Some((_, _, h)) => h,
             None => {
-                let Ok(bytes) = fs::read(&p) else { continue };
+                let bytes = fs::read(&p).map_err(|e| format!("cannot read {rel}: {e}"))?;
                 if store { put_object(root, &bytes)? } else { hash(&bytes) }
             }
         };
@@ -453,7 +469,7 @@ pub fn manifest(root: &Path, store: bool) -> Result<BTreeMap<String, FileEntry>,
         out.insert(rel, FileEntry { h, size });
     }
     let _ = write_atomic(&cache_path, &serde_json::to_vec(&fresh).unwrap_or_default());
-    Ok(out)
+    Ok((out, large))
 }
 
 pub fn list_snapshots(root: &Path) -> Vec<SnapshotInfo> {

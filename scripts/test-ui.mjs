@@ -16,6 +16,141 @@ import { checkDragMotion } from './drag-motion-cases.mjs';
 import { checkWorkspace } from './workspace-cases.mjs';
 const readingOnly=process.argv.includes('--reading');
 
+async function checkContentStability({evaluate, until, vault, scratch}) {
+ const ui = (code) => evaluate(`(async()=>{const {s,ipc}=window.test;${code}})()`);
+ const formattingPath = 'Formatting-CRLF.md';
+ const original = '---\r\ntitle: A\r\n---\r\n::: {align=center dir=rtl}\r\nText\r\n:::\r\n\r\n::: {align=right}\r\nEnd\r\n';
+ await ui(`await ipc.write(${JSON.stringify(formattingPath)}, ${JSON.stringify(original)});await s.openNote(${JSON.stringify(formattingPath)});`);
+ await until(()=>evaluate("!!document.querySelector('.div-warning')"), 'unclosed formatting block warning');
+ await ui(`
+   const v = s.editorView();
+   const { setBlockAttr } = await import('/src/editor/format.ts');
+   v.dispatch({selection:{anchor:v.state.doc.toString().indexOf('Text')+1}});
+   setBlockAttr(v,'align',null);
+   document.querySelector('.div-warning').click();
+   await s.saveAll();
+ `);
+ const formatted = readFileSync(path.join(vault,formattingPath),'utf8');
+ assert.equal(formatted, original.replace('align=center dir=rtl','dir=rtl')+':::\r\n');
+
+ await ui(`
+   const path = 'Save-race.md';
+   await ipc.write(path,'original');
+   await s.openNote(path);
+   const write = ipc.write;
+   let start, release;
+   const started = new Promise(resolve => start = resolve);
+   const held = new Promise(resolve => release = resolve);
+   ipc.write = async (...args) => {
+     if(args[0]===path && args[1]==='older autosave') { start(); await held; }
+     return write(...args);
+   };
+   try {
+     s.updateContent(path,'older autosave');
+     const pending = s.save(path);
+     await started;
+     s.updateContent(path,'original');
+     const closing = s.closeTab(path);
+     release();
+     await Promise.all([pending,closing]);
+   } finally { ipc.write = write; }
+ `);
+ assert.equal(readFileSync(path.join(vault,'Save-race.md'),'utf8'),'original');
+
+ const capture = await ui(`
+   const {captureText} = await import('/src/plugins/daily.tsx');
+   const path = 'Capture-race.md';
+   await ipc.write(path,'start\\n');
+   await s.refreshTree();
+   const {captureTarget,captureFormat} = s.prefs;
+   s.setPrefs('captureTarget',path);
+   s.setPrefs('captureFormat','{{text}}');
+   try {
+     await Promise.all([captureText('first'),captureText('second')]);
+     return await ipc.read(path);
+   } finally {
+     s.setPrefs('captureTarget',captureTarget);
+     s.setPrefs('captureFormat',captureFormat);
+   }
+ `);
+ assert.equal(capture,'start\nfirst\nsecond\n');
+
+ const afterReplace = await ui(`
+   const path = 'Replace-race.md';
+   const opts = {find:'before',replace:'after',scope:'path:Replace-race'};
+   await ipc.write(path,'before');
+   const preview = (await ipc.replacePreview(opts)).find(file=>file.path===path);
+   if(!preview?.hash) throw Error('Replace preview had no file revision');
+   await ipc.write(path,'edited before applying');
+   try { await ipc.replaceApply(opts,[path],{[path]:preview.hash}); }
+   catch { return await ipc.read(path); }
+   throw Error('A stale replace preview should have failed');
+ `);
+ assert.equal(afterReplace,'edited before applying');
+
+ const sync = await ui(`
+   const path = 'Sync-edit.md';
+   const {app,dismissToast} = await import('/src/core/app.ts');
+   await ipc.write(path,'base');
+   await s.openNote(path);
+   const resume = await s.pauseNoteSaves();
+   let result;
+   try {
+     s.updateContent(path,'local edit');
+     await ipc.write(path,'remote edit');
+     await s.reloadFromDisk(path);
+     result = [s.state.buffers[path].content,await ipc.read(path)];
+   } finally { resume(); }
+   const toast = app.toasts().findLast(item=>item.message.includes(path) && item.action);
+   toast.action.run();
+   dismissToast(toast.id);
+   s.dialog().items[0].run();
+   s.setDialog(null);
+   await s.closeTab(path);
+   return [...result,await ipc.read(path)];
+ `);
+ assert.deepEqual(sync,['local edit','remote edit','local edit']);
+
+ const nextVault = path.join(scratch,'vault-switch');
+ mkdirSync(nextVault);
+ writeFileSync(path.join(nextVault,'Same.md'),'second vault');
+ const switchResult = await ui(`
+   const previous = s.root();
+   const target = ${JSON.stringify(nextVault)};
+   const open = ipc.openVault;
+   let ready, release;
+   const started = new Promise(resolve=>ready=resolve);
+   const held = new Promise(resolve=>release=resolve);
+   ipc.openVault = async next => {
+     const tree = await open(next);
+     ready();
+     await held;
+     return tree;
+   };
+   const switching = s.openVault(target);
+   let rejected = false;
+   let inert;
+   try {
+     await started;
+     inert = document.querySelector('.shell').inert;
+     try { await window.notezNative.core('write_note',{path:'Same.md',content:'stale write',vault:previous}); }
+     catch { rejected = true; }
+   } finally {
+     release();
+     await switching;
+     ipc.openVault = open;
+   }
+   const result = {inert,rejected,contents:await ipc.read('Same.md')};
+   await s.openVault(previous);
+   return result;
+ `);
+ assert.deepEqual(switchResult,{inert:true,rejected:true,contents:'second vault'});
+ await ui(`
+   await s.openNote('Audit.md');
+ `);
+ console.log('Formatting, CRLF, save races, capture, stale replace, sync edits and vault switch passed');
+}
+
 async function checkMiddleClickTab({evaluate,rpc,until}) {
  const before=await evaluate(`(async()=>{
   const {s}=window.test;
@@ -86,9 +221,11 @@ try {
   },'application editor ready',60000);
  };
  await waitForEditor();
- if(process.env.NOTEZ_TEST_LANGUAGE==='fa'){
-  await evaluate(`(()=>{const p=JSON.parse(localStorage.getItem('notez.prefs.v1')||'{}');localStorage.setItem('notez.prefs.v1',JSON.stringify({...p,uiLanguage:'fa'}))})()`);await rpc('Page.reload');
-  await waitForEditor('fa');
+ const testLanguage = process.env.NOTEZ_TEST_LANGUAGE === 'fa' ? 'fa' : 'en';
+ if(await evaluate('document.documentElement.lang') !== testLanguage){
+  await evaluate(`(()=>{const p=JSON.parse(localStorage.getItem('notez.prefs.v1')||'{}');localStorage.setItem('notez.prefs.v1',JSON.stringify({...p,uiLanguage:${JSON.stringify(testLanguage)}}))})()`);
+  await rpc('Page.reload');
+  await waitForEditor(testLanguage);
  }
  const initializeTests = () => evaluate(`(async()=>{const s=await import('/src/core/store.ts'),c=await import('/src/core/comments.ts'),{ipc}=await import('/src/core/ipc.ts');window.test={s,c,ipc};window.testErrors=[];window.addEventListener('error',e=>window.testErrors.push(e.message));s.setPrefs('checkUpdates',false);s.setPrefs('snapshotDaily',false);s.setPrefs('updateLinks','always');s.setPrefs('confirmDelete',false);s.setPrefs('deleteToTrash',false);await c.loadComments(s.state.active)})()`);
  await initializeTests();
@@ -99,6 +236,7 @@ try {
  } else {
  await rpc('Emulation.setDeviceMetricsOverride',{width:1280,height:850,deviceScaleFactor:1,mobile:false});
  await until(()=>evaluate("innerWidth===1280&&!window.test.s.compactWorkspace()"),'desktop workspace width');
+ await checkContentStability({evaluate,until,vault,scratch});
  await checkWorkspace({evaluate,rpc,until,vault,scratch,reload:async()=>{
   await rpc('Page.reload');await waitForEditor();await initializeTests();
  }});

@@ -158,9 +158,15 @@ function build(view: EditorView): Decos {
   const last = ranges.length ? doc.lineAt(ranges[ranges.length - 1].to).number : 0;
   const dirs = ranges.length ? explicitDirs(doc, last) : [];
   const math = mathBlockLines(doc, last);
+  let lastLine = 0;
   for (const { from, to } of ranges) {
     for (let pos = from; pos <= to; ) {
       const line = doc.lineAt(pos);
+      pos = line.to + 1;
+      // CodeMirror can expose multiple visible ranges on one long line.
+      // Re-adding an earlier bidi run would make RangeSetBuilder throw.
+      if (line.number <= lastLine) continue;
+      lastLine = line.number;
       const forced = math.has(line.number) ? "ltr" : dirs[line.number];
       const dir = lineDirection(line.text, forced);
       const rtl = dir === "rtl";
@@ -170,7 +176,6 @@ function build(view: EditorView): Decos {
       // Outer ranges first when two start together.
       marks.sort((x, y) => x[0] - y[0] || y[1] - x[1]);
       for (const [a, b, d] of marks) if (b > a) runs.add(line.from + a, line.from + b, d);
-      pos = line.to + 1;
     }
   }
   return { lines: lines.finish(), runs: runs.finish() };

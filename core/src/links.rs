@@ -40,6 +40,31 @@ fn join(dir: &str, rel: &str) -> String {
     if dir.is_empty() { rel.to_string() } else { format!("{dir}/{rel}") }
 }
 
+fn normalize(path: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => { parts.pop()?; }
+            _ => parts.push(part),
+        }
+    }
+    Some(parts.join("/"))
+}
+
+fn explicit_relative(path: &str) -> bool {
+    path.starts_with("./") || path.starts_with("../")
+}
+
+fn relative_path(dir: &str, path: &str) -> String {
+    let from: Vec<_> = dir.split('/').filter(|p| !p.is_empty()).collect();
+    let to: Vec<_> = path.split('/').collect();
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let up = from.len() - shared;
+    let path = to[shared..].join("/");
+    if up == 0 { format!("./{path}") } else { format!("{}{path}", "../".repeat(up)) }
+}
+
 pub(crate) fn has_ext(t: &str) -> bool {
     t.ends_with(".md") || t.ends_with(".typ")
 }
@@ -78,20 +103,33 @@ impl<'a> Resolver<'a> {
 
     /// The vault path a link target (without #heading / |alias) points to.
     pub fn resolve(&self, from: &str, raw: &str) -> Option<(String, Kind)> {
-        let t = raw.trim().trim_start_matches('/').replace("%20", " ");
+        self.resolve_link(from, raw, false)
+    }
+
+    fn resolve_link(&self, from: &str, raw: &str, markdown: bool) -> Option<(String, Kind)> {
+        let t = crate::render::percent_decode(raw.trim());
         if t.is_empty() || t.contains("://") || t.starts_with("mailto:") {
             return None;
         }
         let dir = dir_of(from);
-        for (cand, kind) in [
-            (t.clone(), Kind::Root),
-            (format!("{t}.md"), Kind::Root),
-            (join(dir, &t), Kind::Dir),
-            (join(dir, &format!("{t}.md")), Kind::Dir),
-        ] {
-            if self.exists(&cand) {
-                return Some((cand, if dir.is_empty() { Kind::Root } else { kind }));
+        let absolute = (normalize(&t), Kind::Root);
+        let relative = (normalize(&join(dir, &t)), Kind::Dir);
+        let only = t.starts_with('/') || explicit_relative(&t);
+        let candidates = if t.starts_with('/') { [Some(absolute), None] }
+            else if only { [Some(relative), None] }
+            else if markdown { [Some(relative), Some(absolute)] }
+            else { [Some(absolute), Some(relative)] };
+        for (base, kind) in candidates.into_iter().flatten() {
+            if let Some(base) = base.filter(|p| !p.is_empty()) {
+                for cand in [base.clone(), format!("{base}.md"), format!("{base}.typ")] {
+                    if self.exists(&cand) {
+                        return Some((cand, if dir.is_empty() { Kind::Root } else { kind }));
+                    }
+                }
             }
+        }
+        if only {
+            return None;
         }
         let name = t.rsplit('/').next()?;
         let key = name.strip_suffix(".md").or_else(|| name.strip_suffix(".typ")).unwrap_or(name).to_lowercase();
@@ -213,11 +251,12 @@ pub fn plan_rename(idx: &Index, root: &Path, from: &str, to: &str) -> Vec<(Strin
         let mut edits: Vec<(usize, usize, String)> = Vec::new();
         for (s, e, wiki) in scan(text) {
             let raw = &text[s..e];
-            let Some((target, kind)) = r.resolve(note, raw) else { continue };
+            let Some((target, kind)) = r.resolve_link(note, raw, !wiki) else { continue };
             let Some(new_path) = moved(&target, from, to) else { continue };
             let keep_ext = has_ext(raw.trim()) || !r.is_note(&target);
             let as_path = |p: &str| if keep_ext { p.to_string() } else { p.trim_end_matches(".md").to_string() };
             let mut new = match kind {
+                _ if explicit_relative(raw.trim()) => as_path(&relative_path(&note_dir_after, &new_path)),
                 // `![[pic.png]]` stays a bare file name while it is unique.
                 _ if wiki && attachment && stem_unique && !raw.contains('/') => new_path.rsplit('/').next().unwrap_or(&new_path).to_string(),
                 Kind::Stem if folder => continue, // bare names still resolve
@@ -272,7 +311,7 @@ pub fn graph(idx: &Index, root: &Path, exclude: &[String]) -> Vec<(String, Strin
             if !wiki && !has_ext(raw.trim()) {
                 continue;
             }
-            if let Some((to, _)) = r.resolve(from, raw) {
+            if let Some((to, _)) = r.resolve_link(from, raw, !wiki) {
                 if to != *from && r.is_note(&to) && !vault::excluded(&to, exclude) {
                     out.push((from.clone(), to));
                 }
@@ -383,6 +422,21 @@ mod tests {
         let (dir, idx) = vault("dup", &[("a.md", "[[x]]"), ("p/x.md", ""), ("q/y.md", "")]);
         let plan = plan_rename(&idx, &dir, "p/x.md", "p/y.md");
         assert_eq!(plan, vec![("a.md".to_string(), "[[p/y]]".to_string())]);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn relative_markdown_links_prefer_the_linking_notes_directory() {
+        let (dir, idx) = vault("relative", &[
+            ("a.md", ""), ("sub/a.md", ""), ("other/a.md", ""),
+            ("sub/n.md", "[same](a.md) [other](../other/a.md) [root](/a.md)"),
+        ]);
+        let resolver = Resolver::new(&idx, &dir);
+        assert_eq!(resolver.resolve_link("sub/n.md", "a.md", true).unwrap().0, "sub/a.md");
+        assert_eq!(resolver.resolve("sub/n.md", "../other/a.md").unwrap().0, "other/a.md");
+        assert!(resolver.resolve("sub/n.md", "../../a.md").is_none());
+        let plan = plan_rename(&idx, &dir, "other/a.md", "sub/B.md");
+        assert_eq!(plan, vec![("sub/n.md".into(), "[same](a.md) [other](./B.md) [root](/a.md)".into())]);
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -417,7 +417,7 @@ export default function Sidebar() {
               <div class="menu-title">{t("Vaults")}</div>
               <For each={prefs.recentVaults.filter((v) => v !== root())}>
                 {(v) => (
-                  <button class="menu-item" onClick={() => (close(), import("../core/store").then((s) => s.openVault(v)))}>
+                  <button class="menu-item" onClick={() => (close(), void import("../core/store").then((s) => s.openVault(v)).catch(() => {}))}>
                     <span class="menu-icon"><ArrowLeftRight size={15} /></span>
                     <span class="menu-label" dir="auto">{v.split(/[\\/]/).filter(Boolean).pop()}</span>
                   </button>

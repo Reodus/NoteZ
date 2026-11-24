@@ -268,6 +268,7 @@ export const isDark = () => (prefs.themeMode === "system" ? systemDark() : prefs
 export const [root, setRoot] = createSignal<string | null>(null);
 export const [tree, setTree] = createSignal<Entry[]>([]);
 export const [notesList, setNotesList] = createSignal<string[]>([]);
+export const [vaultChanging, setVaultChanging] = createSignal(false);
 
 /** Every file in the vault tree (notes, PDFs, images…). */
 export function allFiles(): string[] {
@@ -325,6 +326,9 @@ export const isDirty = (path: string) => {
 };
 
 const saveTimers = new Map<string, number>();
+const noteSaves = new Map<string, Promise<void>>();
+const diskConflicts = new Map<string, () => void>();
+let noteSavesPaused: Promise<void> | null = null;
 
 export function rememberVault(path: string) {
   setPrefs("lastVault", path);
@@ -338,8 +342,11 @@ export function rememberVault(path: string) {
  * "vault:changed" still fires: plugins may care about content changes.
  */
 export async function refreshTree() {
+  const vault = root();
+  if (!vault || vaultChanging()) return;
   try {
     const [t, n] = await Promise.all([ipc.tree(), ipc.notes()]);
+    if (root() !== vault || vaultChanging()) return;
     const sameTree = JSON.stringify(t) === JSON.stringify(tree());
     const sameNotes = JSON.stringify(n) === JSON.stringify(notesList());
     if (!sameTree) setTree(t);
@@ -351,29 +358,57 @@ export async function refreshTree() {
 }
 
 export async function openVault(path: string) {
+  if (vaultChanging()) return;
+  setVaultChanging(true);
   noteOpenSeq++;
-  await saveAll();
   try {
-    setTree(await ipc.openVault(path));
-    setNotesList(await ipc.notes());
-  } catch (e) {
-    notify(t("Cannot open vault: {error}", { error: e }), "error");
-    setPrefs("recentVaults", (r) => r.filter((p) => p !== path));
-    if (prefs.lastVault === path) setPrefs("lastVault", null);
-    return;
+    await saveAll();
+    let entries: Entry[];
+    try {
+      entries = await ipc.openVault(path);
+    } catch (e) {
+      notify(t("Cannot open vault: {error}", { error: e }), "error");
+      setPrefs("recentVaults", (r) => r.filter((p) => p !== path));
+      if (prefs.lastVault === path) setPrefs("lastVault", null);
+      return;
+    }
+    const notes: string[] = [];
+    const visit = (children: Entry[]) => {
+      for (const entry of children) {
+        if (entry.is_dir) visit(entry.children);
+        else if (/\.(md|typ)$/.test(entry.path)) notes.push(entry.path);
+      }
+    };
+    visit(entries);
+    batch(() => {
+      setTree(entries);
+      setNotesList(notes.sort());
+      setState({ tabs: [], active: null, buffers: {} });
+      setRoot(path);
+      rememberVault(path);
+    });
+    diskConflicts.clear();
+  } finally {
+    setVaultChanging(false);
   }
-  setState({ tabs: [], active: null, buffers: {} });
-  setRoot(path);
-  rememberVault(path);
   app.events.emit("vault:opened", { root: path });
 }
 
 export async function closeVault() {
+  if (vaultChanging()) return;
+  setVaultChanging(true);
   noteOpenSeq++;
-  await saveAll();
-  setRoot(null);
-  setState({ tabs: [], active: null, buffers: {} });
-  setPrefs("lastVault", null);
+  try {
+    await saveAll();
+    batch(() => {
+      setRoot(null);
+      setState({ tabs: [], active: null, buffers: {} });
+      setPrefs("lastVault", null);
+    });
+    diskConflicts.clear();
+  } finally {
+    setVaultChanging(false);
+  }
 }
 
 /**
@@ -405,6 +440,7 @@ export function keepFocusOnOpen(path: string) {
 
 /** Open a vault file: notes in the editor, images and PDFs in a viewer tab, anything else in its default app. */
 export async function openNote(path: string, opts: { line?: number; keepFocus?: boolean } = {}) {
+  if (!root() || vaultChanging()) return;
   const request = ++noteOpenSeq, vault = root();
   const kind = fileKind(path);
   if (kind === "other") {
@@ -449,27 +485,72 @@ export function updateContent(path: string, content: string) {
   if (!state.buffers[path]) return;
   setState("buffers", path, "content", content);
   app.events.emit("note:changed", { path, content });
-  clearTimeout(saveTimers.get(path));
-  saveTimers.set(path, window.setTimeout(() => void save(path).catch(() => {}), prefs.autosaveMs));
+  scheduleSave(path);
 }
 
-export async function save(path: string) {
+function cancelSave(path: string) {
   clearTimeout(saveTimers.get(path));
-  const b = state.buffers[path];
-  if (!b || b.content === b.saved) return;
-  const content = b.content;
-  try {
-    await ipc.write(path, content);
-    if (state.buffers[path]) setState("buffers", path, "saved", content);
-    app.events.emit("note:saved", { path });
-  } catch (e) {
-    notify(t("Save failed: {error}", { error: e }), "error");
-    throw e;
+  saveTimers.delete(path);
+}
+
+function scheduleSave(path: string) {
+  cancelSave(path);
+  if (!noteSavesPaused && !diskConflicts.has(path)) {
+    saveTimers.set(path, window.setTimeout(() => void save(path).catch(() => {}), prefs.autosaveMs));
   }
 }
 
+/** Keep editing in memory while sync has exclusive access to the note files. */
+export async function pauseNoteSaves() {
+  do { await saveAll(); } while (noteSavesPaused);
+  let resume!: () => void;
+  noteSavesPaused = new Promise<void>(resolve => { resume = resolve; });
+  for (const path of saveTimers.keys()) cancelSave(path);
+  return () => {
+    noteSavesPaused = null;
+    resume();
+    for (const path of Object.keys(state.buffers).filter(isDirty)) scheduleSave(path);
+  };
+}
+
+export async function save(path: string, force = false) {
+  cancelSave(path);
+  const vault = root();
+  // Re-evaluate dirty state after earlier writes, including an undo back to
+  // the last saved text while an older edit is still being written.
+  while (noteSaves.has(path)) await noteSaves.get(path)!.catch(() => {});
+  if (!vault || root() !== vault || noteSavesPaused) return;
+  const b = state.buffers[path];
+  if (!b) return;
+  const resolve = diskConflicts.get(path);
+  if (resolve) {
+    resolve();
+    throw new Error(t('"{name}" changed on disk while you were editing.', { name: path }));
+  }
+  if (!force && b.content === b.saved) return;
+  const content = b.content;
+  const job = ipc.write(path, content, vault).then(() => {
+    if (root() === vault && state.buffers[path] === b) setState("buffers", path, "saved", content);
+    app.events.emit("note:saved", { path });
+  });
+  noteSaves.set(path, job);
+  try {
+    await job;
+  } catch (e) {
+    notify(t("Save failed: {error}", { error: e }), "error");
+    throw e;
+  } finally {
+    if (noteSaves.get(path) === job) noteSaves.delete(path);
+  }
+}
+
+export async function waitForNoteSaves() {
+  while (noteSavesPaused) await noteSavesPaused;
+}
+
 export async function saveAll() {
-  const results = await Promise.allSettled([flushSaveParticipants(), flushComments(), ...Object.keys(state.buffers).map(save)]);
+  await waitForNoteSaves();
+  const results = await Promise.allSettled([flushSaveParticipants(), flushComments(), ...Object.keys(state.buffers).map(path => save(path))]);
   const failure = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
   if (failure) throw failure.reason;
   await flushWrites();
@@ -477,9 +558,14 @@ export async function saveAll() {
 }
 
 export async function closeTab(path: string) {
+  await waitForNoteSaves();
   await flushSaveParticipants();
   await flushComments();
   do { await save(path); } while (isDirty(path));
+  removeTab(path);
+}
+
+function removeTab(path: string) {
   if (state.active === path) noteOpenSeq++;
   setState(
     produce((s) => {
@@ -493,7 +579,7 @@ export async function closeTab(path: string) {
 }
 
 const TEMPLATE_MD = (title: string, theme: string) =>
-  `---\ntitle: ${title}\ntheme: ${theme}\n${prefs.defaultLanguage ? `lang: ${prefs.defaultLanguage}\n` : ""}---\n\n`;
+  `---\ntitle: ${JSON.stringify(title)}\ntheme: ${JSON.stringify(theme)}\n${prefs.defaultLanguage ? `lang: ${JSON.stringify(prefs.defaultLanguage)}\n` : ""}---\n\n`;
 
 export async function createNote(dir = "", name?: string, ext: "md" | "typ" = "md", content?: (title: string) => string) {
   let base = name ?? "Untitled";
@@ -624,18 +710,83 @@ export async function deleteEntry(path: string) {
 
 /** Take an open note's text from disk (after the app rewrote it, e.g. replace). */
 export async function reloadFromDisk(path: string) {
-  if (!state.buffers[path]) return;
+  const vault = root();
+  const b = state.buffers[path];
+  if (!b) return;
   const content = await ipc.read(path);
-  clearTimeout(saveTimers.get(path));
-  setState("buffers", path, { content, saved: content });
-  app.events.emit("note:reloaded", { path, content });
+  if (root() !== vault || state.buffers[path] !== b) return;
+  acceptDiskText(path, content);
+}
+
+export function acceptDiskDeletion(path: string) {
+  acceptDiskText(path, null);
+}
+
+function acceptDiskText(path: string, disk: string | null) {
+  const b = state.buffers[path];
+  if (!b) return;
+  if (disk === b.saved || disk === b.content) {
+    const resolved = diskConflicts.delete(path);
+    if (disk !== b.saved) setState("buffers", path, "saved", disk);
+    if (resolved && isDirty(path)) scheduleSave(path);
+    return;
+  }
+  const vault = root();
+  const reload = (content: string | null) => {
+    cancelSave(path);
+    diskConflicts.delete(path);
+    if (content === null) removeTab(path);
+    else {
+      setState("buffers", path, { content, saved: content });
+      app.events.emit("note:reloaded", { path, content });
+    }
+  };
+  if (!isDirty(path)) {
+    reload(disk);
+    return;
+  }
+  cancelSave(path);
+  if (diskConflicts.has(path)) return;
+  const current = () => root() === vault && state.buffers[path] === b && diskConflicts.has(path);
+  const report = () => notify(t('"{name}" changed on disk while you were editing.', { name: path }), "error", {
+    label: t("Resolve conflict"),
+    run: () => {
+      if (!current()) return;
+      pick(t("Resolve conflict"), [
+        { label: t("Keep my edits"), run: () => {
+          if (!current()) return;
+          diskConflicts.delete(path);
+          void waitForNoteSaves().then(() => {
+            if (root() === vault && state.buffers[path] === b) return save(path, true);
+          }).catch(() => {});
+        } },
+        { label: t("Reload from disk"), run: () => {
+          if (!current()) return;
+          void ipc.read(path).then((latest) => {
+            if (current()) reload(latest);
+          }).catch(e => {
+            if (!current()) return;
+            if (missingNote(e)) reload(null);
+            else notify(String(e), "error");
+          });
+        } },
+      ]);
+    },
+  }, 0);
+  diskConflicts.set(path, report);
+  report();
+}
+
+function missingNote(error: unknown) {
+  return /not found|no such file|cannot find|os error [23]\b/i.test(String(error));
 }
 
 let fsTreeTimer: number | undefined;
 
 /** Files changed outside the app: refresh the tree and open notes. */
 async function vaultChanged(paths: string[]) {
-  if (!root()) return;
+  const vault = root();
+  if (!vault || vaultChanging()) return;
   if (paths.some((p) => !p.startsWith("."))) {
     clearTimeout(fsTreeTimer);
     fsTreeTimer = window.setTimeout(refreshTree, 100);
@@ -648,27 +799,12 @@ async function vaultChanged(paths: string[]) {
     let disk: string;
     try {
       disk = await ipc.read(tab);
-    } catch {
-      // Deleted (or moved) outside the app.
-      if (b.content === b.saved) await closeTab(tab);
-      else notify(t("\"{name}\" was deleted on disk. Save (Ctrl+S) to keep your version.", { name: tab }), "error", undefined, 15000);
-      if (b.content !== b.saved) setState("buffers", tab, "saved", "");
+    } catch (e) {
+      if (root() !== vault || state.buffers[tab] !== b || vaultChanging()) continue;
+      if (missingNote(e)) acceptDiskDeletion(tab);
       continue;
     }
-    if (disk === b.saved || disk === b.content) {
-      if (disk !== b.saved) setState("buffers", tab, "saved", disk);
-      continue; // our own save, or nothing new
-    }
-    const reload = () => {
-      clearTimeout(saveTimers.get(tab));
-      setState("buffers", tab, { content: disk, saved: disk });
-      app.events.emit("note:reloaded", { path: tab, content: disk });
-    };
-    if (b.content === b.saved) reload();
-    else {
-      clearTimeout(saveTimers.get(tab)); // don't overwrite the disk version silently
-      notify(t("\"{name}\" changed on disk while you were editing.", { name: tab }), "error", { label: t("Reload from disk"), run: reload }, 20000);
-    }
+    if (root() === vault && state.buffers[tab] === b && !vaultChanging() && !noteSaves.has(tab)) acceptDiskText(tab, disk);
   }
 }
 

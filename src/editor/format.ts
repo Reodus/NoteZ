@@ -16,7 +16,7 @@ export type { Attrs } from "./dirrules";
 import type { Attrs } from "./dirrules";
 
 export { parseAttrs } from "./dirrules";
-import { parseAttrs } from "./dirrules";
+import { markdownDivs, parseAttrs } from "./dirrules";
 
 import { t } from "../core/i18n";
 import { renumberChanges } from "./footnotes";
@@ -426,41 +426,19 @@ function wrapParagraph(view: EditorView, open: string, close: string) {
 
 // ----------------------------------------------- divs: align / direction
 
-interface Div {
-  open: Line;
-  close: Line | null;
-  attrs: Attrs;
+export function blockFormattingAt(state: EditorState, pos: number, key?: string) {
+  let div = markdownDivs(state.doc).at[state.doc.lineAt(pos).number];
+  while (key && div && !Object.hasOwn(div.attrs, key)) div = div.parent;
+  return div;
 }
 
-/** The innermost `::: {…}` block containing line `n`. */
-function divAt(state: EditorState, n: number): Div | null {
-  let depth = 0;
-  for (let i = n; i >= 1; i--) {
-    const t = state.doc.line(i).text.trim();
-    if (/^:::\s*$/.test(t) && i !== n) depth++;
-    else if (/^:::\s*\S/.test(t)) {
-      if (depth === 0) {
-        const open = state.doc.line(i);
-        let d = 0;
-        let close: Line | null = null;
-        for (let j = i + 1; j <= state.doc.lines; j++) {
-          const tj = state.doc.line(j).text.trim();
-          if (/^:::\s*\S/.test(tj)) d++;
-          else if (/^:::\s*$/.test(tj)) {
-            if (d === 0) {
-              close = state.doc.line(j);
-              break;
-            }
-            d--;
-          }
-        }
-        if (close && close.number < n) return null;
-        return { open, close, attrs: parseAttrs(t.replace(/^:::\s*/, "")) };
-      }
-      depth--;
-    }
-  }
-  return null;
+export function revealBlockFormatting(view: EditorView) {
+  const div = blockFormattingAt(view.state, view.state.selection.main.head, "align") ??
+    blockFormattingAt(view.state, view.state.selection.main.head);
+  if (!div) return;
+  const line = view.state.doc.line(div.open);
+  view.dispatch({ selection: { anchor: line.to }, scrollIntoView: true });
+  view.focus();
 }
 
 export function blockAttr(state: EditorState, pos: number, key: string): string | null {
@@ -474,7 +452,7 @@ export function blockAttr(state: EditorState, pos: number, key: string): string 
     }
     return null;
   }
-  return divAt(state, state.doc.lineAt(pos).number)?.attrs[key] ?? null;
+  return blockFormattingAt(state, pos, key)?.attrs[key] ?? null;
 }
 
 /** Set (or with null, remove) a block attribute for the paragraph(s) at the cursor. */
@@ -482,20 +460,23 @@ export function setBlockAttr(view: EditorView, key: string, value: string | null
   if (isTypst()) return setTypstAlign(view, key === "align" ? value : null);
   const s = view.state;
   const sel = s.selection.main;
-  const div = divAt(s, s.doc.lineAt(sel.from).number);
+  const div = blockFormattingAt(s, sel.from, value === null ? key : undefined);
   if (div) {
+    const open = s.doc.line(div.open);
+    const close = div.close === null ? null : s.doc.line(div.close);
     const attrs = { ...div.attrs };
     if (value === null) delete attrs[key];
     else attrs[key] = value;
-    if (Object.keys(attrs).length === 0 && div.close) {
+    if (Object.keys(attrs).length === 0) {
+      const changes = [{ from: open.from, to: Math.min(open.to + 1, s.doc.length) }];
+      if (close) changes.push({ from: Math.max(changes[0].to, close.from - 1), to: close.to });
       view.dispatch({
-        changes: [
-          { from: div.open.from, to: Math.min(div.open.to + 1, s.doc.length) },
-          { from: div.close.from - 1, to: div.close.to },
-        ],
+        changes,
+        annotations: isolateHistory.of("full"),
       });
     } else {
-      view.dispatch({ changes: { from: div.open.from, to: div.open.to, insert: `::: {${formatAttrs(attrs)}}` } });
+      view.dispatch({ changes: { from: open.from, to: open.to, insert: `::: {${formatAttrs(attrs)}}` },
+        annotations: isolateHistory.of("full") });
     }
   } else if (value !== null) {
     wrapParagraph(view, `::: {${key}=${value}}`, ":::");

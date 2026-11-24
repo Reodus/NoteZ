@@ -124,7 +124,7 @@ export async function checkTableColumns({ evaluate, rpc, until, sleep }) {
   const label = await evaluate(`(()=>{
     const grip=document.querySelector('.nz-column-grip');grip.focus();return grip.getAttribute('aria-label');
   })()`);
-  assert.equal(label, process.env.NOTEZ_TEST_LANGUAGE === 'fa' ? 'جابه‌جایی ستون ۱' : 'Move column 1');
+  assert.equal(label, await evaluate('document.documentElement.lang') === 'fa' ? 'جابه‌جایی ستون ۱' : 'Move column 1');
   await key('Enter', 'Enter');
   await until(() => evaluate(`document.activeElement?.matches('.context-menu')`), 'column grip keyboard menu');
   await key('ArrowDown', 'ArrowDown');
