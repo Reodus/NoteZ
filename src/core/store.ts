@@ -2,6 +2,7 @@
 import { batch, createSignal, createRoot, createEffect } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { EditorView } from "@codemirror/view";
+import { revealEditorPosition } from "../editor/navigation";
 import { ask, onVaultFs, openPath, trashPath } from "./native";
 import { flushSaveParticipants } from "./saveParticipants";
 import { flushComments, renameComments } from "./comments";
@@ -473,12 +474,11 @@ export async function openNote(path: string, opts: { line?: number; keepFocus?: 
   }, 30));
 }
 
-export function goToLine(line: number) {
+export function goToLine(line: number, column = 0) {
   const view = editorView();
   if (!view) return;
   const l = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines)));
-  view.dispatch({ selection: { anchor: l.from }, scrollIntoView: true });
-  view.focus();
+  revealEditorPosition(view, Math.max(l.from, Math.min(l.to, l.from + column)), "nearest");
 }
 
 export function updateContent(path: string, content: string) {

@@ -418,7 +418,11 @@ export default function Editor() {
     const line = view.state.doc.lineAt(sel.head);
     setCursor({ line: line.number, col: sel.head - line.from + 1, selected: 0 });
     if (!keepFocusOnOpen(path)) {
-      focusFrame = requestAnimationFrame(() => { if (current === path && state.active === path) view?.focus(); });
+      const focused = document.activeElement;
+      focusFrame = requestAnimationFrame(() => {
+        if (current === path && state.active === path &&
+            (document.activeElement === focused || document.activeElement === document.body)) view?.focus();
+      });
     }
   }
 
