@@ -78,7 +78,8 @@ impl<'a> Resolver<'a> {
 
     /// The vault path a link target (without #heading / |alias) points to.
     pub fn resolve(&self, from: &str, raw: &str) -> Option<(String, Kind)> {
-        let t = raw.trim().trim_start_matches('/').replace("%20", " ");
+        let t = raw.trim().trim_start_matches('/');
+        let t = super_decode(t);
         if t.is_empty() || t.contains("://") || t.starts_with("mailto:") {
             return None;
         }
@@ -127,22 +128,16 @@ pub(crate) struct Link {
 pub(crate) fn scan_full(text: &str) -> Vec<Link> {
     scan(text)
         .into_iter()
-        .map(|(s, e, wiki)| {
-            let embed = s >= if wiki { 3 } else { 2 } && {
-                if wiki {
-                    text[..s - 2].ends_with('!')
-                } else {
-                    // ![alt](target): find the `[` that opens this link.
-                    let head = &text[..s - 2];
-                    head.rfind('[').is_some_and(|i| head[..i].ends_with('!'))
-                }
-            };
+        .map(|link| {
+            let e = link.target.end;
             let rest = &text[e..];
             let sub = rest.strip_prefix('#').map(|r| {
-                let end = r.find(if wiki { &['|', ']', '\n'][..] } else { &[')', ' ', '\n'][..] }).unwrap_or(r.len());
-                super_decode(&r[..end])
+                let end = if link.wiki { r.find(['|', ']', '\n']) }
+                    else if link.angle { r.find(['>', '\n']) }
+                    else { r.find([')', ' ', '\n']) };
+                super_decode(&r[..end.unwrap_or(r.len())])
             });
-            Link { target: s..e, wiki, embed, sub: sub.filter(|x| !x.is_empty()) }
+            Link { target: link.target, wiki: link.wiki, embed: link.embed, sub: sub.filter(|x| !x.is_empty()) }
         })
         .collect()
 }
@@ -151,10 +146,15 @@ fn super_decode(s: &str) -> String {
     crate::render::percent_decode(s)
 }
 
-/// Every link in `text`: (byte range of the target, the target text, is_wikilink).
-fn scan(text: &str) -> Vec<(usize, usize, bool)> {
+struct ScannedLink {
+    target: std::ops::Range<usize>,
+    wiki: bool,
+    embed: bool,
+    angle: bool,
+}
+
+fn scan(text: &str) -> Vec<ScannedLink> {
     let mut out = Vec::new();
-    // [[target#heading|alias]] and ![[...]]
     let mut at = 0;
     while let Some(i) = text[at..].find("[[") {
         let s = at + i + 2;
@@ -162,14 +162,33 @@ fn scan(text: &str) -> Vec<(usize, usize, bool)> {
         let inner = &text[s..s + j];
         if !inner.contains('\n') {
             let end = inner.find(['#', '|', '^']).unwrap_or(inner.len());
-            out.push((s, s + end, true));
+            out.push(ScannedLink { target: s..s + end, wiki: true, embed: text[..s - 2].ends_with('!'), angle: false });
         }
         at = s + j + 2;
     }
-    // [text](target "title") and ![alt](target)
+    let images = crate::markdown_images::scan(text);
+    for image in &images {
+        let dest = &text[image.destination.clone()];
+        let end = dest.find('#').unwrap_or(dest.len());
+        if end > 0 {
+            let s = image.destination.start;
+            out.push(ScannedLink { target: s..s + end, wiki: false, embed: true, angle: image.angle });
+        }
+    }
+    // Keep the established scan for ordinary links and their optional title.
     let mut at = 0;
+    let mut image = 0;
     while let Some(i) = text[at..].find("](") {
-        let s = at + i + 2;
+        let marker = at + i;
+        while images.get(image).is_some_and(|img| img.source.end <= marker) { image += 1; }
+        if let Some(img) = images.get(image).filter(|img| img.source.contains(&marker)) {
+            at = img.source.end;
+            continue;
+        }
+        let s = marker + 2;
+        at = s;
+        let head = &text[..marker];
+        if head.rfind('[').is_some_and(|i| head[..i].ends_with('!')) { continue; }
         let Some(j) = text[s..].find(')') else { break };
         let inner = &text[s..s + j];
         if !inner.contains('\n') && !inner.starts_with('<') {
@@ -177,7 +196,7 @@ fn scan(text: &str) -> Vec<(usize, usize, bool)> {
             let t = t.split('#').next().unwrap_or("");
             let lead = inner.len() - inner.trim_start().len();
             if !t.is_empty() {
-                out.push((s + lead, s + lead + t.len(), false));
+                out.push(ScannedLink { target: s + lead..s + lead + t.len(), wiki: false, embed: false, angle: false });
             }
         }
         at = s + j;
@@ -208,19 +227,36 @@ pub fn plan_rename(idx: &Index, root: &Path, from: &str, to: &str) -> Vec<(Strin
     };
     let mut plan = Vec::new();
     for note in idx.paths() {
-        let Some(text) = idx.text(note) else { continue };
+        let Ok(text) = vault::read(root, note) else { continue };
         let note_dir_after = dir_of(&moved(note, from, to).unwrap_or_else(|| note.clone())).to_string();
         let mut edits: Vec<(usize, usize, String)> = Vec::new();
-        for (s, e, wiki) in scan(text) {
+        for ScannedLink { target: std::ops::Range { start: s, end: e }, wiki, angle, embed } in scan(&text) {
             let raw = &text[s..e];
-            let Some((target, kind)) = r.resolve(note, raw) else { continue };
+            let resolved = if embed && !wiki {
+                let dir = dir_of(note);
+                crate::render::resolve_image(Some(root), dir, raw).map(|path| {
+                    let path = path.trim_start_matches('/');
+                    let raw_path = super_decode(raw.trim().trim_start_matches('/'));
+                    let kind = if !dir.is_empty() && !raw.starts_with('/') && path == join(dir, &raw_path) {
+                        Kind::Dir
+                    } else if path == raw_path {
+                        Kind::Root
+                    } else {
+                        Kind::Stem
+                    };
+                    (path.to_string(), kind)
+                })
+            } else {
+                r.resolve(note, raw)
+            };
+            let Some((target, kind)) = resolved else { continue };
             let Some(new_path) = moved(&target, from, to) else { continue };
             let keep_ext = has_ext(raw.trim()) || !r.is_note(&target);
             let as_path = |p: &str| if keep_ext { p.to_string() } else { p.trim_end_matches(".md").to_string() };
             let mut new = match kind {
                 // `![[pic.png]]` stays a bare file name while it is unique.
                 _ if wiki && attachment && stem_unique && !raw.contains('/') => new_path.rsplit('/').next().unwrap_or(&new_path).to_string(),
-                Kind::Stem if folder => continue, // bare names still resolve
+                Kind::Stem if folder && !raw.contains('/') => continue, // bare names still resolve
                 Kind::Stem if wiki && stem_unique => {
                     let name = new_path.rsplit('/').next().unwrap_or(&new_path);
                     as_path(name)
@@ -231,7 +267,7 @@ pub fn plan_rename(idx: &Index, root: &Path, from: &str, to: &str) -> Vec<(Strin
                 },
                 _ => as_path(&new_path),
             };
-            if !wiki && (raw.contains("%20") || (!raw.contains(' ') && new.contains(' '))) {
+            if !wiki && (raw.contains("%20") || (!angle && !raw.contains(' ') && new.contains(' '))) {
                 new = new.replace(' ', "%20");
             }
             if raw.trim().starts_with('/') {
@@ -267,8 +303,8 @@ pub fn graph(idx: &Index, root: &Path, exclude: &[String]) -> Vec<(String, Strin
     let mut out = Vec::new();
     for from in idx.paths().filter(|p| !vault::excluded(p, exclude)) {
         let Some(text) = idx.text(from) else { continue };
-        for (s, e, wiki) in scan(text) {
-            let raw = &text[s..e];
+        for ScannedLink { target, wiki, .. } in scan(text) {
+            let raw = &text[target];
             if !wiki && !has_ext(raw.trim()) {
                 continue;
             }

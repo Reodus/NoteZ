@@ -548,6 +548,8 @@ const fa: Record<string, string> = {
   "Linked from": "پیوندخورده از",
   "Linked {mentions} in {notes}.": "{mentions} در {notes} پیوند داده شد.",
   "Links": "پیوندها",
+  "Read only": "فقط خواندنی",
+  "Properties": "ویژگی‌ها",
   "Live preview": "پیش‌نمایش زنده",
   "Live preview (Ctrl+Shift+M)": "پیش‌نمایش زنده (Ctrl+Shift+M)",
   "Live preview hides Markdown syntax except on the line you are editing (Ctrl+Shift+M).": "پیش‌نمایش زنده نحو Markdown را جز در سطری که ویرایش می‌کنید پنهان می‌کند (Ctrl+Shift+M).",

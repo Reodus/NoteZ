@@ -86,11 +86,11 @@ function inlineEditor(raw: string, placeholder: string, commit: (v: string) => v
 }
 
 export class PropertiesWidget extends WidgetType {
-  constructor(readonly src: string) {
+  constructor(readonly src: string, readonly read = false) {
     super();
   }
   eq(o: PropertiesWidget) {
-    return o.src === this.src;
+    return o.src === this.src && o.read === this.read;
   }
   ignoreEvent() {
     return true; // the card handles its own mouse/keyboard
@@ -109,6 +109,7 @@ export class PropertiesWidget extends WidgetType {
   }
 
   updateDOM(dom: HTMLElement, view: EditorView): boolean {
+    if (dom.classList.contains("nz-props-read") !== this.read) return false;
     if (dom.contains(document.activeElement)) (dom as any)._pending = this;
     else this.fill(dom, view);
     return true;
@@ -122,7 +123,21 @@ export class PropertiesWidget extends WidgetType {
       editFrontmatter(view, (d) => d.set(key, value === null ? null : d.createNode(value)));
     const del = (key: string) => editFrontmatter(view, (d) => void d.delete(key));
 
+    outer.classList.toggle("nz-props-read", this.read);
     const card = h("div", "cm-nz-lp-props");
+    if (this.read) {
+      const grid = h("div", "cm-nz-lp-props-grid");
+      for (const [key, value] of props) {
+        const label = h("div", "k", key);
+        const text = isScalar(value) ? show(value) : Array.isArray(value) && value.every(isScalar) ? value.map(show).join(", ") : JSON.stringify(value);
+        const field = h("div", "v", text);
+        field.dir = "auto";
+        grid.append(label, field);
+      }
+      card.append(h("div", "cm-nz-lp-props-title", t("Properties")), grid);
+      outer.append(card);
+      return;
+    }
     const head = h("div", "cm-nz-lp-props-title", "Properties");
     const raw = h("button", "nz-prop-btn nz-prop-raw", "</>");
     raw.title = t("Edit as YAML");

@@ -1,11 +1,13 @@
 import { onCleanup, onMount, createEffect, on } from "solid-js";
-import { Compartment, EditorState, Extension, Prec, Transaction } from "@codemirror/state";
+import { Annotation, Compartment, EditorState, Extension, Prec, Transaction } from "@codemirror/state";
 import {
   EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, dropCursor,
   highlightSpecialChars, rectangularSelection, crosshairCursor, placeholder,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { spacedImages } from "./imageSyntax";
+import { tableBoundaries } from "./tableSyntax";
 import { footnoteDefinitions } from "./footnotes";
 import { footnoteComposer } from "./footnoteComposer";
 import { languages } from "@codemirror/language-data";
@@ -22,7 +24,8 @@ import {
   editorView, allFiles, setPdfJump, keepFocusOnOpen,
 } from "../core/store";
 import { ipc, stem, LinkInfo } from "../core/ipc";
-import { preview, schedulePreview } from "../core/render";
+import { textChange } from "../core/textChange";
+import { preview } from "../core/render";
 import { bidi } from "./bidi";
 import { typst } from "./typst-lang";
 import { styling, themeCss } from "./styling";
@@ -49,7 +52,9 @@ import { toggleInline, setBlockStyle, setTitle, insertLink, BlockStyle } from ".
 const lineNumbersComp = new Compartment();
 const previewsComp = new Compartment();
 const pluginComp = new Compartment();
-const liveComp = new Compartment();
+const modeComp = new Compartment();
+const syncedContent = Annotation.define<boolean>();
+const markdownBlockTools = blockTools();
 const commentsComp = new Compartment();
 /** Settings → Editor: tab size, bracket pairing, spellcheck, Vim. */
 const prefsComp = new Compartment();
@@ -222,7 +227,7 @@ function formattingKeymap() {
 
 function languageFor(path: string): Extension {
   if (path.endsWith(".typ")) return typst;
-  return markdown({ base: markdownLanguage, codeLanguages: codeLanguage(languages), extensions: [footnoteDefinitions] });
+  return markdown({ base: markdownLanguage, codeLanguages: codeLanguage(languages), extensions: [footnoteDefinitions, spacedImages, tableBoundaries] });
 }
 
 /** Editor state per open tab (undo history, cursor), kept while the editor
@@ -231,15 +236,6 @@ const states = new Map<string, EditorState>();
 interface ReadingPosition { pos: number; offset: number; left: number }
 const scrolls = new Map<string, ReadingPosition>();
 app.events.on("vault:opened", () => { states.clear(); scrolls.clear(); });
-
-/** Patch disk changes without resetting the cursor, history or viewport anchor. */
-function textChange(before: string, after: string) {
-  let from = 0;
-  while (from < before.length && from < after.length && before[from] === after[from]) from++;
-  let suffix = 0;
-  while (suffix < before.length - from && suffix < after.length - from && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
-  return { from, to: before.length - suffix, insert: after.slice(from, after.length - suffix) };
-}
 
 export default function Editor() {
   let host!: HTMLDivElement;
@@ -278,15 +274,30 @@ export default function Editor() {
       });
     }) };
   }
-  const live = (path: string) => [
-    prefs.editorMode === "live" && !path.endsWith(".typ") ? liveEmbeds : [],
-    livePreview(prefs.editorMode === "live", path.endsWith(".typ"), {
-      openLink: (t) => void openLinkTarget(t),
-      notePath: () => current,
-      vaultRoot: () => root(),
-      resolveAsset: (note, url) => ipc.resolveAsset(note, url),
-    }),
-  ];
+  const editorMode = (path: string): Extension => {
+    const typst = path.endsWith(".typ");
+    const read = prefs.editorMode === "read";
+    return [
+      EditorState.readOnly.of(read),
+      EditorView.editable.of(!read),
+      EditorView.contentAttributes.of(read ? { tabindex: "0", "aria-readonly": "true" } : {}),
+      read ? EditorView.editorAttributes.of({ class: "cm-nz-read" }) : [
+        dropCursor(), highlightActiveLine(), highlightSelectionMatches(), rectangularSelection(), crosshairCursor(),
+        indentOnInput(), mathAutoPair, Prec.high(delimiterBackspace), footnoteComposer,
+        autocompletion({ override: [wikilinkCompletion, blockRefCompletion, slashCompletion, ...COMPLETION_SOURCES], icons: false, addToOptions: [slashIconRender], maxRenderedOptions: 80 }),
+        slashKeymap, slashGhost, Prec.high(formattingKeymap()), tableKeys, skipTableCaret,
+        pointerHold, attachmentDrop, richPaste, trailingLine(typst),
+        typst ? [] : markdownBlockTools,
+      ],
+      prefs.editorMode !== "source" && !typst ? liveEmbeds : [],
+      livePreview(prefs.editorMode !== "source", typst, {
+        openLink: (target) => void openLinkTarget(target),
+        notePath: () => current,
+        vaultRoot: () => root(),
+        resolveAsset: (note, url) => ipc.resolveAsset(note, url),
+      }),
+    ];
+  };
 
   const makeState = (path: string, doc: string) =>
     EditorState.create({
@@ -294,30 +305,17 @@ export default function Editor() {
       // Start below the frontmatter so it shows as the Properties card.
       selection: { anchor: Math.min(doc.length, /^---\r?\n[\s\S]*?\r?\n(---|\.\.\.)[ \t]*(\r?\n|$)/.exec(doc)?.[0].length ?? 0) },
       extensions: [
-        vimComp.of(vimExt && prefs.vimMode ? vimExt : []),
+        vimComp.of(vimExt && prefs.vimMode && prefs.editorMode !== "read" ? vimExt : []),
         prefsComp.of(editorPrefs()),
         lineNumbersComp.of(prefs.lineNumbers ? lineNumbers() : []),
         history(),
         drawSelection(),
-        dropCursor(),
         highlightSpecialChars(),
-        highlightActiveLine(),
-        highlightSelectionMatches(),
-        rectangularSelection(),
-        crosshairCursor(),
-        indentOnInput(),
         bracketMatching(),
-        mathAutoPair,
-        Prec.high(delimiterBackspace),
         EditorView.lineWrapping,
-        autocompletion({ override: [wikilinkCompletion, blockRefCompletion, slashCompletion, ...COMPLETION_SOURCES], icons: false, addToOptions: [slashIconRender], maxRenderedOptions: 80 }),
-        slashKeymap,
-        slashGhost,
         tagExtension((tag) => searchFor(`tag:${tag}`)),
-        path.endsWith(".typ") ? [] : [blockExtensions(), blockTools()],
-        footnoteComposer,
+        path.endsWith(".typ") ? [] : blockExtensions(),
         commentsComp.of(prefs.disabledBuiltins.includes("core.comments") ? [] : commentExtension(path)),
-        Prec.high(formattingKeymap()),
         keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
         languageFor(path),
         styling(path.endsWith(".typ")),
@@ -325,19 +323,14 @@ export default function Editor() {
         lintGutter(),
         linkClick,
         editorContextMenu(openLinkTarget),
-        tableKeys,
-        skipTableCaret,
-        pointerHold,
-        attachmentDrop,
-        richPaste,
-        trailingLine(path.endsWith(".typ")),
         placeholder(path.endsWith(".typ") ? "= Start writing Typst…" : "شروع به نوشتن کنید… / Start writing…"),
         previewsComp.of(blockPreviews(prefs.inlinePreviews, isDark())),
-        liveComp.of(live(path)),
+        modeComp.of(editorMode(path)),
+        EditorState.transactionFilter.of((tr) => tr.startState.readOnly && tr.docChanged && !tr.annotation(syncedContent) ? [] : tr),
         pluginComp.of(app.editorExtensions.items()),
         EditorView.updateListener.of((u) => {
           if (u.selectionSet || u.transactions.some((tr) => tr.scrollIntoView)) cancelRestore();
-          if (u.docChanged) updateContent(path, u.state.doc.toString());
+          if (u.docChanged && u.transactions.some((tr) => tr.docChanged && !tr.annotation(syncedContent))) updateContent(path, u.state.doc.toString());
           if (u.docChanged || u.selectionSet) {
             const sel = u.state.selection.main;
             const line = u.state.doc.lineAt(sel.head);
@@ -364,7 +357,7 @@ export default function Editor() {
     let st = states.get(path);
     if (!st) st = makeState(path, buf?.content ?? "");
     else if (st.doc.toString() !== buf?.content) {
-      const tr = st.update({ changes: textChange(st.doc.toString(), buf?.content ?? ""), effects: refreshComments.of(), annotations: Transaction.addToHistory.of(false) });
+      const tr = st.update({ changes: textChange(st.doc.toString(), buf?.content ?? ""), effects: refreshComments.of(), annotations: [Transaction.addToHistory.of(false), syncedContent.of(true)] });
       const reading = scrolls.get(path);
       if (reading) scrolls.set(path, { ...reading, pos: tr.changes.mapPos(reading.pos, 1) });
       st = tr.state;
@@ -379,10 +372,10 @@ export default function Editor() {
         commentsComp.reconfigure(prefs.disabledBuiltins.includes("core.comments") ? [] : commentExtension(path)),
         lineNumbersComp.reconfigure(prefs.lineNumbers ? lineNumbers() : []),
         previewsComp.reconfigure(blockPreviews(prefs.inlinePreviews, isDark())),
-        liveComp.reconfigure(live(path)),
+        modeComp.reconfigure(editorMode(path)),
         pluginComp.reconfigure(app.editorExtensions.items()),
         prefsComp.reconfigure(editorPrefs()),
-        vimComp.reconfigure(vimExt && prefs.vimMode ? vimExt : []),
+        vimComp.reconfigure(vimExt && prefs.vimMode && prefs.editorMode !== "read" ? vimExt : []),
       ],
     });
     const reading = scrolls.get(path);
@@ -409,7 +402,7 @@ export default function Editor() {
     if (!view || path !== current) return;
     const old = view.state.doc.toString();
     if (old === content) return;
-    const tr = view.state.update({ changes: textChange(old, content), effects: refreshComments.of(), annotations: Transaction.addToHistory.of(false) });
+    const tr = view.state.update({ changes: textChange(old, content), effects: refreshComments.of(), annotations: [Transaction.addToHistory.of(false), syncedContent.of(true)] });
     const reading = readingPosition(view);
     view.dispatch(tr);
     restoreReadingPosition(view, { ...reading, pos: tr.changes.mapPos(reading.pos, 1) });
@@ -432,7 +425,7 @@ export default function Editor() {
 
   createEffect(on(() => prefs.vimMode, async () => {
     const ext = await vimMode();
-    view?.dispatch({ effects: vimComp.reconfigure(ext) });
+    view?.dispatch({ effects: vimComp.reconfigure(prefs.editorMode === "read" || !prefs.vimMode ? [] : ext) });
   }));
 
   createEffect(on(() => prefs.disabledBuiltins.includes("core.comments"), disabled => {
@@ -440,7 +433,13 @@ export default function Editor() {
   }, { defer: true }));
 
   createEffect(on(() => prefs.editorMode, () => {
-    if (view && current) view.dispatch({ effects: liveComp.reconfigure(live(current)) });
+    if (!view || !current) return;
+    const reading = readingPosition(view);
+    view.dispatch({ effects: [
+      modeComp.reconfigure(editorMode(current)),
+      vimComp.reconfigure(prefs.editorMode === "read" || !prefs.vimMode ? [] : vimExt ?? []),
+    ] });
+    restoreReadingPosition(view, reading);
   }, { defer: true }));
 
   createEffect(on(app.editorExtensions.items, (exts) => {
@@ -471,9 +470,6 @@ export default function Editor() {
       });
     view.dispatch(setDiagnostics(view.state, diags));
   });
-
-  // Live preview follows typing.
-  createEffect(on(() => [state.active ? state.buffers[state.active]?.content : undefined, prefs.commentsInPdf], () => schedulePreview(), { defer: false }));
 
   onCleanup(() => {
     cancelAnimationFrame(focusFrame);

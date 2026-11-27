@@ -127,6 +127,7 @@ under an item to keep it part of the item.
 ![[diagram.png]]                   Obsidian-style embed (found anywhere in the vault)
 ![[diagram.png|300]]               300 px wide
 ![](images/diagram.png)            relative to this note
+![](images/team photo.png)         local paths can contain spaces
 ![A caption](images/diagram.png)   alt text becomes a figure caption in the PDF
 ![A caption|250](images/diagram.png)
 
@@ -154,8 +155,9 @@ under an item to keep it part of the item.
 
 - The colons in the second row set alignment: `:---` left, `:---:` center,
   `---:` right.
-- The pipes don't have to line up. In the editor the table is edited as a
-  grid, and you can use Tab to move between cells.
+- The pipes don't have to line up. Each body row needs an unescaped pipe.
+  Use `| cell |` for a one-column row. Prose can follow on the next line.
+  In the editor the table is edited as a grid, and you can use Tab to move between cells.
 - Cells can hold inline formatting, links, math and images, but not block
   elements. Use `<br>` for a line break inside a cell.
 - A right-to-left table puts its first column on the right. The direction

@@ -4,7 +4,7 @@ import { Copy, Minimize2 } from "lucide-solid";
 import { app, notify } from "./core/app";
 import {
   root, prefs, isDark, openVault, openNote, openOsPath, dialog, setDialog, sidebarOpen, saveAll, state,
-  focusMode, setFocusMode, viewLayout, activeThemeKey, refreshActiveTheme, compactWorkspace, compactPanel, setCompactPanel, rightPanelOpen,
+  focusMode, setFocusMode, viewLayout, activeThemeKey, refreshActiveTheme, compactWorkspace, compactPanel, setCompactPanel, rightPanelOpen, readingTypst, documentPreviewOpen,
 } from "./core/store";
 import { fileKind, ipc } from "./core/ipc";
 import { onSaveRequest, setZoom, setSpellcheck, takeOpenedFiles, onOpenPath, onVaultFs, onCapture, setCaptureShortcut } from "./core/native";
@@ -23,7 +23,9 @@ import "./core/safety";
 import Sidebar, { WorkspaceRail } from "./ui/Sidebar";
 import TabBar from "./ui/TabBar";
 import Toolbar from "./ui/Toolbar";
+import { schedulePreview } from "./core/render";
 import RightPanel from "./ui/RightPanel";
+import { PreviewPane } from "./ui/PreviewPane";
 import { cancelDragAnimations } from "./ui/dragMotion";
 import StatusBar from "./ui/StatusBar";
 import CommandPalette from "./ui/CommandPalette";
@@ -89,6 +91,13 @@ function EmptyState() {
 
 export default function App() {
   const fullPreview = () => viewLayout() === "preview" && isNotePath(state.active) && !graphOpen();
+  createEffect(on(
+    () => [root(), state.active, state.active && state.buffers[state.active]?.content, prefs.commentsInPdf, documentPreviewOpen()] as const,
+    ([, path, , , visible], previous) => {
+      if (!visible || !isNotePath(path)) return;
+      schedulePreview(!previous?.[4] || previous[0] !== root() || previous[1] !== path ? 0 : prefs.previewDelayMs);
+    },
+  ));
   const documentThemeKey = createMemo(activeThemeKey);
   createEffect(on(documentThemeKey, (key) => {
     if (!key) return;
@@ -191,14 +200,14 @@ export default function App() {
             <div class="work-area" classList={{ [`layout-${viewLayout()}`]: true, "full-preview-layout": fullPreview() }}>
               <div class="workspace-content">
                 <Show when={!focusMode()}><TabBar /></Show>
-                <Show when={isNotePath(state.active) && !graphOpen() && viewLayout() !== "preview" && !focusMode()}>
+                <Show when={isNotePath(state.active) && !graphOpen() && viewLayout() !== "preview" && prefs.editorMode !== "read" && !focusMode()}>
                   <Toolbar />
                 </Show>
                 <Show when={!fullPreview()}>
                   <Show when={!graphOpen() || focusMode()} fallback={<GraphView />}>
                     <Show when={state.active} fallback={<EmptyState />}>
                       <Show when={isNotePath(state.active)} fallback={fileKind(state.active!) === "base" ? <BaseFile path={state.active!} /> : <FileView path={state.active!} />}>
-                        <Editor />
+                        <Show when={!readingTypst()} fallback={<PreviewPane />}><Editor /></Show>
                       </Show>
                     </Show>
                   </Show>

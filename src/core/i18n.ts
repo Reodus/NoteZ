@@ -11,6 +11,7 @@
 // translate the values, and add it to LOCALES and UI_LANGUAGES below.
 import fa from "../locales/fa";
 import { platformKeys } from "./keys";
+import { persistPreferences, prefs, setPrefs } from "./preferences";
 
 export type UiLang = "en" | "fa";
 
@@ -24,15 +25,7 @@ export const UI_LANGUAGES: { value: string; label: string }[] = [
   { value: "fa", label: "فارسی (Persian)" },
 ];
 
-/** The saved choice ("auto", "en", "fa"…). Same key as src/core/store.ts. */
-function saved(): string {
-  try {
-    return JSON.parse(localStorage.getItem("notez.prefs.v1") ?? "{}").uiLanguage ?? "auto";
-  } catch {
-    return "auto";
-  }
-}
-
+/** Resolve "auto" against the system language, falling back to English. */
 function resolve(choice: string): UiLang {
   if (choice === "en" || choice in LOCALES) return choice as UiLang;
   for (const l of navigator.languages ?? [navigator.language]) {
@@ -43,7 +36,7 @@ function resolve(choice: string): UiLang {
 }
 
 /** The language the UI is shown in (fixed until the next reload). */
-export const uiLang: UiLang = resolve(saved());
+export const uiLang: UiLang = resolve(prefs.uiLanguage);
 export const uiRtl = RTL.includes(uiLang);
 const dict: Record<string, string> = uiLang === "en" ? {} : LOCALES[uiLang];
 
@@ -83,15 +76,11 @@ export function applyUiLanguage() {
  * it is there when the page comes back.
  */
 export async function setUiLanguage(choice: string) {
-  const { prefs, setPrefs, saveAll } = await import("./store");
   if (prefs.uiLanguage === choice) return;
   setPrefs("uiLanguage", choice);
-  try {
-    localStorage.setItem("notez.prefs.v1", JSON.stringify(prefs));
-  } catch {
-    /* the store's own effect saves it too */
-  }
+  persistPreferences();
   if (resolve(choice) === uiLang) return; // e.g. "auto" that resolves to what is shown already
+  const { saveAll } = await import("./noteBuffers");
   await saveAll();
   location.reload();
 }

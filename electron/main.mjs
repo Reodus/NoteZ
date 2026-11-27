@@ -2,11 +2,12 @@
 // (vault, Typst rendering, PDF export) as a helper process spoken to over
 // newline-delimited JSON (see core/src/main.rs).
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, net, protocol, safeStorage, screen, shell } from "electron";
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, watch, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as updates from "./updater.mjs";
+import { createCoreClient } from "./coreClient.mjs";
+import { watchVault } from "./vaultWatcher.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -30,63 +31,14 @@ const packagesDir = app.isPackaged ? path.join(process.resourcesPath, "typst-pac
 // Bundled Noto fonts (scripts/fonts.mjs): used by the PDF engine and the editor.
 const fontsDir = app.isPackaged ? path.join(process.resourcesPath, "fonts") : path.join(root, "core/fonts/noto");
 
-let core = null;
-let nextId = 1;
-const pending = new Map();
-let openVault = null; // replayed when the core restarts
-
-function startCore() {
-  // windowsHide: no console window on Windows. stderr is piped (a GUI-subsystem
-  // core has no console to inherit) and forwarded to the shell's own log.
-  const child = spawn(coreBin, [], {
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-    env: { ...process.env, NOTEZ_PACKAGES: packagesDir, NOTEZ_FONTS: fontsDir },
-  });
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk) => process.stderr.write(chunk));
-  let buf = "";
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    buf += chunk;
-    let nl;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      if (!line.trim()) continue;
-      let msg;
-      try {
-        msg = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      const p = pending.get(msg.id);
-      if (!p) continue;
-      pending.delete(msg.id);
-      "err" in msg ? p.reject(msg.err) : p.resolve(msg.ok);
-    }
-  });
-  child.on("exit", (code) => {
-    if (core !== child) return;
-    core = null;
-    for (const [id, p] of pending) if (p.child === child) (pending.delete(id), p.reject("NoteZ core stopped"));
-    if (!quitting) {
-      console.error(`notez-core exited (${code}), restarting`);
-      startCore();
-      if (openVault) call("open_vault", { path: openVault }).catch(() => {});
-    }
-  });
-  core = child;
-}
-
-function call(cmd, args) {
-  if (!core) startCore();
-  const id = nextId++;
-  return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject, child: core });
-    core.stdin.write(JSON.stringify({ id, cmd, args: args ?? {} }) + "\n");
-  });
-}
+let openVault = null;
+let quitting = false;
+const core = createCoreClient(coreBin, {
+  env: { ...process.env, NOTEZ_PACKAGES: packagesDir, NOTEZ_FONTS: fontsDir },
+  getVault: () => openVault,
+  isQuitting: () => quitting,
+});
+let stopWatchingVault;
 
 /** `notez [vault] [note]`: paths given on the command line. */
 function startupArgs() {
@@ -119,10 +71,16 @@ const wrap = (fn) => async (_e, ...a) => {
 };
 
 ipcMain.handle("core", wrap(async (cmd, args) => {
-  const r = await call(cmd, args);
+  const r = await core.call(cmd, args);
   if (cmd === "open_vault") {
     openVault = args.path;
-    watchVault(args.path);
+    stopWatchingVault?.();
+    stopWatchingVault = watchVault(args.path, async (paths, signal) => {
+      const notes = paths.filter((p) => !p.startsWith("."));
+      if (notes.length) await core.call("index_update", { paths: notes }).catch(() => {});
+      if (signal.aborted) return;
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send("vault-fs", paths);
+    });
   }
   return r;
 }));
@@ -240,47 +198,6 @@ ipcMain.handle("dialog-ask", wrap(async (message, o = {}) => {
   });
   return r.response === 0;
 }));
-
-// ------------------------------------------------------- vault watcher
-
-// Changes made outside the app (another editor, git, sync) are batched,
-// fed to the core's note index, then sent to the UI as "vault-fs".
-let watcher = null;
-let changed = new Set();
-let flushTimer = null;
-
-/** Hidden paths are ignored, except NoteZ's own styles, plugins and comments. */
-const watched = (rel) => !rel.split("/").some((s) => s.startsWith(".")) || /^\.notez\/(styles|plugins|themes|snippets|comments)\//.test(rel);
-
-function watchVault(dir) {
-  watcher?.close();
-  watcher = null;
-  try {
-    watcher = watch(dir, { recursive: true }, (_ev, name) => {
-      if (!name) return;
-      const rel = name.toString().split(path.sep).join("/");
-      if (!watched(rel)) return;
-      changed.add(rel);
-      clearTimeout(flushTimer);
-      flushTimer = setTimeout(flushChanges, 150);
-    });
-    watcher.on("error", (e) => console.error("vault watcher:", e));
-  } catch (e) {
-    console.error("cannot watch vault:", e);
-  }
-}
-
-async function flushChanges() {
-  const paths = [...changed];
-  changed = new Set();
-  const notes = paths.filter((p) => !p.startsWith("."));
-  if (notes.length) await call("index_update", { paths: notes }).catch(() => {});
-  for (const w of BrowserWindow.getAllWindows()) w.webContents.send("vault-fs", paths);
-}
-
-// ----------------------------------------------------------- window
-
-let quitting = false;
 
 // ------------------------------------------------------- quick capture
 
@@ -493,14 +410,19 @@ app.whenReady().then(() => {
     headers.set("Access-Control-Allow-Origin", "*");
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   });
-  startCore();
+  core.start();
   createWindow();
   watchConfigCss();
 });
 
 app.on("will-quit", () => globalShortcut.unregisterAll());
 app.on("before-quit", (event) => {
-  if (quitting || !mainWindow()) { quitting = true; core?.kill(); return; }
+  if (quitting || !mainWindow()) {
+    quitting = true;
+    stopWatchingVault?.();
+    core.stop();
+    return;
+  }
   event.preventDefault();
   if (quitPending) return;
   quitPending = true;

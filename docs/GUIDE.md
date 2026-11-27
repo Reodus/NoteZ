@@ -31,7 +31,7 @@ command palette, which lists every command with its shortcut.
 | Sidebar (left) | Files, search (**Ctrl+Shift+F**), tags, bookmarks and the graph. **Ctrl+\\** shows or hides it. |
 | Tabs | Open notes, images and PDFs. **Ctrl+Tab** / **Ctrl+Shift+Tab** switch. |
 | Toolbar | Paragraph style, font, size, bold/italic/…, colors, alignment, direction, lists, insert. |
-| Editor | *Live preview* (Markdown hides away from the cursor) or *Source* (**Ctrl+Shift+M**). |
+| Editor | **Source** shows Markdown, **Live preview** renders formatting as you edit, and **Read only** shows formatted notes for reading. **Ctrl+Shift+M** switches between Source and Live and exits Read only. Typst Read only shows rendered pages. |
 | Vertical navigation | Files, search, tags, bookmarks, graph, today's note and settings. |
 | Tools panel | PDF preview, styles, outline, links (backlinks) and the calendar. Pin and reorder tabs with **+**. |
 | Status bar | Save state, words, characters, cursor position, theme, preview status. |

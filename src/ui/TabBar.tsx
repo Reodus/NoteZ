@@ -1,6 +1,6 @@
 import { noteIcon } from "../core/meta";
 import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js";
-import { X, FileText, FileCode2, FileImage, FileType2, Columns2, PanelRight, Square, BookOpen, Code2, Maximize2, Table2 } from "lucide-solid";
+import { X, FileText, FileCode2, FileImage, FileType2, Columns2, PanelRight, Square, BookOpen, Code2, LockKeyhole, Maximize2, Table2 } from "lucide-solid";
 import { state, setState, openNote, isDirty, closeTab, prefs, setPrefs, setFocusMode, setWorkspaceLayout, compactWorkspace, compactPanel, setCompactPanel, showRightPanel, rightTab } from "../core/store";
 import { stem, basename, fileKind, isNotePath } from "../core/ipc";
 import { fileMenu, entryFor } from "./fileMenu";
@@ -159,13 +159,18 @@ export default function TabBar() {
           )}
         </For>
       </div>
-      <Show when={prefs.layout !== "preview" && isNotePath(state.active) && !state.active!.endsWith(".typ")}>
-        <div class="layout-switch mode-switch">
-          <button classList={{ active: prefs.editorMode === "live" }} aria-pressed={prefs.editorMode === "live"} title={t("Live preview (Ctrl+Shift+M)")} onClick={() => setPrefs("editorMode", "live")}>
-            <BookOpen size={15} />
-          </button>
-          <button classList={{ active: prefs.editorMode === "source" }} aria-pressed={prefs.editorMode === "source"} title={t("Source mode (Ctrl+Shift+M)")} onClick={() => setPrefs("editorMode", "source")}>
+      <Show when={prefs.layout !== "preview" && isNotePath(state.active)}>
+        <div class="layout-switch mode-switch" role="group" aria-label={t("Editing mode")}>
+          <Show when={!state.active?.endsWith(".typ")}>
+            <button classList={{ active: prefs.editorMode === "live" }} aria-pressed={prefs.editorMode === "live"} aria-label={t("Live preview")} title={t("Live preview (Ctrl+Shift+M)")} onClick={() => setPrefs("editorMode", "live")}>
+              <BookOpen size={15} />
+            </button>
+          </Show>
+          <button classList={{ active: prefs.editorMode === "source" || (!!state.active?.endsWith(".typ") && prefs.editorMode !== "read") }} aria-pressed={prefs.editorMode === "source" || (!!state.active?.endsWith(".typ") && prefs.editorMode !== "read")} aria-label={t("Source")} title={t("Source mode (Ctrl+Shift+M)")} onClick={() => setPrefs("editorMode", "source")}>
             <Code2 size={15} />
+          </button>
+          <button classList={{ active: prefs.editorMode === "read" }} aria-pressed={prefs.editorMode === "read"} aria-label={t("Read only")} title={t("Read only")} onClick={() => setPrefs("editorMode", "read")}>
+            <LockKeyhole size={15} />
           </button>
         </div>
       </Show>

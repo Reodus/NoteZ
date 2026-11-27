@@ -208,16 +208,25 @@ impl<'a> Out<'a> {
         }
         res.push_str(&s[last..]);
         s = res;
-        // ![alt|300](url)
-        let img = regex::Regex::new(r"!\[([^\]]*)\]\(([^)\s]+)\)").unwrap();
-        s = replace_all(&img, &s, |c| {
-            let (alt, w) = match c[1].rsplit_once('|') {
-                Some((a, w)) if w.trim().parse::<f64>().is_ok() => (a.trim().to_string(), w.trim().parse().ok()),
-                _ => (c[1].to_string(), None),
+        // Use the same image destination ranges as rendering and renaming.
+        for image in crate::markdown_images::scan(&s).into_iter().rev() {
+            let prefix = &s[image.source.start + 2..image.destination.start];
+            let Some((raw_alt, _)) = prefix.rsplit_once("](") else { continue };
+            let (alt, width) = match raw_alt.rsplit_once('|') {
+                Some((a, w)) if w.trim().parse::<f64>().is_ok() => (a.trim(), w.trim().parse().ok()),
+                _ => (raw_alt, None),
             };
-            let url = r::percent_decode(c[2].trim_start_matches('<').trim_end_matches('>'));
-            self.image(&url, &alt, w)
-        });
+            let url = &s[image.destination.clone()];
+            let mut rendered = self.image(url, alt, width);
+            if width.is_none() {
+                let title_start = image.destination.end + usize::from(image.angle);
+                let title = s[title_start..image.source.end - 1].trim();
+                if !title.is_empty() && rendered.ends_with(')') {
+                    rendered.insert_str(rendered.len() - 1, &format!(" {title}"));
+                }
+            }
+            s.replace_range(image.source, &rendered);
+        }
         let wl = regex::Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
         s = replace_all(&wl, &s, |c| self.wikilink(&c[1]));
         // ==mark==
@@ -479,6 +488,7 @@ pub fn write(
     }
     let mut md = lines.join("\n");
     md.push('\n');
+    crate::render::md::separate_table_prose(&mut md);
     std::fs::write(output, md).map_err(|e| e.to_string())?;
     o.warnings.dedup();
     Ok(o.warnings)

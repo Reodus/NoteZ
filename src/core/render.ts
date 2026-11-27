@@ -3,8 +3,8 @@
 import { createSignal } from "solid-js";
 import { saveDialog, openPath } from "./native";
 import { app, notify } from "./app";
-import { ipc, Diagnostic, RenderedBlock, stem, dirname } from "./ipc";
-import { root, state, rightPanelOpen, rightTab, prefs } from "./store";
+import { ipc, isNotePath, Diagnostic, RenderedBlock, stem, dirname } from "./ipc";
+import { root, state, prefs, documentPreviewOpen } from "./store";
 
 import { comments, loadComments } from "./comments";
 import { injectComments } from "./commentPdf";
@@ -84,6 +84,7 @@ export const [preview, setPreview] = createSignal<PreviewState>({
 });
 
 let seq = 0;
+let previewVault: string | null = null;
 let timer: number | undefined;
 
 export function schedulePreview(delay = prefs.previewDelayMs) {
@@ -109,10 +110,14 @@ async function withComments(path: string, text: string) {
 
 export async function runPreview() {
   const path = state.active;
-  if (!path || !rightPanelOpen() || rightTab() !== "preview") return;
+  if (!path || !isNotePath(path) || !documentPreviewOpen()) return;
   const vault = root();
   const text = state.buffers[path]?.content ?? "";
   const my = ++seq;
+  if (vault !== previewVault) {
+    previewVault = vault;
+    setPreview({ path: null, pages: [], hashes: [], diagnostics: [], notes: [], millis: 0, busy: false });
+  }
   const current = () => my === seq && root() === vault && state.active === path;
   setPreview((p) => ({ ...p, busy: true }));
   try {
@@ -142,7 +147,7 @@ export async function runPreview() {
     app.events.emit("preview:rendered", { path, pages: r.pages.length, millis: r.millis, errors });
   } catch (e) {
     if (!current()) return;
-    setPreview((p) => ({ ...p, busy: false, diagnostics: [{ severity: "error", message: String(e), hints: [], line: null, column: null, file: null }] }));
+    setPreview((p) => ({ ...p, path, pages: p.path === path ? p.pages : [], hashes: p.path === path ? p.hashes : [], notes: [], busy: false, diagnostics: [{ severity: "error", message: String(e), hints: [], line: null, column: null, file: null }] }));
   }
 }
 

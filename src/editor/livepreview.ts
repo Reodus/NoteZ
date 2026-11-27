@@ -16,6 +16,7 @@ import { PropertiesWidget } from "./properties";
 import { holdDecorations, released } from "./pointer";
 
 import { t } from "../core/i18n";
+import { imageCaption, markdownImages } from "./imageSyntax";
 import { footnoteNumbers } from "./footnotes";
 export interface LiveOptions {
   /** Open a link target (note name, path or URL). */
@@ -51,7 +52,7 @@ export function resolveImage(src: string): Promise<string | null> {
   let p = resolved.get(key);
   if (!p) {
     p = o
-      .resolveAsset(note, decodeURI(src.split(/[?#]/)[0]))
+      .resolveAsset(note, src.split(/[?#]/)[0])
       .then((abs) => (abs ? fileSrc(abs) : null))
       .catch(() => null)
       .then((u) => {
@@ -82,17 +83,21 @@ class BulletWidget extends WidgetType {
 }
 
 class CheckboxWidget extends WidgetType {
-  constructor(readonly checked: boolean) {
+  constructor(readonly checked: boolean, readonly read: boolean) {
     super();
   }
   eq(o: CheckboxWidget) {
-    return o.checked === this.checked;
+    return o.checked === this.checked && o.read === this.read;
   }
   toDOM(view: EditorView) {
     const box = document.createElement("input");
     box.type = "checkbox";
     box.className = "cm-nz-lp-check";
     box.checked = this.checked;
+    if (this.read) {
+      box.disabled = true;
+      return box;
+    }
     box.addEventListener("mousedown", (e) => e.preventDefault());
     box.addEventListener("click", (e) => {
       e.preventDefault();
@@ -142,7 +147,7 @@ const mathCache = new Map<string, string>();
 /** Clicking a rendered formula puts the cursor inside its source. */
 function editOnClick(el: HTMLElement, view: EditorView, offset: (from: number) => number) {
   el.addEventListener("mousedown", (e) => {
-    if (e.button !== 0) return;
+    if (view.state.readOnly || e.button !== 0) return;
     e.preventDefault();
     const from = view.posAtDOM(el);
     view.dispatch({ selection: { anchor: Math.min(view.state.doc.length, offset(from)) } });
@@ -229,14 +234,6 @@ export function imageAlt(alt: string, url: string): { caption: string; width: st
   return { caption: isFile ? "" : text, width };
 }
 
-const IMAGE_SRC = /^(?:!\[\[[^\]\n]+\]\]|!\[[^\]\n]*\]\([^)\n]*\))/;
-
-/** The source range of the image whose widget starts at `from`. */
-function imageRange(view: EditorView, from: number): { from: number; to: number } | null {
-  const m = IMAGE_SRC.exec(view.state.sliceDoc(from, Math.min(view.state.doc.length, from + 2000)));
-  return m ? { from, to: from + m[0].length } : null;
-}
-
 const ICONS: Record<string, string> = {
   zoom: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
   edit: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
@@ -296,12 +293,14 @@ class ImageWidget extends WidgetType {
     readonly src: string,
     readonly caption: string,
     readonly width: string | null,
-    readonly mode: "" | "selected" | "preview" = "",
+    readonly source: string,
+    readonly editOffset: number,
+    readonly mode: "" | "selected" | "preview" | "read" = "",
   ) {
     super();
   }
   eq(o: ImageWidget) {
-    return o.src === this.src && o.caption === this.caption && o.width === this.width && o.mode === this.mode;
+    return o.src === this.src && o.caption === this.caption && o.width === this.width && o.source === this.source && o.editOffset === this.editOffset && o.mode === this.mode;
   }
   toDOM(view: EditorView) {
     const outer = document.createElement("span");
@@ -330,8 +329,10 @@ class ImageWidget extends WidgetType {
     if (this.caption) wrap.append(Object.assign(document.createElement("span"), { className: "cm-nz-lp-caption", textContent: this.caption }));
 
     const range = () => {
+      if (!outer.isConnected) return null;
       const from = view.posAtDOM(outer);
-      return this.mode === "preview" ? null : imageRange(view, from);
+      const to = from + this.source.length;
+      return to <= view.state.doc.length && view.state.sliceDoc(from, to) === this.source ? { from, to } : null;
     };
     let url: string | null = null;
     let missingLabel: Text | null = null;
@@ -374,14 +375,14 @@ class ImageWidget extends WidgetType {
         iconButton("edit", t("Edit image"), () => {
           const r = range();
           if (!r) return;
-          view.dispatch({ selection: { anchor: r.to }, scrollIntoView: true });
+          view.dispatch({ selection: { anchor: r.from + this.editOffset }, scrollIntoView: true });
           view.focus();
         }),
         iconButton("left", t("Align left"), align("left")),
         iconButton("center", t("Center"), align("center")),
         iconButton("right", t("Align right"), align("right")),
       ];
-      bar.append(...buttons);
+      bar.append(...(this.mode === "read" ? buttons.slice(0, 1) : buttons));
       frame.append(bar);
       // Show which alignment is on.
       outer.addEventListener("mouseenter", () => {
@@ -550,11 +551,19 @@ export function inlineHtml(src: string): string {
 }
 
 function renderInline(src: string): string {
+  const images = markdownImages(src);
+  const html = images.map(({ alt, url }) => {
+    const { caption, width } = imageAlt(alt, url);
+    return `<img data-src="${escHtml(url)}" alt="${escHtml(caption)}"${width ? ` style="width:${width}px"` : ""}>`;
+  });
+  for (let i = images.length - 1; i >= 0; i--) {
+    const { from, to } = images[i];
+    src = src.slice(0, from) + `\u0002${i}\u0002` + src.slice(to);
+  }
   return escHtml(src)
     .replace(/!\[\[([^\]|]+?)(?:\|(\d+))?\]\]/g, (_, f, w) =>
       IMAGE_EXT.test(f) ? `<img data-src="${f}"${w ? ` style="width:${w}px"` : ""}>` : `<span class="cm-nz-lp-link internal" data-target="${f}">↪ ${f}</span>`,
     )
-    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, a, u) => `<img data-src="${u}" alt="${a.split("|")[0]}">`)
     .replace(/&lt;center&gt;/gi, '<span class="cm-nz-center">')
     .replace(/&lt;\/center&gt;/gi, "</span>")
     .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
@@ -565,7 +574,8 @@ function renderInline(src: string): string {
     .replace(/~~([^~]+)~~/g, "<s>$1</s>")
     .replace(/\[\[([^\]|]+)\|?([^\]]*)\]\]/g, (_, t, a) => `<span class="cm-nz-lp-link internal" data-target="${t}">${a || t}</span>`)
     .replace(/\[([^\]]+)\]\(([^)\s]+)[^)]*\)/g, '<span class="cm-nz-lp-link" data-target="$2">$1</span>')
-    .replace(/\[([^\]]*)\]\{[^}]*\}/g, "$1");
+    .replace(/\[([^\]]*)\]\{[^}]*\}/g, "$1")
+    .replace(/\u0002(\d+)\u0002/g, (token, i) => html[+i] ?? token);
 }
 
 class FenceWidget extends WidgetType {
@@ -592,7 +602,7 @@ function blockDecorations(state: EditorState): DecorationSet {
   const doc = state.doc;
   const decos: Range<Decoration>[] = [];
   const sel = state.selection.ranges;
-  const touched = (from: number, to: number) => sel.some((r) => r.to >= from && r.from <= to);
+  const touched = (from: number, to: number) => !state.readOnly && sel.some((r) => r.to >= from && r.from <= to);
 
   // Frontmatter → Properties card.
   if (doc.lines > 2 && doc.line(1).text === "---") {
@@ -600,7 +610,7 @@ function blockDecorations(state: EditorState): DecorationSet {
       const t = doc.line(i).text;
       if (t === "---" || t === "...") {
         const end = doc.line(i).to;
-        if (!touched(0, end)) decos.push(Decoration.replace({ widget: new PropertiesWidget(doc.sliceString(0, end)), block: true }).range(0, end));
+        if (!touched(0, end)) decos.push(Decoration.replace({ widget: new PropertiesWidget(doc.sliceString(0, end), state.readOnly), block: true }).range(0, end));
         break;
       }
     }
@@ -661,8 +671,8 @@ function blockDecorations(state: EditorState): DecorationSet {
         const to = doc.lineAt(node.to).to;
         // Tables stay tables while editing (cells are edited in place), unless
         // "Edit as Markdown" asked for the source.
-        if (state.field(rawTableField, false) !== from) {
-          decos.push(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to), explicitDirAt(doc, doc.lineAt(from).number)), block: true }).range(from, to));
+        if (state.readOnly || state.field(rawTableField, false) !== from) {
+          decos.push(Decoration.replace({ widget: new TableWidget(doc.sliceString(from, to), explicitDirAt(doc, doc.lineAt(from).number), state.readOnly), block: true }).range(from, to));
         }
         return false;
       }
@@ -726,7 +736,7 @@ function build(view: EditorView): DecorationSet {
   const free = (from: number, to: number) => !taken.some(([a, b]) => from < b && to > a);
   // Only the element the cursor (or selection) is in shows its source: the
   // rest of the line — other math, links, emphasis — stays rendered.
-  const ranges = state.selection.ranges;
+  const ranges = state.readOnly ? [] : state.selection.ranges;
   /** The selection touches [from, to] (the cursor right before or after counts). */
   const near = (from: number, to: number) => ranges.some((r) => r.to >= from && r.from <= to);
   /** The cursor is on a line marker itself ([from, to), not just after it). */
@@ -734,7 +744,7 @@ function build(view: EditorView): DecorationSet {
   /** The element being decorated: when it is revealed, nothing of it is hidden. */
   let reveal = false;
   const add = (from: number, to: number, deco: Decoration) => {
-    if (from > to || (from < to && !free(from, to))) return;
+    if (from > to || (from < to && (!free(from, to) || (deco.point && doc.lineAt(from).to < to)))) return;
     if (from < to) taken.push([from, to]);
     if (reveal) return;
     decos.push(deco.range(from, to));
@@ -742,17 +752,18 @@ function build(view: EditorView): DecorationSet {
   /** An image: rendered; selected as a whole (after an align button), it stays
    * rendered with a ring; with the cursor in its source, the source shows and
    * the image is previewed under it. */
-  const addImage = (from: number, to: number, src: string, caption: string, width: string | null) => {
+  const addImage = (from: number, to: number, src: string, caption: string, width: string | null, editOffset: number) => {
     if (!free(from, to)) return;
+    const source = doc.sliceString(from, to);
     const exact = ranges.some((r) => r.from === from && r.to === to);
     if (reveal && !exact) {
       taken.push([from, to]);
-      decos.push(Decoration.widget({ widget: new ImageWidget(src, caption, width, "preview"), side: 1 }).range(to));
+      decos.push(Decoration.widget({ widget: new ImageWidget(src, caption, width, source, editOffset, "preview"), side: 1 }).range(to));
       return;
     }
     const was = reveal;
     reveal = false;
-    add(from, to, Decoration.replace({ widget: new ImageWidget(src, caption, width, exact ? "selected" : "") }));
+    add(from, to, Decoration.replace({ widget: new ImageWidget(src, caption, width, source, editOffset, state.readOnly ? "read" : exact ? "selected" : "") }));
     reveal = was;
   };
   const headingLines = new Set<number>();
@@ -890,7 +901,7 @@ function build(view: EditorView): DecorationSet {
             const [file, frag = ""] = m[1].trim().split("#");
             if (IMAGE_EXT.test(m[1])) {
               const w = /^\d+$/.test(m[2] ?? "") ? m[2] : null;
-              addImage(s, e, m[1].trim(), "", w);
+              addImage(s, e, m[1].trim(), "", w, 3);
             } else if (/\.pdf$/i.test(file)) {
               const page = /page=(\d+)/.exec(frag)?.[1] ?? null;
               const w = /^\d+$/.test(m[2] ?? "") ? m[2] : null;
@@ -1029,7 +1040,7 @@ function build(view: EditorView): DecorationSet {
           }
           case "TaskMarker": {
             const checked = /x/i.test(doc.sliceString(node.from, node.to));
-            add(node.from, node.to, Decoration.replace({ widget: new CheckboxWidget(checked) }));
+            add(node.from, node.to, Decoration.replace({ widget: new CheckboxWidget(checked, state.readOnly) }));
             reveal = false;
             if (checked) {
               const line = doc.lineAt(node.from);
@@ -1037,16 +1048,18 @@ function build(view: EditorView): DecorationSet {
             }
             return;
           }
-          case "Image": {
+          case "Image":
+          case "SpacedImage": {
+            if (node.to > doc.lineAt(node.from).to) return false;
             const src = node.node.getChild("URL");
             if (!src) return false;
-            const raw = doc.sliceString(node.from, node.to);
-            const alt = /^!\[([^\]]*)\]/.exec(raw)?.[1] ?? "";
+            const prefix = doc.sliceString(node.from, src.from);
+            const alt = imageCaption(prefix);
             const url = doc.sliceString(src.from, src.to).replace(/^<|>$/g, "");
             const [file, frag = ""] = url.split("#");
             const { caption, width: w } = imageAlt(alt, url);
             if (/\.pdf$/i.test(file)) add(node.from, node.to, Decoration.replace({ widget: new PdfWidget(file, /page=(\d+)/.exec(frag)?.[1] ?? null, w, /height=(\d+)/.exec(frag)?.[1] ?? null) }));
-            else addImage(node.from, node.to, url, caption, w);
+            else addImage(node.from, node.to, url, caption, w, Math.max(2, prefix.lastIndexOf("](")));
             return false;
           }
           case "Link": {
@@ -1123,7 +1136,7 @@ export function livePreview(enabled: boolean, typstMode: boolean, opts: LiveOpti
         const rel = u.transactions.some(released);
         // Button held and only the selection moved: lines keep their look until release.
         if (!rel && !u.docChanged && !u.viewportChanged && u.transactions.length && u.transactions.every(holdDecorations)) return;
-        if (rel || u.docChanged || u.viewportChanged || u.selectionSet || u.focusChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) {
+        if (rel || u.docChanged || u.viewportChanged || u.selectionSet || u.focusChanged || u.startState.readOnly !== u.state.readOnly || syntaxTree(u.startState) !== syntaxTree(u.state)) {
           this.decorations = build(u.view);
         }
       }
@@ -1131,12 +1144,20 @@ export function livePreview(enabled: boolean, typstMode: boolean, opts: LiveOpti
     { decorations: (v) => v.decorations },
   );
   const clicks = EditorView.domEventHandlers({
-    mousedown(e) {
+    mousedown(e, view) {
+      if (view.state.readOnly) return false;
       const el = (e.target as HTMLElement).closest?.(".cm-nz-lp-link") as HTMLElement | null;
       if (!el || e.button !== 0 || e.shiftKey) return false;
       const target = el.dataset.target;
       if (!target) return false;
       e.preventDefault();
+      opts.openLink(target);
+      return true;
+    },
+    click(e, view) {
+      if (!view.state.readOnly || e.button !== 0 || e.shiftKey || !window.getSelection()?.isCollapsed) return false;
+      const target = (e.target as HTMLElement).closest?.<HTMLElement>(".cm-nz-lp-link")?.dataset.target;
+      if (!target) return false;
       opts.openLink(target);
       return true;
     },

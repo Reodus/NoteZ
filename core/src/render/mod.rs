@@ -255,6 +255,11 @@ pub fn resolve_image(vault: Option<&Path>, note_dir: &str, url: &str) -> Option<
     if vault.join(&rel).is_file() {
         return Some(format!("/{rel}"));
     }
+    if let Some(vault_relative) = normalize(&url) {
+        if vault_relative != rel && vault.join(&vault_relative).is_file() {
+            return Some(format!("/{vault_relative}"));
+        }
+    }
     // Obsidian-style: search the vault by file name.
     let name = url.rsplit('/').next()?;
     let found = find_by_name(vault, name, 0)?;

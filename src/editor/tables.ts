@@ -1,3 +1,4 @@
+import { markdownImages } from "./imageSyntax";
 // Table editing in live preview (like Obsidian's table editor + the Advanced
 // Tables plugin): a Markdown table always stays a rendered table; each cell
 // is edited in place and writes straight back to the Markdown source.
@@ -25,62 +26,11 @@ import { ltrRanges, RTL, rtlLine, tableDir } from "./bidi";
 import { movedRanges } from "./commentRanges";
 
 import { t } from "../core/i18n";
-type Align = "" | "left" | "center" | "right";
-
-interface Model {
-  header: string[];
-  aligns: Align[];
-  rows: string[][];
-}
-
-// ------------------------------------------------------------- parsing
-
-/** Cell content ranges (offsets in `text`) between unescaped pipes. */
-function segments(text: string): { from: number; to: number }[] {
-  const pipes: number[] = [];
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === "\\") i++;
-    else if (text[i] === "|") pipes.push(i);
-  }
-  const lead = text.trimStart().startsWith("|");
-  const trimmed = text.trimEnd();
-  const trail = pipes.length > (lead ? 1 : 0) && pipes[pipes.length - 1] === trimmed.length - 1;
-  const bounds = [lead ? pipes[0] : -1, ...pipes.slice(lead ? 1 : 0, trail ? -1 : undefined), trail ? pipes[pipes.length - 1] : text.length];
-  const out: { from: number; to: number }[] = [];
-  for (let i = 0; i + 1 < bounds.length; i++) out.push({ from: bounds[i] + 1, to: bounds[i + 1] });
-  return out;
-}
-
-const cellsOf = (line: string) => segments(line).map((s) => line.slice(s.from, s.to).trim());
-
-function parse(src: string): Model {
-  const lines = src.split("\n").filter((l) => l.trim());
-  const header = cellsOf(lines[0] ?? "");
-  const aligns = cellsOf(lines[1] ?? "").map((c): Align => (/^:-+:$/.test(c) ? "center" : /^-+:$/.test(c) ? "right" : /^:-+$/.test(c) ? "left" : ""));
-  const rows = lines.slice(2).map(cellsOf);
-  const n = Math.max(1, header.length, ...rows.map((r) => r.length));
-  const pad = (r: string[]) => [...r, ...Array(Math.max(0, n - r.length)).fill("")].slice(0, n);
-  return { header: pad(header), aligns: pad(aligns as string[]) as Align[], rows: rows.map(pad) };
-}
-
-/** Display width: combining marks and joiners take no space. */
-const width = (s: string) => [...s].filter((c) => !/[\p{M}‌‍‎‏]/u.test(c)).length;
-const padTo = (s: string, w: number) => s + " ".repeat(Math.max(0, w - width(s)));
-
-/** Advanced-Tables-style source: aligned pipes, `---` rows with colons. */
-function format(m: Model): string {
-  const n = m.header.length;
-  const w = Array.from({ length: n }, (_, c) => Math.max(3, width(m.header[c]), ...m.rows.map((r) => width(r[c] ?? ""))));
-  const line = (cells: string[]) => "| " + cells.map((c, i) => padTo(c ?? "", w[i])).join(" | ") + " |";
-  const delim = "| " + m.aligns.map((a, i) => {
-    const d = w[i];
-    return a === "center" ? ":" + "-".repeat(d - 2) + ":" : a === "right" ? "-".repeat(d - 1) + ":" : a === "left" ? ":" + "-".repeat(d - 1) : "-".repeat(d);
-  }).join(" | ") + " |";
-  return [line(m.header), delim, ...m.rows.map(line)].join("\n");
-}
-
-const unesc = (s: string) => s.replace(/\\\|/g, "|");
-const esc = (s: string) => s.replace(/(?<!\\)\|/g, "\\|");
+import {
+  type TableAlignment as Align, type TableModel as Model, cellSegments as segments,
+  columnRanges, escapeCell as esc, formatTable as format, parseTable as parse,
+  pastedRows, unescapeCell as unesc,
+} from "./tableModel";
 
 // ------------------------------------------------- "edit as Markdown"
 
@@ -121,11 +71,11 @@ const live = new WeakMap<HTMLElement, Live>();
 let writingCell: HTMLElement | null = null;
 
 export class TableWidget extends WidgetType {
-  constructor(readonly src: string, readonly dir: "rtl" | "ltr" | null = null) {
+  constructor(readonly src: string, readonly dir: "rtl" | "ltr" | null = null, readonly read = false) {
     super();
   }
   eq(o: TableWidget) {
-    return o.src === this.src && o.dir === this.dir;
+    return o.src === this.src && o.dir === this.dir && o.read === this.read;
   }
   get estimatedHeight() {
     return 34 + 38 * Math.max(1, this.src.split("\n").length - 1);
@@ -133,13 +83,13 @@ export class TableWidget extends WidgetType {
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
     live.set(wrap, { view, src: this.src, dir: this.dir });
-    wire(wrap);
-    render(wrap, parse(this.src));
+    if (!this.read) wire(wrap);
+    render(wrap, parse(this.src), this.read);
     return wrap;
   }
   updateDOM(dom: HTMLElement, view: EditorView) {
     const st = live.get(dom);
-    if (!st) return false;
+    if (!st || dom.classList.contains("nz-read-table") !== this.read) return false;
     if (st.view !== view || st.src !== this.src || st.dir !== this.dir) st.cancelColumnDrag?.();
     st.view = view;
     st.src = this.src;
@@ -153,7 +103,7 @@ export class TableWidget extends WidgetType {
       table && table.rows.length === m.rows.length + 1 && (table.rows[0]?.cells.length ?? -1) === m.header.length;
     if (!sameShape) {
       const focus = focusedCell(dom);
-      render(dom, m);
+      render(dom, m, this.read);
       if (focus) focusCell(dom, focus.r, focus.c);
       return true;
     }
@@ -178,8 +128,8 @@ export class TableWidget extends WidgetType {
     });
     return true;
   }
-  ignoreEvent() {
-    return true; // the widget handles its own mouse/keyboard
+  ignoreEvent(event: Event) {
+    return !this.read || event.type !== "click";
   }
   destroy(dom: HTMLElement) {
     const st = live.get(dom);
@@ -195,9 +145,10 @@ function paint(cell: HTMLElement) {
 }
 
 
-function render(wrap: HTMLElement, m: Model) {
+function render(wrap: HTMLElement, m: Model, read = false) {
   const st = live.get(wrap)!;
   wrap.className = /!\[/.test(st.src) ? "cm-nz-lp-table nz-edit-table figure" : "cm-nz-lp-table nz-edit-table";
+  wrap.classList.toggle("nz-read-table", read);
   st.stopGripMeasure?.();
   wrap.textContent = "";
   const dir = tableDir(st.src, st.dir);
@@ -214,7 +165,7 @@ function render(wrap: HTMLElement, m: Model) {
       const td = document.createElement(tag);
       if (m.aligns[c]) td.style.textAlign = m.aligns[c];
       const cell = el("div", "nz-cell");
-      cell.contentEditable = "plaintext-only";
+      if (!read) cell.contentEditable = "plaintext-only";
       cell.spellcheck = false;
       cell.dir = "auto";
       cell.dataset.r = String(r);
@@ -231,6 +182,12 @@ function render(wrap: HTMLElement, m: Model) {
   const tbody = document.createElement("tbody");
   m.rows.forEach((row, i) => tbody.append(mkRow(row, i + 1, "td")));
   table.append(thead, tbody);
+  if (read) {
+    scroll.append(table);
+    box.append(scroll);
+    wrap.append(box);
+    return;
+  }
   const track = el("div", "nz-table-track");
   const rail = el("div", "nz-column-rail");
   const headers = [...thead.rows[0].cells];
@@ -795,16 +752,6 @@ function selectedModel(m: Model, s: CellSel): Model {
 
 const htmlEsc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** Rows of a pasted block: tab-separated (spreadsheets) or a Markdown table. */
-function pastedRows(text: string): string[][] | null {
-  const lines = text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n");
-  if (lines.every((l) => l.trim().startsWith("|"))) {
-    return lines.filter((l) => !/^\s*\|?[\s:|-]+\|?\s*$/.test(l) || !l.includes("-")).map(cellsOf);
-  }
-  if (lines.length > 1 || text.includes("\t")) return lines.map((l) => l.split("\t").map((c) => esc(c.trim())));
-  return null;
-}
-
 function wireCellSelection(wrap: HTMLElement) {
   let drag: { r: number; c: number; moved: boolean } | null = null;
   const cellFrom = (e: MouseEvent) => {
@@ -1268,11 +1215,12 @@ function wire(wrap: HTMLElement) {
 
 // ------------------------------------------------------ images in cells
 
-const IMG_MD = /!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)\s]+\)/g;
-
 /** Image embeds in a cell's (escaped) source, in display order. */
 function imageSpans(raw: string): { from: number; to: number; text: string }[] {
-  return [...raw.matchAll(IMG_MD)].map((m) => ({ from: m.index!, to: m.index! + m[0].length, text: m[0] }));
+  const standard = markdownImages(raw).map(({ from, to }) => ({ from, to, text: raw.slice(from, to) }));
+  const wiki = [...raw.matchAll(/!\[\[[^\]]*\]\]/g)]
+    .map((m) => ({ from: m.index, to: m.index + m[0].length, text: m[0] }));
+  return [...wiki, ...standard].sort((a, b) => a.from - b.from);
 }
 
 let selImg: { wrap: HTMLElement; cell: HTMLElement; idx: number } | null = null;
@@ -1443,35 +1391,6 @@ function moveColumn(wrap: HTMLElement, from: number, to: number, focus = focused
     userEvent: "move.table.column",
   });
   if (focus) focusCell(findWrap(view, range.from) ?? wrap, focus.r, order.indexOf(focus.c));
-}
-
-/** Map cell content by its row and column, including identical text in different cells. */
-function columnRanges(before: string, after: string, start: number, order: number[]) {
-  const ranges: { from: number; to: number; dest: number }[] = [];
-  const lines = after.split("\n");
-  let oldStart = start, newStart = start, row = 0;
-  for (const line of before.split("\n")) {
-    if (line.trim()) {
-      const next = lines[row];
-      if (row !== 1) {
-        const oldCells = segments(line), newCells = segments(next);
-        order.forEach((oldColumn, newColumn) => {
-          const old = oldCells[oldColumn];
-          if (!old) return;
-          const raw = line.slice(old.from, old.to);
-          const content = raw.trim();
-          if (!content) return;
-          const from = oldStart + old.from + raw.length - raw.trimStart().length;
-          // The formatter always writes one space between a pipe and the content.
-          ranges.push({ from, to: from + content.length, dest: newStart + newCells[newColumn].from + 1 });
-        });
-      }
-      newStart += next.length + 1;
-      row++;
-    }
-    oldStart += line.length + 1;
-  }
-  return ranges;
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });

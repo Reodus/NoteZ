@@ -325,8 +325,8 @@ export default function Settings(props: { tab?: string; onClose: () => void }) {
 
           <Section id="editor">
             <Field label={t("Editing mode")} hint={t("Live preview hides Markdown syntax except on the line you are editing (Ctrl+Shift+M).")}>
-              <Segmented value={prefs.editorMode} onChange={(v) => setPrefs("editorMode", v as "live" | "source")}
-                options={[{ value: "live", label: t("Live preview") }, { value: "source", label: t("Source") }]} />
+              <Segmented value={prefs.editorMode} onChange={(v) => setPrefs("editorMode", v as typeof prefs.editorMode)}
+                options={[{ value: "live", label: t("Live preview") }, { value: "source", label: t("Source") }, { value: "read", label: t("Read only") }]} />
             </Field>
             <Field label={t("Editor font")} hint={t("Empty = Inter, with a bundled font for every other script. A note's theme can still set its own body font.")}>
               <div class="row gap">

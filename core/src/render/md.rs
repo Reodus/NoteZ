@@ -369,7 +369,7 @@ pub fn preprocess(src: &str) -> String {
         out.push_str(&body);
         out.push_str(nl);
     }
-    out
+    crate::markdown_images::normalize(out)
 }
 
 /// Extra empty lines become vertical space, as they look in the editor
@@ -1189,9 +1189,8 @@ pub fn no_notes(_: &str) -> Option<String> {
     None
 }
 
-pub fn convert(src: &str, opts: &Options2) -> Output {
-    let pre = preprocess(src);
-    let mut options = Options::ENABLE_TABLES
+pub(crate) fn markdown_options() -> Options {
+    Options::ENABLE_TABLES
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
@@ -1200,12 +1199,69 @@ pub fn convert(src: &str, opts: &Options2) -> Output {
         | Options::ENABLE_GFM
         | Options::ENABLE_WIKILINKS
         | Options::ENABLE_SUPERSCRIPT
-        | Options::ENABLE_SUBSCRIPT;
-    options.remove(Options::ENABLE_SMART_PUNCTUATION);
-    let events: Vec<(Event, Range<usize>)> = Parser::new_ext(&pre, options).into_offset_iter().collect();
+        | Options::ENABLE_SUBSCRIPT
+}
+
+/// Insert a parser-only blank line before prose that GFM would pad into a
+/// table row. The returned offsets mark the synthetic lines for source maps.
+pub(crate) fn separate_table_prose(text: &mut String) -> Vec<usize> {
+    if !text.contains('|') {
+        return Vec::new();
+    }
+
+    let mut boundaries = Vec::new();
+    let mut in_rows = false;
+    for (event, range) in Parser::new_ext(text, markdown_options()).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Table(_)) => in_rows = true,
+            Event::End(TagEnd::Table) => in_rows = false,
+            Event::Start(Tag::TableRow) if in_rows => {
+                let row = &text[range.clone()];
+                let row = row.split_once('\n').map_or(row, |(line, _)| line);
+                let mut chars = row.chars();
+                let mut has_pipe = false;
+                while let Some(ch) = chars.next() {
+                    match ch {
+                        '|' => { has_pipe = true; break; }
+                        '\\' => { chars.next(); }
+                        _ => {}
+                    }
+                }
+                if !has_pipe {
+                    let line_start = text[..range.start].rfind('\n').map_or(0, |i| i + 1);
+                    let prefix = text[line_start..range.start].trim_end();
+                    boundaries.push((line_start, format!("{prefix}\n")));
+                    in_rows = false;
+                }
+            }
+            _ => {}
+        }
+    }
+    if boundaries.is_empty() {
+        return Vec::new();
+    }
+
+    let mut normalized = String::with_capacity(text.len() + boundaries.len());
+    let mut synthetic_lines = Vec::with_capacity(boundaries.len());
+    let mut copied = 0;
+    for (offset, separator) in boundaries {
+        normalized.push_str(&text[copied..offset]);
+        synthetic_lines.push(normalized.len());
+        normalized.push_str(&separator);
+        copied = offset;
+    }
+    normalized.push_str(&text[copied..]);
+    *text = normalized;
+    synthetic_lines
+}
+
+pub fn convert(src: &str, opts: &Options2) -> Output {
+    let mut pre = preprocess(src);
+    let synthetic_lines = separate_table_prose(&mut pre);
+    let events: Vec<(Event, Range<usize>)> = Parser::new_ext(&pre, markdown_options()).into_offset_iter().collect();
 
     let mut line_starts = vec![0];
-    line_starts.extend(pre.match_indices('\n').map(|(i, _)| i + 1));
+    line_starts.extend(pre.match_indices('\n').map(|(i, _)| i + 1).filter(|i| synthetic_lines.binary_search(i).is_err()));
 
     let new_conv = |line_starts: Vec<usize>| Converter {
         stack: vec![Node { frame: Frame::Root, buf: String::new(), plain: String::new() }],
@@ -1477,6 +1533,34 @@ mod tests {
         let out = conv("```rust\nfn main() {}\n```\n\n$x^2$\n");
         assert!(out.contains("#raw(block: true, lang: \"rust\", \"fn main() {}\")"), "{out}");
         assert!(out.contains("#mi(\"x^2\")"));
+    }
+
+    #[test]
+    fn prose_after_table_keeps_its_source_line() {
+        let source = "| نام | مقدار |\n| --- | --- |\n| یک | دو |\nمتن بعد از جدول\nسطر دوم";
+        let rendered = Rendered::new();
+        let out = convert(source, &Options2 {
+            base: Dir::Rtl,
+            lang: "fa",
+            rendered: &rendered,
+            resolve_image: &|_| None,
+            resolve_note: &no_notes,
+            depth: 0,
+        });
+        assert!(out.typst.contains("متن بعد از جدول"), "{}", out.typst);
+        let src_lines: Vec<usize> = out.checkpoints.iter().map(|c| c.1).collect();
+        assert_eq!(src_lines, vec![0, 3]);
+    }
+
+    #[test]
+    fn prose_leaves_quoted_table_inside_its_quote() {
+        let mut text = "> | A |\n> | --- |\n> | one |\n> Escaped \\| pipe\n> Continuation".to_string();
+        separate_table_prose(&mut text);
+        assert_eq!(text, "> | A |\n> | --- |\n> | one |\n>\n> Escaped \\| pipe\n> Continuation");
+        let events: Vec<_> = Parser::new_ext(&text, markdown_options()).collect();
+        assert_eq!(events.iter().filter(|event| matches!(event, Event::Start(Tag::TableRow))).count(), 1);
+        assert_eq!(events.iter().filter(|event| matches!(event, Event::Start(Tag::BlockQuote(_)))).count(), 1);
+        assert!(events.iter().any(|event| matches!(event, Event::Start(Tag::Paragraph))));
     }
 
     #[test]

@@ -13,7 +13,7 @@ function needsLine(state: EditorState): boolean {
 
 /** After an edit leaves the note ending in such a block, add a newline. */
 const appendFilter = EditorState.transactionFilter.of((tr) => {
-  if (!tr.docChanged || tr.isUserEvent("undo") || tr.isUserEvent("redo")) return tr;
+  if (!tr.docChanged || tr.annotation(Transaction.addToHistory) === false || tr.isUserEvent("undo") || tr.isUserEvent("redo")) return tr;
   const doc = tr.newDoc;
   const last = doc.line(doc.lines);
   if (!last.length || !BLOCK_END.test(last.text)) return tr;

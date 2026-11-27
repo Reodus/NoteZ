@@ -2,6 +2,7 @@
 // what a link points at, and the Markdown → HTML used by embeds and previews.
 import { EditorView } from "@codemirror/view";
 import { ipc, stem } from "./ipc";
+import { textChange } from "./textChange";
 import { editorView, notesList, state, updateContent } from "./store";
 
 /** A new block id: six lowercase letters and digits. */
@@ -19,11 +20,7 @@ export function applyText(path: string, next: string, userEvent = "input.blockid
   if (view && state.active === path) {
     const cur = view.state.doc.toString();
     if (cur === next) return;
-    let a = 0;
-    while (a < cur.length && a < next.length && cur[a] === next[a]) a++;
-    let b = 0;
-    while (b < cur.length - a && b < next.length - a && cur[cur.length - 1 - b] === next[next.length - 1 - b]) b++;
-    view.dispatch({ changes: { from: a, to: cur.length - b, insert: next.slice(a, next.length - b) }, userEvent });
+    view.dispatch({ changes: textChange(cur, next), userEvent });
   } else if (state.buffers[path]) updateContent(path, next);
 }
 

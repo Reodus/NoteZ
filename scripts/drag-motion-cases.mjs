@@ -176,6 +176,8 @@ export async function checkDragMotion({ evaluate, rpc, until, sleep, vault }) {
   await until(() => evaluate("!!document.querySelector('.cm-nz-handle.visible')"), 'block grip');
   const blockGrip = await center('.cm-nz-handle.visible');
   const blockEnd = await pointAt('Gamma block', true);
+  await mouse('mouseMoved', blockGrip);
+  assert.ok(await evaluate(`!!document.elementFromPoint(${blockGrip.x}, ${blockGrip.y})?.closest('.cm-nz-handle')`), 'the fixed gutter grip receives the pointer');
   await mouse('mousePressed', blockGrip);
   await mouse('mouseMoved', blockEnd, true);
   await until(() => evaluate("document.querySelector('.nz-drag-carry .cm-line')?.textContent.includes('Alpha block')"), 'rendered block before release');

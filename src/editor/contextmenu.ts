@@ -13,6 +13,7 @@ import {
   toggleInline, setBlockStyle, toggleList, insertLink, insertTable, insertMath, insertFootnote,
   insertFenced, insertBlock, insertCallout, isTypst, BlockStyle,
 } from "./format";
+import { syntaxTree } from "@codemirror/language";
 import { CALLOUTS } from "./livepreview";
 
 import { app } from "../core/app";
@@ -32,13 +33,20 @@ interface Hit {
 function hitAt(view: EditorView, pos: number): Hit | null {
   const line = view.state.doc.lineAt(pos);
   const off = pos - line.from;
+  for (const side of [1, -1] as const) {
+    let node = syntaxTree(view.state).resolveInner(pos, side);
+    while (node.parent && node.name !== "Image" && node.name !== "SpacedImage") node = node.parent;
+    const url = node.getChild("URL");
+    if (url && node.from >= line.from && node.to <= line.to)
+      return { kind: "mdImage", target: view.state.sliceDoc(url.from, url.to).replace(/^<|>$/g, ""), from: node.from, to: node.to };
+  }
   const re = /(!?)\[\[([^\]]+)\]\]|(!?)\[([^\]]*)\]\(([^)\s]+)[^)]*\)|(https?:\/\/[^\s)>\]]+)/g;
   for (const m of line.text.matchAll(re)) {
     const a = m.index!;
     if (off < a || off > a + m[0].length) continue;
     const span = { from: line.from + a, to: line.from + a + m[0].length };
     if (m[2] !== undefined) return { kind: m[1] ? "wikiImage" : "wiki", target: m[2].split("|")[0], ...span };
-    if (m[5] !== undefined) return { kind: m[3] ? "mdImage" : "md", target: decodeURI(m[5]), ...span };
+    if (m[5] !== undefined) return m[3] ? null : { kind: "md", target: m[5], ...span };
     return { kind: "url", target: m[6], ...span };
   }
   return null;
@@ -72,7 +80,9 @@ export async function clipboard(view: EditorView, op: "cut" | "copy" | "paste" |
   view.focus();
   const { from, to } = view.state.selection.main;
   if (op === "copy" || op === "cut") {
-    await navigator.clipboard.writeText(view.state.sliceDoc(from, to));
+    const native = view.state.readOnly ? window.getSelection() : null;
+    const visible = native?.anchorNode && view.contentDOM.contains(native.anchorNode) ? native.toString() : "";
+    await navigator.clipboard.writeText(visible || view.state.sliceDoc(from, to));
     if (op === "cut") view.dispatch({ changes: { from, to }, userEvent: "delete.cut" });
     return;
   }
@@ -100,7 +110,7 @@ function linkItems(view: EditorView, hit: Hit, openLink: (t: string) => boolean)
         },
       },
       { label: t("Copy image path"), run: () => void navigator.clipboard.writeText(hit.target) },
-      { label: t("Remove image"), danger: true, run: () => view.dispatch({ changes: { from: hit.from, to: hit.to } }) },
+      ...view.state.readOnly ? [] : [{ label: t("Remove image"), danger: true, run: () => view.dispatch({ changes: { from: hit.from, to: hit.to } }) }],
       "-",
     ];
   }
@@ -108,7 +118,7 @@ function linkItems(view: EditorView, hit: Hit, openLink: (t: string) => boolean)
   return [
     { label: external ? t("Open link in browser") : t("Open link"), run: () => (external ? window.open(hit.target) : void openLink(hit.target)) },
     { label: t("Copy link"), run: () => void navigator.clipboard.writeText(hit.target) },
-    { label: t("Edit link"), run: () => view.dispatch({ selection: { anchor: hit.from, head: hit.to } }) },
+    ...view.state.readOnly ? [] : [{ label: t("Edit link"), run: () => view.dispatch({ selection: { anchor: hit.from, head: hit.to } }) }],
     "-",
   ];
 }
@@ -117,13 +127,18 @@ function buildMenu(view: EditorView, pos: number, openLink: (t: string) => boole
   const typ = isTypst();
   const sel = view.state.selection.main;
   const items: Item[] = [];
-  if (spell?.word) {
+  if (!view.state.readOnly && spell?.word) {
     for (const s of spell.suggestions.slice(0, 6)) items.push({ label: s, run: () => replaceMisspelling(s) });
     if (!spell.suggestions.length) items.push({ label: t("No spelling suggestions"), run: () => {} });
     items.push({ label: t("Add “{word}” to dictionary", { word: spell.word }), run: () => addToDictionary(spell.word) }, "-");
   }
   const hit = hitAt(view, pos);
   if (hit) items.push(...linkItems(view, hit, openLink));
+  if (view.state.readOnly) return [
+    ...items,
+    { label: t("Copy"), hint: "Ctrl+C", run: () => void clipboard(view, "copy") },
+    { label: t("Select all"), hint: "Ctrl+A", run: () => { view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }); view.focus(); } },
+  ];
 
   items.push(
     { label: t("Cut"), hint: "Ctrl+X", run: () => void clipboard(view, "cut") },

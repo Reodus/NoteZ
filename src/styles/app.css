@@ -531,6 +531,7 @@ select.input {
 .rail-today:hover { background: var(--accent); color: var(--accent-fg, #fff); filter: brightness(1.1); }
 .rail-settings { margin-block-start: auto; }
 .workspace {
+  min-height: 0;
   position: relative;
   flex: 1;
   min-width: 0;
@@ -1376,6 +1377,8 @@ mark {
   background: transparent;
   color: var(--fg-muted);
 }
+.editor .cm-nz-read .cm-cursorLayer { display: none; }
+.editor .cm-nz-read .cm-content { cursor: text; }
 .editor .cm-cursor {
   border-left: 2px solid var(--accent);
 }
@@ -1632,6 +1635,7 @@ mark {
 /* ---------------------------------------------------------- right panel */
 
 .right-panel {
+  min-height: 0;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1728,6 +1732,7 @@ mark {
   min-height: 0;
 }
 .preview-bar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1800,6 +1805,9 @@ mark {
 }
 .preview-scroll {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overscroll-behavior: contain;
   overflow: auto;
   padding: 24px;
   background: var(--canvas);
@@ -1811,7 +1819,6 @@ mark {
 .page-wrap {
   margin: 0 auto 22px;
   width: max-content;
-  max-width: 100%;
 }
 .page {
   background: white;
@@ -4748,7 +4755,31 @@ body:has(.nz-footnote-compose) .editor .cm-tooltip:has(> .cm-nz-fn-peek) { visib
 .cm-nz-embed .cm-nz-preview-body { max-height: 480px; overflow: auto; }
 
 /* block handle, drop line, folding, zoom */
+.editor .cm-nz-block-gutter {
+  --block-gutter-width: 26px;
+  padding-left: var(--block-gutter-width);
+}
+:root[dir="rtl"] .editor .cm-nz-block-gutter {
+  padding-left: 0;
+  padding-right: var(--block-gutter-width);
+}
+.editor .cm-nz-block-gutter::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--block-gutter-width);
+  border-right: 1px solid var(--border);
+  pointer-events: none;
+}
+:root[dir="rtl"] .editor .cm-nz-block-gutter::before {
+  inset: 0 0 0 auto;
+  border-right: 0;
+  border-left: 1px solid var(--border);
+}
+:root[dir="rtl"] .editor .cm-nz-handle { left: auto; right: 4px; }
+
 .editor .cm-nz-handle {
+  left: 4px;
   touch-action: none;
   position: absolute;
   z-index: 6;
@@ -4765,7 +4796,7 @@ body:has(.nz-footnote-compose) .editor .cm-tooltip:has(> .cm-nz-fn-peek) { visib
 }
 .editor .cm-nz-handle.visible { opacity: 1; pointer-events: auto; }
 .editor .cm-nz-handle:hover { background: var(--hover); color: var(--fg-muted); }
-.editor .cm-nz-handle.dragging { cursor: grabbing; opacity: 1; }
+.editor .cm-nz-handle.dragging { cursor: grabbing; opacity: 1; pointer-events: auto; }
 body.nz-dragging-block, body.nz-dragging-block * { cursor: grabbing !important; user-select: none; }
 .editor .cm-nz-drop-line {
   position: absolute;

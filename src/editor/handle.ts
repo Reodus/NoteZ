@@ -1,5 +1,5 @@
 // Block handle, folding and zoom for Markdown notes.
-// - A grip appears left of the block under the mouse: drag it to move the
+// - A grip in the editor gutter follows the block under the mouse: drag it to move the
 //   block (a heading takes its section along); click it for a menu (copy a
 //   link or embed of the block, turn into, duplicate, fold, zoom, delete).
 // - Headings, list items, quotes, code and tables fold (gutter arrows,
@@ -182,12 +182,6 @@ function blockMenu(view: EditorView, b: Block, x: number, y: number) {
 
 // ------------------------------------------------------------- handle
 
-/** The right edge of what is drawn before the text at `pos` (a list bullet, a quote bar…). */
-function lineRight(view: EditorView, pos: number): number[] {
-  const c = view.coordsAtPos(pos, -1);
-  return c ? [c.right] : [];
-}
-
 class Handle {
   dom: HTMLElement;
   indicator: HTMLElement;
@@ -197,7 +191,7 @@ class Handle {
   pointer: { x: number; y: number } | null = null;
   refreshKey = {};
   onMouseMove = (e: MouseEvent) => { if (!e.buttons && !(e.target as HTMLElement).closest?.(".cm-nz-handle, .cm-gutters, .cm-panels")) this.hover(e); };
-  onMouseLeave = () => { this.pointer = null; this.hideSoon(); };
+  onMouseLeave = () => { this.pointer = null; if (!this.cancelDrag) this.hideSoon(); };
   onScroll = () => this.refresh();
   constructor(readonly view: EditorView) {
     this.dom = document.createElement("div");
@@ -221,49 +215,37 @@ class Handle {
   hover(e: MouseEvent) {
     if (store.active?.endsWith(".typ") || this.cancelDrag) return;
     this.pointer = { x: e.clientX, y: e.clientY };
-    const content = this.view.contentDOM.getBoundingClientRect();
-    // Also when the mouse is in the margin left of the text.
-    const x = Math.max(content.left + 4, Math.min(e.clientX, content.right - 4));
-    const pos = this.view.posAtCoords({ x, y: e.clientY }, false);
+    const pos = this.positionAtRow(e.clientY);
     const b = pos == null ? null : blockAt(this.view.state, pos);
     if (!b) return this.hideSoon();
     clearTimeout(this.hideTimer);
     this.block = b;
     this.place();
   }
+  private positionAtRow(y: number): number | null {
+    const view = this.view;
+    const viewport = view.scrollDOM.getBoundingClientRect();
+    const offset = y - view.documentTop;
+    if (y < viewport.top || y >= viewport.bottom || offset < 0) return null;
+    const row = view.lineBlockAtHeight(offset);
+    return offset >= row.top && offset < row.bottom ? row.from : null;
+  }
+
   place() {
     const b = this.block;
     if (!b) return;
     this.view.requestMeasure({ key: this, read: () => {
-      const view = this.view, dom = view.dom.getBoundingClientRect(), content = view.contentDOM.getBoundingClientRect();
-      const first = view.state.doc.lineAt(b.from), indent = first.text.search(/\S|$/);
-      const at = view.coordsAtPos(first.from + indent, 1);
-      if (!at) return null;
-      const found = view.domAtPos(b.from, 1);
-      const node = found.node === view.contentDOM ? found.node.childNodes[found.offset] : found.node;
-      const el = node?.nodeType === 1 ? node as HTMLElement : node?.parentElement;
-      const line = el?.closest<HTMLElement>(".cm-line");
-      const widget = line ? null : el?.closest<HTMLElement>(".cm-nz-lp-table, .cm-nz-preview") ?? (el !== view.contentDOM ? el : null);
-      const dirEl = widget?.querySelector<HTMLElement>("[dir]") ?? line ?? widget;
-      const rtl = dirEl ? getComputedStyle(dirEl).direction === "rtl" : view.textDirection === 1;
-      const marker = line?.querySelector<HTMLElement>(".cm-nz-lp-bullet, .cm-nz-lp-check")?.getBoundingClientRect();
-      // Inline image previews share the source line and can make the caret
-      // rectangle as tall as the image. Anchor the grip to the source row.
-      const sourceImage = line?.querySelector<HTMLElement>(".cm-nz-lp-image.preview");
-      const rect = widget?.getBoundingClientRect();
-      const sourceRow = sourceImage ? line!.getBoundingClientRect() : null;
-      const rowHeight = sourceImage ? view.defaultLineHeight : at.bottom - at.top;
-      const x = rtl
-        ? Math.min(Math.max(sourceRow?.right ?? rect?.right ?? at.right, marker?.right ?? 0, ...lineRight(view, first.from + indent)) + 6, dom.right - 22)
-        : Math.max(Math.min(sourceRow?.left ?? rect?.left ?? at.left, marker?.left ?? Infinity) - 24, dom.left + (view.scrollDOM.querySelector<HTMLElement>(".cm-gutters")?.getBoundingClientRect().width ?? 0) + 2);
-      const top = (rect?.top ?? sourceRow?.top ?? at.top) + Math.max(0, (Math.min(rowHeight, 40) - 22) / 2);
+      const view = this.view;
       const viewport = view.scrollDOM.getBoundingClientRect();
-      if (top < viewport.top || top + 22 > viewport.bottom || !content.width) return null;
-      return { x: x - dom.left, y: top - dom.top };
-    }, write: pos => {
-      if (!pos || this.block !== b) return this.hide();
-      this.dom.style.top = `${pos.y}px`;
-      this.dom.style.left = `${pos.x}px`;
+      const row = view.lineBlockAt(b.from);
+      const firstRow = view.documentTop + row.top;
+      if (view.documentTop + row.bottom <= viewport.top || firstRow >= viewport.bottom) return null;
+      const top = Math.max(viewport.top, firstRow + Math.max(0, (view.defaultLineHeight - 22) / 2));
+      return top + 22 <= viewport.bottom ? top - view.dom.getBoundingClientRect().top : null;
+    }, write: top => {
+      if (this.cancelDrag || this.block !== b) return;
+      if (top === null) return this.hide();
+      this.dom.style.top = `${top}px`;
       this.dom.classList.add("visible");
     } });
   }
@@ -271,11 +253,12 @@ class Handle {
     if (this.cancelDrag || !this.pointer) return;
     const { x, y } = this.pointer;
     this.view.requestMeasure({ key: this.refreshKey, read: () => {
-      const box = this.view.scrollDOM.getBoundingClientRect();
-      if (x < box.left || x > box.right || y < box.top || y > box.bottom) return null;
-      const pos = this.view.posAtCoords({ x, y }, false);
+      const box = this.view.dom.getBoundingClientRect();
+      if (x < box.left || x > box.right) return null;
+      const pos = this.positionAtRow(y);
       return pos == null ? null : blockAt(this.view.state, pos);
     }, write: block => {
+      if (this.cancelDrag) return;
       this.block = block;
       if (block) this.place(); else this.hide();
     } });
@@ -295,6 +278,7 @@ class Handle {
     e.stopPropagation();
     const view = this.view;
     this.cancelDrag?.();
+    clearTimeout(this.hideTimer);
     const sx = e.clientX, sy = e.clientY;
     let dragging = false, frame = 0;
     let drop: { at: number; before: boolean } | null = null;
@@ -388,7 +372,7 @@ class Handle {
       return null;
     }
     const content = view.contentDOM.getBoundingClientRect();
-    const pos = view.posAtCoords({ x: Math.max(content.left + 4, Math.min(ev.clientX, content.right - 4)), y: ev.clientY }, false);
+    const pos = this.positionAtRow(ev.clientY);
     let t = pos == null ? null : blockAt(view.state, pos);
     if (!t && pos != null && !view.state.doc.lineAt(pos).text.trim()) {
       const doc = view.state.doc, n = doc.lineAt(pos).number;
@@ -405,15 +389,14 @@ class Handle {
       return null;
     }
     if (t.kind === "heading") t = { ...t, ...extent(view.state, t) };
-    const top = view.coordsAtPos(t.from, 1);
-    const bottom = view.coordsAtPos(t.to, -1);
-    if (!top || !bottom) return null;
-    const before = ev.clientY < (top.top + bottom.bottom) / 2;
+    const top = view.documentTop + view.lineBlockAt(t.from).top;
+    const bottom = view.documentTop + view.lineBlockAt(t.to).bottom;
+    const before = ev.clientY < (top + bottom) / 2;
     const dom = view.dom.getBoundingClientRect();
     const firstLine = view.state.doc.lineAt(t.from);
     const line = view.coordsAtPos(firstLine.from + firstLine.text.search(/\S|$/), 1);
     const left = Math.max(dom.left + 24, Math.min(line?.left ?? content.left, content.left + 48));
-    this.indicator.style.top = `${(before ? top.top : bottom.bottom) - dom.top - 1}px`;
+    this.indicator.style.top = `${(before ? top : bottom) - dom.top - 1}px`;
     this.indicator.style.left = `${left - dom.left}px`;
     this.indicator.style.width = `${Math.max(0, Math.min(dom.right - 24, content.right - 48) - left)}px`;
     this.indicator.classList.add("visible");
@@ -438,7 +421,11 @@ const handlePlugin = ViewPlugin.fromClass(
     }
     update(u: ViewUpdate) {
       if (u.docChanged || u.geometryChanged) {
-        if (u.docChanged) this.h.cancelDrag?.();
+        if (u.docChanged) {
+          this.h.cancelDrag?.();
+          this.h.block = null;
+          this.h.hide();
+        }
         this.h.refresh();
       }
     }
@@ -599,6 +586,7 @@ class FoldWidget extends WidgetType {
 export function blockTools(): Extension {
   return [
     handlePlugin,
+    EditorView.editorAttributes.of({ class: "cm-nz-block-gutter" }),
     codeFolding({ placeholderDOM: (view) => new FoldWidget().toDOM(view) }),
     foldGutter({
       markerDOM: (open) => {

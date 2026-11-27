@@ -9,9 +9,8 @@
 //! (HTML) or PNG (Word) with the same engine the PDF uses.
 
 use std::collections::HashMap;
-use std::ops::Range;
 
-use pulldown_cmark::{Alignment, BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, LinkType, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, LinkType, Parser, Tag, TagEnd};
 
 use crate::render::blocks::{self, BlockCtx};
 use crate::render::md::{self, detect_dir, Dir, Rendered};
@@ -620,20 +619,9 @@ fn caption_of(alt: &str, url: &str) -> Option<String> {
 }
 
 fn run_all(b: &mut B, src: &str) {
-    let pre = md::preprocess(src);
-    let mut options = Options::ENABLE_TABLES
-        | Options::ENABLE_FOOTNOTES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_HEADING_ATTRIBUTES
-        | Options::ENABLE_MATH
-        | Options::ENABLE_GFM
-        | Options::ENABLE_WIKILINKS
-        | Options::ENABLE_SUPERSCRIPT
-        | Options::ENABLE_SUBSCRIPT;
-    options.remove(Options::ENABLE_SMART_PUNCTUATION);
-    let events: Vec<(Event, Range<usize>)> = Parser::new_ext(&pre, options).into_offset_iter().collect();
-    for (ev, _) in events {
+    let mut pre = md::preprocess(src);
+    md::separate_table_prose(&mut pre);
+    for ev in Parser::new_ext(&pre, md::markdown_options()) {
         match ev {
             Event::Start(t) => b.start(t),
             Event::End(t) => b.end(t),

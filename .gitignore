@@ -7,3 +7,7 @@ core/bin
 *.log
 .DS_Store
 core/fonts/noto
+
+/AGENTS.md
+/graphify-out/
+/.graphify*

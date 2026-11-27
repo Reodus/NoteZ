@@ -89,7 +89,11 @@ export const corePlugin: BuiltinPlugin = {
       id: "editor.mode",
       title: t("Toggle live preview / source mode"),
       key: "Mod-Shift-m",
-      run: () => setPrefs("editorMode", prefs.editorMode === "live" ? "source" : "live"),
+      run: () => {
+        if (state.active?.endsWith(".typ")) {
+          if (prefs.editorMode === "read") setPrefs("editorMode", "source");
+        } else setPrefs("editorMode", prefs.editorMode === "live" ? "source" : "live");
+      },
     });
     c({ id: "editor.lineNumbers", title: t("Toggle line numbers"), run: () => setPrefs("lineNumbers", !prefs.lineNumbers) });
     c({ id: "editor.previews", title: t("Toggle inline diagram previews"), run: () => setPrefs("inlinePreviews", !prefs.inlinePreviews) });

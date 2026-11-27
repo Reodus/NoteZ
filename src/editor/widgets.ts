@@ -36,11 +36,12 @@ class DataBlock extends WidgetType {
     readonly lang: "base" | "query",
     readonly code: string,
     readonly codeFrom: number,
+    readonly read: boolean,
   ) {
     super();
   }
   eq(o: DataBlock) {
-    return o.lang === this.lang && o.code === this.code;
+    return o.lang === this.lang && o.code === this.code && o.read === this.read;
   }
   toDOM(view: EditorView) {
     const outer = document.createElement("div");
@@ -59,7 +60,8 @@ class DataBlock extends WidgetType {
     });
     const body = document.createElement("div");
     body.className = "cm-nz-block-body";
-    wrap.append(label, body);
+    if (!this.read) wrap.append(label);
+    wrap.append(body);
     outer.append(wrap);
     const lang = this.lang;
     const code = this.code;
@@ -74,7 +76,7 @@ class DataBlock extends WidgetType {
     };
     void Promise.all([import("../ui/BaseView"), import("../core/store")]).then(([m, st]) => {
       if (this.gone) return;
-      this.dispose = m.mountBase(body, { kind: lang, src: code, thisPath: st.state.active, onSrc: lang === "base" ? onSrc : undefined, embedded: true });
+      this.dispose = m.mountBase(body, { kind: lang, src: code, thisPath: st.state.active, onSrc: lang === "base" && !this.read ? onSrc : undefined, embedded: true });
     });
     return outer;
   }
@@ -117,19 +119,20 @@ class BlockPreview extends WidgetType {
     readonly codeFrom: number,
     readonly from: number,
     readonly dark: boolean,
+    readonly read: boolean,
   ) {
     super();
   }
 
   eq(other: BlockPreview) {
-    return other.lang === this.lang && other.code === this.code;
+    return other.lang === this.lang && other.code === this.code && other.read === this.read;
   }
 
   toDOM(view: EditorView) {
     const wrap = document.createElement("div");
     wrap.className = "cm-nz-block-preview";
     wrap.setAttribute("dir", "ltr");
-    wrap.title = t("Click to edit");
+    if (!this.read) wrap.title = t("Click to edit");
     const label = document.createElement("span");
     label.className = "cm-nz-block-tag";
     label.textContent = this.lang;
@@ -163,7 +166,7 @@ class BlockPreview extends WidgetType {
       }, 450);
     }
 
-    wrap.addEventListener("mousedown", (e) => {
+    if (!this.read) wrap.addEventListener("mousedown", (e) => {
       e.preventDefault();
       view.dispatch({ selection: { anchor: this.codeFrom }, scrollIntoView: false });
       view.focus();
@@ -228,9 +231,9 @@ function decorations(state: EditorState): DecorationSet {
   const decos: Range<Decoration>[] = [];
   for (const b of findBlocks(state)) {
     const widget = DATA_BLOCKS.has(b.lang)
-      ? new DataBlock(b.lang as "base" | "query", b.code, b.codeFrom)
-      : new BlockPreview(b.lang, b.code, b.codeFrom, b.from, dark);
-    const cursorInside = sel.to >= b.from && sel.from <= b.to;
+      ? new DataBlock(b.lang as "base" | "query", b.code, b.codeFrom, state.readOnly)
+      : new BlockPreview(b.lang, b.code, b.codeFrom, b.from, dark, state.readOnly);
+    const cursorInside = !state.readOnly && sel.to >= b.from && sel.from <= b.to;
     if (cursorInside) {
       decos.push(Decoration.widget({ widget, block: true, side: 1 }).range(b.to));
     } else {

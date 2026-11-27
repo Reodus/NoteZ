@@ -1,335 +1,21 @@
-// Global app state: vault, open tabs, buffers, layout and preferences.
-import { batch, createSignal, createRoot, createEffect } from "solid-js";
-import { createStore, produce } from "solid-js/store";
-import type { EditorView } from "@codemirror/view";
-import { ask, onVaultFs, openPath, trashPath } from "./native";
-import { flushSaveParticipants } from "./saveParticipants";
-import { flushComments, renameComments } from "./comments";
-import { renameBookmarkPaths } from "./bookmarks";
+// Vault and tab operations. Re-exports keep existing UI and plugin consumers working.
+import { produce } from "solid-js/store";
 import { app, notify } from "./app";
-import { ipc, flushWrites, Entry, Theme, dirname, join, fileKind, isNotePath } from "./ipc";
-import { frontmatterRange } from "./frontmatter";
-
+import { renameBookmarkPaths } from "./bookmarks";
+import { flushComments, renameComments } from "./comments";
 import { t, tn } from "./i18n";
-// ------------------------------------------------------------ preferences
+import { dirname, fileKind, ipc, join } from "./ipc";
+import { ask, onVaultFs, openPath, trashPath } from "./native";
+import { cancelAutosave, reloadFromDisk, replaceSavedBuffer, save, saveAll } from "./noteBuffers";
+import { prefs, rememberVault, setPrefs } from "./preferences";
+import { flushSaveParticipants } from "./saveParticipants";
+import { type Buffer, editorView, isDirty, notesList, root, setFileRev, setNotesList, setRoot, setState, setTree, state, tree } from "./vaultState";
+import { readingTypst, setWorkspaceLayout, viewLayout } from "./workspace";
 
-export type ThemeMode = "system" | "light" | "dark";
-export type Layout = "editor" | "split" | "preview";
-export const CALENDAR_PANEL = "core.daily-notes.calendar";
-
-export interface Prefs {
-  themeMode: ThemeMode;
-  /** UI theme used in light mode (src/core/uithemes.ts ids). */
-  uiThemeLight: string;
-  /** UI theme used in dark mode. */
-  uiThemeDark: string;
-  /** CSS snippets switched on (ids = file names without .css). */
-  enabledSnippets: string[];
-  /** Accent color; "" = the theme's own accent. */
-  accent: string;
-  editorFontSize: number;
-  lineNumbers: boolean;
-  readableWidth: boolean;
-  inlinePreviews: boolean;
-  /** "live" hides Markdown syntax off the cursor line; "source" shows it all. */
-  editorMode: "live" | "source";
-  autosaveMs: number;
-  layout: Layout;
-  sidebarWidth: number;
-  sidebarOpen: boolean;
-  previewWidth: number;
-  pinnedPanels: string[];
-  recentVaults: string[];
-  lastVault: string | null;
-  enabledPlugins: string[];
-  newNoteTheme: string;
-  /** Rewrite links in other notes when a note or folder is renamed/moved. */
-  updateLinks: "always" | "ask" | "never";
-  /** Where pasted/dropped files go (like Obsidian's "Default location for new attachments"). */
-  attachmentMode: "root" | "folder" | "same" | "subfolder";
-  /** The vault folder ("folder" mode) or the subfolder name ("subfolder" mode). */
-  attachmentFolder: string;
-  /** File name for pasted images without a name; `{{date:FMT}}` and `{{note}}` are filled in. */
-  attachmentName: string;
-  /** File tree: show images and PDFs next to notes. */
-  showAttachments: boolean;
-  /** File tree: show every file type (others open in their default app). */
-  showAllFiles: boolean;
-  /** Built-in plugins switched off. */
-  disabledBuiltins: string[];
-  /** Folder with note templates ("" = find a top-level "Templates" folder). */
-  templatesFolder: string;
-  /** Daily notes: folder ("" = vault root). */
-  dailyFolder: string;
-  /** Daily notes: file name as a date format (may contain "/" for subfolders). */
-  dailyFormat: string;
-  /** Daily notes: template note ("" = none). */
-  dailyTemplate: string;
-  /** First day of the week in the calendar: 0 = Sunday, 1 = Monday, 6 = Saturday. */
-  weekStart: number;
-  /** Quick capture: global shortcut ("" = off), Electron accelerator syntax. */
-  captureShortcut: string;
-  /** Quick capture: where captured text goes: "daily" or a note path. */
-  captureTarget: string;
-  /** Quick capture: line format; {{text}}, {{date:…}}, {{time:…}}. */
-  captureFormat: string;
-  // editor
-  /** Editor font family ("" = Inter, with a bundled font for every other script). Note themes may override it. */
-  editorFont: string;
-  lineHeight: number;
-  spellcheck: boolean;
-  /** Spell-checker dictionaries, e.g. ["en-US", "de", "fa"] (empty = system language + English). */
-  spellcheckLanguages: string[];
-  /**
-   * Language of new notes ("" = detect from the text). Written to the new
-   * note's frontmatter as `lang:`; sets direction, fonts and digits.
-   */
-  defaultLanguage: string;
-  tabSize: number;
-  autoPair: boolean;
-  vimMode: boolean;
-  // files
-  newNoteLocation: "root" | "current" | "folder";
-  newNoteFolder: string;
-  defaultNoteType: "md" | "typ";
-  deleteToTrash: boolean;
-  confirmDelete: boolean;
-  /** Folders left out of search and the graph. */
-  excludedFolders: string[];
-  /** Graph view options (see GraphView.tsx; missing keys take the defaults). */
-  graph: Record<string, unknown>;
-  // flashcards (src/ui/ReviewView.tsx)
-  /** Wanted chance of remembering a card when it comes due. */
-  srsRetention: number;
-  srsNewPerDay: number;
-  /** Days. */
-  srsMaxInterval: number;
-  /** Minutes, space-separated ("1 10"). */
-  srsLearningSteps: string;
-  srsRelearningSteps: string;
-  // history
-  historyEnabled: boolean;
-  /** Minutes: saves within this window make one version. */
-  historyInterval: number;
-  historyKeepDays: number;
-  historyMaxVersions: number;
-  /** Take a vault snapshot once a day (when the vault is open). */
-  snapshotDaily: boolean;
-  /** Automatic snapshots kept. */
-  snapshotKeep: number;
-  // PDF & preview
-  /** Include open Markdown comments as render-only PDF margin notes. */
-  commentsInPdf: boolean;
-  /** Where Export PDF suggests saving: "" = vault root, "./" = next to the note, else an absolute folder. */
-  pdfFolder: string;
-  openAfterExport: boolean;
-  /** Look for a new NoteZ release on GitHub at startup. */
-  checkUpdates: boolean;
-  /** Language of menus and dialogs: "auto" (system) or a code from UI_LANGUAGES. */
-  uiLanguage: string;
-  previewDelayMs: number;
-  /** Initial preview zoom: 0 = fit width, else a factor. */
-  previewZoom: number;
-  // appearance
-  uiZoom: number;
-  showTabBar: boolean;
-  showStatusBar: boolean;
-  animations: boolean;
-  /** Custom shortcuts by command id ("" = none). */
-  hotkeys: Record<string, string>;
-}
-
-const DEFAULT_PREFS: Prefs = {
-  themeMode: "system",
-  uiThemeLight: "light",
-  uiThemeDark: "dark",
-  enabledSnippets: [],
-  accent: "",
-  editorFontSize: 16,
-  lineNumbers: false,
-  readableWidth: true,
-  inlinePreviews: true,
-  editorMode: "live",
-  autosaveMs: 600,
-  layout: "split",
-  sidebarWidth: 264,
-  sidebarOpen: true,
-  previewWidth: 520,
-  pinnedPanels: ["preview", CALENDAR_PANEL],
-  recentVaults: [],
-  lastVault: null,
-  enabledPlugins: [],
-  newNoteTheme: "default",
-  updateLinks: "ask",
-  attachmentMode: "folder",
-  attachmentFolder: "attachments",
-  attachmentName: "Pasted image {{date:YYYYMMDDHHmmss}}",
-  showAttachments: true,
-  showAllFiles: false,
-  disabledBuiltins: [],
-  templatesFolder: "",
-  dailyFolder: "Daily",
-  dailyFormat: "YYYY-MM-DD",
-  dailyTemplate: "",
-  weekStart: 1,
-  captureShortcut: "",
-  captureTarget: "daily",
-  captureFormat: "- {{time}} {{text}}",
-  editorFont: "",
-  lineHeight: 1.85,
-  spellcheck: false,
-  spellcheckLanguages: [],
-  defaultLanguage: "",
-  tabSize: 4,
-  autoPair: true,
-  vimMode: false,
-  newNoteLocation: "root",
-  newNoteFolder: "",
-  defaultNoteType: "md",
-  deleteToTrash: true,
-  confirmDelete: true,
-  excludedFolders: [],
-  graph: {},
-  srsRetention: 0.9,
-  srsNewPerDay: 20,
-  srsMaxInterval: 36500,
-  srsLearningSteps: "1 10",
-  srsRelearningSteps: "10",
-  historyEnabled: true,
-  historyInterval: 10,
-  historyKeepDays: 60,
-  historyMaxVersions: 300,
-  snapshotDaily: true,
-  snapshotKeep: 14,
-  commentsInPdf: false,
-  pdfFolder: "",
-  openAfterExport: false,
-  checkUpdates: true,
-  uiLanguage: "auto",
-  previewDelayMs: 350,
-  previewZoom: 0,
-  uiZoom: 1,
-  showTabBar: true,
-  showStatusBar: true,
-  animations: true,
-  hotkeys: {},
-};
-
-const PREFS_KEY = "notez.prefs.v1";
-
-function loadPrefs(): Prefs {
-  try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    if (raw) {
-      const saved = JSON.parse(raw);
-      // Before 0.5: one field, "./x" meaning "x next to the note".
-      if (!saved.attachmentMode && typeof saved.attachmentFolder === "string") {
-        const f = saved.attachmentFolder.trim();
-        if (f.startsWith(".")) {
-          const sub = f.replace(/^\.\/?/, "").replace(/\/+$/, "");
-          saved.attachmentMode = sub ? "subfolder" : "same";
-          saved.attachmentFolder = sub || "attachments";
-        } else saved.attachmentMode = "folder";
-      }
-      // Before 0.6 the accent was always set; the old default now means "the theme's accent".
-      if (saved.accent === "#6d5efc" && !("uiThemeLight" in saved)) saved.accent = "";
-      if (Array.isArray(saved.pinnedPanels)) saved.pinnedPanels = [...new Set(saved.pinnedPanels.filter((id: unknown) => typeof id === "string"))];
-      else delete saved.pinnedPanels;
-      return { ...DEFAULT_PREFS, ...saved };
-    }
-  } catch {
-    /* fall through */
-  }
-  return { ...DEFAULT_PREFS };
-}
-
-export const [prefs, setPrefs] = createStore<Prefs>(loadPrefs());
-app.commands.setOverrides(() => prefs.hotkeys);
-
-createRoot(() => {
-  createEffect(() => {
-    const snapshot = JSON.stringify(prefs);
-    try {
-      localStorage.setItem(PREFS_KEY, snapshot);
-    } catch {
-      /* non-essential */
-    }
-  });
-});
-
-// System dark mode tracking.
-const media = window.matchMedia("(prefers-color-scheme: dark)");
-const [systemDark, setSystemDark] = createSignal(media.matches);
-media.addEventListener("change", (e) => setSystemDark(e.matches));
-export const isDark = () => (prefs.themeMode === "system" ? systemDark() : prefs.themeMode === "dark");
-
-// ------------------------------------------------------------------ vault
-
-export const [root, setRoot] = createSignal<string | null>(null);
-export const [tree, setTree] = createSignal<Entry[]>([]);
-export const [notesList, setNotesList] = createSignal<string[]>([]);
-
-/** Every file in the vault tree (notes, PDFs, images…). */
-export function allFiles(): string[] {
-  const out: string[] = [];
-  const walk = (es: Entry[]) => es.forEach((e) => (e.is_dir ? walk(e.children) : out.push(e.path)));
-  walk(tree());
-  return out;
-}
-
-/** A PDF link to follow: the PDF view scrolls to the page / annotation. `n` makes repeats distinct. */
-export const [pdfJump, setPdfJump] = createSignal<{ path: string; page?: number; annotation?: string; n: number } | null>(null);
-
-export interface Buffer {
-  content: string;
-  saved: string;
-}
-
-interface State {
-  tabs: string[];
-  active: string | null;
-  buffers: Record<string, Buffer>;
-}
-
-export const [state, setState] = createStore<State>({ tabs: [], active: null, buffers: {} });
-
-/** The CodeMirror view of the active note (set by the editor). */
-export const [editorView, setEditorView] = createSignal<EditorView | null>(null);
-/** Effective theme of the active note (for WYSIWYM styling + styles panel). */
-export const [activeTheme, setActiveTheme] = createSignal<Theme | null>(null);
-
-export function activeThemeKey() {
-  const path = state.active;
-  if (!path || !isNotePath(path)) return "";
-  const text = state.buffers[path]?.content ?? "";
-  const meta = path.endsWith(".typ") ? text.split("\n", 1)[0] : text.slice(0, frontmatterRange(text)?.to ?? 0);
-  return `${root()}\u0000${path}\u0000${meta}`;
-}
-
-let themeRequest = 0;
-export async function refreshActiveTheme() {
-  const path = state.active;
-  const key = activeThemeKey();
-  const request = ++themeRequest;
-  if (!path || !key) return setActiveTheme(null);
-  const theme = await ipc.noteTheme(path, state.buffers[path]?.content ?? "").catch(() => null);
-  if (request === themeRequest && key === activeThemeKey()) setActiveTheme(theme);
-}
-/** Cursor info for the status bar. */
-export const [cursor, setCursor] = createSignal({ line: 1, col: 1, selected: 0 });
-
-export const activeBuffer = () => (state.active ? state.buffers[state.active] : undefined);
-export const isDirty = (path: string) => {
-  const b = state.buffers[path];
-  return !!b && b.content !== b.saved;
-};
-
-const saveTimers = new Map<string, number>();
-
-export function rememberVault(path: string) {
-  setPrefs("lastVault", path);
-  setPrefs("recentVaults", (r) => [path, ...r.filter((p) => p !== path)].slice(0, 8));
-}
+export { reloadFromDisk, save, saveAll, updateContent } from "./noteBuffers";
+export * from "./preferences";
+export * from "./vaultState";
+export * from "./workspace";
 
 /**
  * Reload the file tree. Saving a note also reaches here (through the vault
@@ -391,9 +77,6 @@ export async function openOsPath(p: string) {
   if (now && path.startsWith(now + "/")) await openNote(path.slice(now.length + 1));
 }
 
-/** Bumped when files change on disk, so image/PDF tabs reload. */
-export const [fileRev, setFileRev] = createSignal(0);
-
 let noteOpenSeq = 0;
 let keepFocusFor: string | null = null;
 
@@ -437,43 +120,21 @@ export async function openNote(path: string, opts: { line?: number; keepFocus?: 
   }, 30));
 }
 
+export function goToPreviewDiagnostic(line: number) {
+  if (viewLayout() === "preview" || readingTypst()) {
+    if (prefs.editorMode === "read") setPrefs("editorMode", "source");
+    if (viewLayout() === "preview") setWorkspaceLayout("editor");
+    const path = state.active;
+    requestAnimationFrame(() => { if (state.active === path) goToLine(line); });
+  } else goToLine(line);
+}
+
 export function goToLine(line: number) {
   const view = editorView();
   if (!view) return;
   const l = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines)));
   view.dispatch({ selection: { anchor: l.from }, scrollIntoView: true });
   view.focus();
-}
-
-export function updateContent(path: string, content: string) {
-  if (!state.buffers[path]) return;
-  setState("buffers", path, "content", content);
-  app.events.emit("note:changed", { path, content });
-  clearTimeout(saveTimers.get(path));
-  saveTimers.set(path, window.setTimeout(() => void save(path).catch(() => {}), prefs.autosaveMs));
-}
-
-export async function save(path: string) {
-  clearTimeout(saveTimers.get(path));
-  const b = state.buffers[path];
-  if (!b || b.content === b.saved) return;
-  const content = b.content;
-  try {
-    await ipc.write(path, content);
-    if (state.buffers[path]) setState("buffers", path, "saved", content);
-    app.events.emit("note:saved", { path });
-  } catch (e) {
-    notify(t("Save failed: {error}", { error: e }), "error");
-    throw e;
-  }
-}
-
-export async function saveAll() {
-  const results = await Promise.allSettled([flushSaveParticipants(), flushComments(), ...Object.keys(state.buffers).map(save)]);
-  const failure = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
-  if (failure) throw failure.reason;
-  await flushWrites();
-  if (Object.keys(state.buffers).some(isDirty)) await saveAll();
 }
 
 export async function closeTab(path: string) {
@@ -556,9 +217,7 @@ async function relocate(path: string, to: string) {
     renameBookmarkPaths(path, to);
     // Rewritten notes that are open: take the new text (no unsaved edits — saveAll above).
     for (const p of changed.filter((c) => state.buffers[c])) {
-      const content = await ipc.read(p);
-      setState("buffers", p, { content, saved: content });
-      app.events.emit("note:reloaded", { path: p, content });
+      await reloadFromDisk(p);
     }
     await refreshTree();
     if (changed.length) notify(t("Updated links in {notes}", { notes: tn(changed.length, "{n} note", "{n} notes") }), "success");
@@ -622,15 +281,6 @@ export async function deleteEntry(path: string) {
 
 // ------------------------------------------------- changes made on disk
 
-/** Take an open note's text from disk (after the app rewrote it, e.g. replace). */
-export async function reloadFromDisk(path: string) {
-  if (!state.buffers[path]) return;
-  const content = await ipc.read(path);
-  clearTimeout(saveTimers.get(path));
-  setState("buffers", path, { content, saved: content });
-  app.events.emit("note:reloaded", { path, content });
-}
-
 let fsTreeTimer: number | undefined;
 
 /** Files changed outside the app: refresh the tree and open notes. */
@@ -659,130 +309,13 @@ async function vaultChanged(paths: string[]) {
       if (disk !== b.saved) setState("buffers", tab, "saved", disk);
       continue; // our own save, or nothing new
     }
-    const reload = () => {
-      clearTimeout(saveTimers.get(tab));
-      setState("buffers", tab, { content: disk, saved: disk });
-      app.events.emit("note:reloaded", { path: tab, content: disk });
-    };
+    const reload = () => replaceSavedBuffer(tab, disk);
     if (b.content === b.saved) reload();
     else {
-      clearTimeout(saveTimers.get(tab)); // don't overwrite the disk version silently
+      cancelAutosave(tab); // don't overwrite the disk version silently
       notify(t("\"{name}\" changed on disk while you were editing.", { name: tab }), "error", { label: t("Reload from disk"), run: reload }, 20000);
     }
   }
 }
 
 onVaultFs((paths) => void vaultChanged(paths));
-
-// ------------------------------------------------------------- UI state
-
-export type Dialog =
-  | null
-  | { kind: "palette"; mode: "files" | "commands" }
-  | { kind: "pick"; placeholder: string; items: PickItem[] }
-  | { kind: "settings"; tab?: string }
-  | { kind: "style"; key: string; scope: "note" | "theme" }
-  | { kind: "page" }
-  | { kind: "help"; doc?: string; anchor?: string }
-  | { kind: "themes" }
-  | { kind: "diagrams" }
-  | { kind: "typst"; source: string }
-  | { kind: "history"; tab?: "note" | "deleted" | "snapshots"; path?: string }
-  /** deck: open a session for that deck (null = all); missing = the deck list. */
-  | { kind: "review"; deck?: string | null };
-
-export interface PickItem {
-  label: string;
-  detail?: string;
-  run: () => void;
-}
-
-export const [dialog, setDialog] = createSignal<Dialog>(null);
-/** Let the user choose one of `items` (a palette-style list). */
-export const pick = (placeholder: string, items: PickItem[]) => setDialog({ kind: "pick", placeholder, items });
-const SIDEBAR_TAB_KEY = "notez.sidebarTab";
-const [sidebarTabRaw, setSidebarTabRaw] = createSignal<string>(
-  (() => {
-    try {
-      return localStorage.getItem(SIDEBAR_TAB_KEY) || "files";
-    } catch {
-      return "files";
-    }
-  })(),
-);
-const [paneRequest, setPaneRequest] = createSignal(0);
-/** The sidebar pane shown (files, search, tags, bookmarks); remembered between sessions. */
-export const sidebarTab = sidebarTabRaw;
-/** Bumped each time a pane is asked for, so it can focus its input again. */
-export const sidebarPaneRequest = paneRequest;
-/** Show a sidebar pane — opening the sidebar (and leaving focus mode) if it is hidden. */
-export function setSidebarTab(id: string) {
-  setSidebarTabRaw(id);
-  try {
-    localStorage.setItem(SIDEBAR_TAB_KEY, id);
-  } catch {
-    /* storage unavailable */
-  }
-  if (focusMode()) setFocusMode(false);
-  setSidebarOpen(true);
-  setPaneRequest((n) => n + 1);
-}
-export const [rightTab, setRightTab] = createSignal<string>("preview");
-export const [graphOpen, setGraphOpen] = createSignal(false);
-const compactMedia = window.matchMedia("(max-width: 1000px)");
-const [compactWorkspace, setCompactWorkspace] = createSignal(compactMedia.matches);
-export { compactWorkspace };
-const [compactPanel, setDrawer] = createSignal<"sidebar" | "right" | null>(null);
-const [panelFile, setPanelFile] = createSignal<string | null>(null);
-export { compactPanel };
-export function setCompactPanel(panel: ReturnType<typeof compactPanel>) {
-  if (compactPanel() === "right" && panel !== "right" && prefs.layout === "preview") setRightTab("preview");
-  setDrawer(panel);
-}
-compactMedia.addEventListener("change", (event) => {
-  batch(() => {
-    setCompactPanel(null);
-    setCompactWorkspace(event.matches);
-  });
-});
-
-export const sidebarOpen = () => compactWorkspace() ? compactPanel() === "sidebar" : prefs.sidebarOpen;
-export function setSidebarOpen(open: boolean) {
-  if (!compactWorkspace()) setPrefs("sidebarOpen", open);
-  else if (open || compactPanel() === "sidebar") setCompactPanel(open ? "sidebar" : null);
-}
-
-export function showRightPanel(id: string) {
-  if (!root()) return;
-  batch(() => {
-    setFocusMode(false);
-    setGraphOpen(false);
-    setRightTab(id);
-    if (compactWorkspace()) {
-      setCompactPanel(id === "preview" && prefs.layout === "preview" && isNotePath(state.active) ? null : "right");
-    } else {
-      setPanelFile(state.active && !isNotePath(state.active) ? state.active : null);
-      if (prefs.layout !== "split" && (prefs.layout !== "preview" || id !== "preview")) setPrefs("layout", "split");
-    }
-  });
-}
-
-export function setWorkspaceLayout(layout: Layout) {
-  batch(() => {
-    if (layout === "preview") setRightTab("preview");
-    setCompactPanel(null);
-    setPanelFile(null);
-    setPrefs("layout", layout);
-  });
-}
-/** Focus mode: only the text — no sidebar, tabs, toolbar or preview. */
-export const [focusMode, setFocusMode] = createSignal(false);
-/** Layout actually shown (focus mode forces the editor alone). */
-export const viewLayout = (): Layout => {
-  if (focusMode()) return "editor";
-  if (prefs.layout === "preview" && compactPanel() === "right" && rightTab() !== "preview") return "split";
-  return prefs.layout;
-};
-export const rightPanelOpen = () => !focusMode() && !graphOpen() && (compactWorkspace()
-  ? compactPanel() === "right" || (viewLayout() === "preview" && isNotePath(state.active))
-  : viewLayout() !== "editor" && (state.active === null || isNotePath(state.active) || panelFile() === state.active || rightTab() !== "preview"));

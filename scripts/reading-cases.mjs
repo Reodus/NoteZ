@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, realpathSync, copyFileSync } from 'node:fs';
 import path from 'node:path';
 
 // Original synthetic text only. A supplied private note is copied to the
@@ -9,6 +9,22 @@ export function readingFixture(vault) {
  const section = n => `## Section ${n}\n\n${Array.from({length:6},(_,i)=>`${n}.${i} ${paragraph}\n`).join('\n')}\n![[scroll-image-${n}.png]]\n\n\`\`\`cpp\n${Array.from({length:45},(_,i)=>`unsigned value_${i} = ${i};`).join('\n')}\n\`\`\`\n\n![[missing-scroll-image.png]]\n\n`;
  const text = process.env.NOTEZ_SCROLL_FILE ? readFileSync(process.env.NOTEZ_SCROLL_FILE,'utf8') : '::: {align=justify}\n![[tall-scroll.svg]]\n\n'+Array.from({length:4},(_,i)=>section(i)).join('')+'::: \n';
  writeFileSync(path.join(vault,'Reading.md'),text);
+ if(process.env.NOTEZ_SCROLL_ASSETS_ROOT) {
+  const assetsRoot = realpathSync(process.env.NOTEZ_SCROLL_ASSETS_ROOT);
+  for (const match of text.matchAll(/!\[[^\]\r\n]*\]\((?:<([^>\r\n]+)>|([^\s)]+))\)/g)) {
+   const url = match[1] ?? match[2];
+   let target;
+   try { target = decodeURIComponent(url.split(/[?#]/, 1)[0]).replace(/^\/+/, ''); }
+   catch { continue; }
+   if (/^[\w+.-]+:/.test(target) || target.split('/').includes('..')) continue;
+   const source = path.join(assetsRoot, target);
+   if (!existsSync(source) || !realpathSync(source).startsWith(assetsRoot + path.sep)) continue;
+   const destination = path.join(vault, target);
+   mkdirSync(path.dirname(destination), {recursive:true});
+   copyFileSync(source, destination);
+  }
+ }
+
  if(!process.env.NOTEZ_SCROLL_FILE)writeFileSync(path.join(vault,'tall-scroll.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="300" height="1200"><rect width="300" height="1200" fill="#6c5ce7"/></svg>');
  if(!process.env.NOTEZ_SCROLL_FILE || process.env.NOTEZ_SCROLL_IMAGES==='1') {
   for(const m of text.matchAll(/!\[\[([^\]\n]+\.png)\]\]/g)) {

@@ -9,6 +9,7 @@ import { createServer } from 'vite';
 import { readingFixture, checkReading } from './reading-cases.mjs';
 import { checkScroll } from './scroll-cases.mjs';
 import { checkAutoPair, checkEditor } from './editor-cases.mjs';
+import { checkEditorModes } from './editor-modes-cases.mjs';
 import { checkDocumentThemes } from './theme-cases.mjs';
 import { checkTableColumns } from './column-cases.mjs';
 import { checkFootnoteComposer } from './footnote-cases.mjs';
@@ -96,6 +97,9 @@ try {
   await checkReading({evaluate,rpc,sleep,scratch,vault,original:readingText});
   assert.deepEqual(await evaluate('window.testErrors'),[]);assert.equal(exceptions.length,0,JSON.stringify(exceptions));assert.deepEqual(layoutWarnings,[],'editor geometry must stabilize');
   console.log('Reading artifacts: '+scratch);
+ } else if (process.argv.includes('--editor-modes')) {
+  await checkEditorModes({evaluate,rpc,until,vault,scratch});
+  assert.deepEqual(exceptions, []);
  } else {
  await rpc('Emulation.setDeviceMetricsOverride',{width:1280,height:850,deviceScaleFactor:1,mobile:false});
  await until(()=>evaluate("innerWidth===1280&&!window.test.s.compactWorkspace()"),'desktop workspace width');
@@ -106,6 +110,7 @@ try {
  await checkMiddleClickTab({evaluate,rpc,until});
  await checkAutoPair({evaluate,rpc,until});
  await checkEditor({evaluate,rpc,sleep});
+ await checkEditorModes({evaluate,rpc,until,vault,scratch});
  await checkScroll(evaluate,sleep);
  assert.deepEqual(layoutWarnings,[],'Source and Live scroll restores must stabilize');
  await checkDocumentThemes({evaluate,rpc,until,vault});
@@ -140,18 +145,20 @@ try {
  }
  await evaluate(`window.test.s.setPrefs('editorMode','live')`);await sleep(180);
  // Rendered table widgets ignore CodeMirror input; hover must still expose
- // a grip on the actual LTR/RTL edge without covering cells.
+ // a grip on the interface gutter without covering cells.
  for(const n of [0,1]) {
   await evaluate(`(()=>{const v=window.test.s.editorView();v.dispatch({selection:{anchor:0}});const table=document.querySelectorAll('.nz-edit-table')[${n}];table.scrollIntoView({block:'center'})})()`);await sleep(300);
   const rect=await evaluate(`(()=>{const r=document.querySelectorAll('.nz-edit-table')[${n}].getBoundingClientRect();return {left:r.left,right:r.right,top:r.top}})()`);
   await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:rect.left+15,y:rect.top+15});await sleep(300);
-  const h=await evaluate(`(()=>{const h=document.querySelector('.cm-nz-handle.visible');if(!h)throw Error('No rendered table handle');const r=h.getBoundingClientRect();return {left:r.left,right:r.right}})()`);
-  assert.ok(n===0?h.right<=rect.left:h.left>=rect.right,`table ${n} grip overlaps widget: ${JSON.stringify({rect,h})}`);
+  const h=await evaluate(`(()=>{const h=document.querySelector('.cm-nz-handle.visible');if(!h)throw Error('No rendered table handle');const r=h.getBoundingClientRect(),editor=h.closest('.cm-editor').getBoundingClientRect();return {left:r.left,right:r.right,gutter:document.documentElement.dir==='rtl'?editor.right-r.right:r.left-editor.left,rtl:document.documentElement.dir==='rtl'}})()`);
+  assert.ok(h.rtl?h.left>=rect.right:h.right<=rect.left,`table ${n} grip overlaps widget: ${JSON.stringify({rect,h})}`);
+  assert.ok(h.gutter>=0&&h.gutter<=5,'grip uses the same fixed gutter for both table directions');
   const shot=await rpc('Page.captureScreenshot',{format:'png'});writeFileSync(path.join(scratch,`table-${n}.png`),Buffer.from(shot.data,'base64'));
  }
  // Escape cancels an active pointer drag and removes its global cursor state.
  const cancelGrip=await hover('Alpha');
  const scrollBefore=await evaluate(`({top:window.test.s.editorView().scrollDOM.scrollTop,text:window.test.s.editorView().state.doc.toString(),bottom:window.test.s.editorView().scrollDOM.getBoundingClientRect().bottom})`);
+ await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:cancelGrip.x,y:cancelGrip.y,buttons:0});
  await rpc('Input.dispatchMouseEvent',{type:'mousePressed',x:cancelGrip.x,y:cancelGrip.y,button:'left',clickCount:1});
  await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',x:cancelGrip.x+30,y:scrollBefore.bottom-4,buttons:1});
  await until(()=>evaluate("!!document.querySelector('.nz-drag-float')"),'editor block follows the pointer');
@@ -161,7 +168,7 @@ try {
  assert.equal(await evaluate(`document.body.classList.contains('nz-dragging-block')`),false);
  await until(()=>evaluate("!document.querySelector('.nz-drag-float')"),'cancel clears the floating editor block');
  assert.equal(await evaluate(`window.test.s.editorView().state.doc.toString()`),scrollBefore.text,'cancel must retain document');
- await evaluate(`(async()=>{const {s,ipc}=window.test;await s.saveAll();await ipc.createFolder('folder');await s.renameEntry('Audit.md','Renamed.md');await s.moveEntry('Renamed.md','folder');await s.renameEntry('folder','archive');await s.saveAll();await s.openNote('Other.md');const tabs=document.querySelectorAll('.tab'),dataTransfer=new DataTransfer();tabs[1].dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer}));tabs[0].dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer}));tabs[0].dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer}));if(s.state.tabs[0]!=='Other.md')throw Error('Tab reorder failed');await s.openNote('archive/Renamed.md');const section=await ipc.noteSection('Other.md','Renamed');if(section?.path!=='archive/Renamed.md')throw Error('Renamed link no longer resolves')})()`);
+ await evaluate(`(async()=>{const {s,ipc}=window.test;await s.saveAll();await ipc.createFolder('folder');await s.renameEntry('Audit.md','Renamed.md');await s.moveEntry('Renamed.md','folder');await s.renameEntry('folder','archive');await s.saveAll();await s.openNote('Other.md');const tabs=document.querySelectorAll('.tab'),dataTransfer=new DataTransfer(),other=document.querySelector('.tab[title="Other.md"]');other.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer}));tabs[0].dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer}));tabs[0].dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer}));if(s.state.tabs[0]!=='Other.md')throw Error('Tab reorder failed');await s.openNote('archive/Renamed.md');const section=await ipc.noteSection('Other.md','Renamed');if(section?.path!=='archive/Renamed.md')throw Error('Renamed link no longer resolves')})()`);
  assert.ok(existsSync(path.join(vault,'.notez/comments/archive/Renamed.md.json')),'sidecar follows file/folder');
  // Real render/export, history and encrypted folder sync use only the scratch vault.
  await evaluate(`(async()=>{const {s,c,ipc}=window.test,p=s.state.active,text=s.state.buffers[p].content;const {injectComments}=await import('/src/core/commentPdf.ts');await ipc.exportPdf(p,injectComments(p,text,c.comments[p]),[],${JSON.stringify(path.join(scratch,'audit.pdf'))});await ipc.exportHtml(p,text,[],${JSON.stringify(path.join(scratch,'audit.html'))});await ipc.exportDocx(p,text,[],${JSON.stringify(path.join(scratch,'audit.docx'))});const hits=await ipc.search('Alpha');if(!hits.length)throw Error('Search failed');await ipc.historyKeep(p,'before-restore');const versions=await ipc.historyList(p);if(!versions.length)throw Error('No history');const version=versions[0];await ipc.historyRestore(p,version.h);await s.reloadFromDisk(p);await ipc.snapshotCreate('smoke');await s.deleteEntry('Other.md');const deleted=(await ipc.historyDeleted()).find(x=>x.path==='Other.md');if(!deleted)throw Error('Deleted note not recoverable');await ipc.historyRestore('Other.md',deleted.h);await s.refreshTree();if(!(await ipc.read('Other.md')).includes('Renamed'))throw Error('Restore lost links');await s.saveAll();await ipc.syncRun({kind:'folder',url:${JSON.stringify(path.join(scratch,'remote'))},user:'',password:'',bucket:'',region:'',prefix:''},'test-only-passphrase')})()`);

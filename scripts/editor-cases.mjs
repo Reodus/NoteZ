@@ -70,10 +70,10 @@ export async function checkEditor({evaluate,rpc,sleep}) {
  await evaluate(`(()=>{const v=window.test.s.editorView();window.test.s.setPrefs('editorMode','live');const p=v.state.doc.toString().indexOf('تصویر');v.dispatch({selection:{anchor:p},scrollIntoView:true})})()`);await sleep(500);
  const point=await evaluate(`(()=>{const v=window.test.s.editorView(),c=v.coordsAtPos(v.state.selection.main.head);return {x:c.left,y:c.top+5}})()`);
  await rpc('Input.dispatchMouseEvent',{type:'mouseMoved',...point});await sleep(300);
- const geometry=await evaluate(`(()=>{const h=document.querySelector('.cm-nz-handle.visible'),preview=document.querySelector('.cm-nz-lp-image.preview'),line=preview?.closest('.cm-line');return {handle:h?.getBoundingClientRect().toJSON(),line:line?.getBoundingClientRect().toJSON(),height:window.test.s.editorView().defaultLineHeight,rtl:line&&getComputedStyle(line).direction==='rtl',source:line?.querySelector('.cm-nz-ltr-run')?.getBoundingClientRect().toJSON()}})()`);
+ const geometry=await evaluate(`(()=>{const h=document.querySelector('.cm-nz-handle.visible'),preview=document.querySelector('.cm-nz-lp-image.preview'),line=preview?.closest('.cm-line');return {handle:h?.getBoundingClientRect().toJSON(),line:line?.getBoundingClientRect().toJSON(),height:window.test.s.editorView().defaultLineHeight,editor:window.test.s.editorView().dom.getBoundingClientRect().toJSON(),rtl:document.documentElement.dir==='rtl',source:line?.querySelector('.cm-nz-ltr-run')?.getBoundingClientRect().toJSON()}})()`);
  assert.ok(geometry.handle&&geometry.line,JSON.stringify(geometry));
  assert.ok(geometry.handle.top>=geometry.line.top-1&&geometry.handle.bottom<=geometry.line.top+geometry.height+2,'image source grip aligns with text row: '+JSON.stringify(geometry));
- assert.ok(geometry.rtl?geometry.handle.left>=geometry.source.right:geometry.handle.right<=geometry.source.left,'image source grip stays outside path: '+JSON.stringify(geometry));
+ assert.ok(Math.abs(geometry.rtl?geometry.editor.right-geometry.handle.right:geometry.handle.left-geometry.editor.left)<=5,'image grip stays in the interface gutter: '+JSON.stringify(geometry));
  await evaluate(`(async()=>{const {s}=window.test;await s.closeTab('Editor.md');await s.openNote('Audit.md')})()`);
  console.log('Editor regressions: title Enter, mixed bidi row end, image source grip');
 }

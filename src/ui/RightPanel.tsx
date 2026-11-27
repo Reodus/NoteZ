@@ -1,142 +1,17 @@
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { startResize } from "./resize";
-import {
-  Eye, Palette, ZoomIn, ZoomOut, AlertTriangle, CheckCircle2, Loader2, FileDown,
-  FileCode, Pencil, Plus, Ellipsis, ArrowUp, ArrowDown, X,
-} from "lucide-solid";
+import { Eye, Palette, Pencil, Plus, Ellipsis, ArrowUp, ArrowDown, X } from "lucide-solid";
 import { app, Panel } from "../core/app";
 import {
-  state, rightTab, setRightTab, goToLine, activeTheme, setDialog, prefs, setPrefs, compactWorkspace, showRightPanel, CALENDAR_PANEL,
+  state, rightTab, setRightTab, activeTheme, setDialog, prefs, setPrefs, compactWorkspace, showRightPanel, CALENDAR_PANEL,
 } from "../core/store";
-import { preview, exportPdf, showGeneratedTypst, runPreview } from "../core/render";
 import { isTypst } from "../editor/format";
 import { previewCss } from "./Toolbar";
 import { Modal, SvgIcon, openMenuAt } from "./primitives";
-import { exportItems } from "./fileMenu";
+import { PreviewPane } from "./PreviewPane";
 import { isNotePath } from "../core/ipc";
 
-import { t, tn } from "../core/i18n";
-// --------------------------------------------------------------- preview
-
-function PreviewPane() {
-  const [zoom, setZoom] = createSignal<number | "fit">(prefs.previewZoom > 0 ? prefs.previewZoom : "fit");
-  const [width, setWidth] = createSignal(500);
-  let scroller!: HTMLDivElement;
-
-  let resizeFrame = 0;
-  const ro = new ResizeObserver(([e]) => {
-    const width = e.contentRect.width;
-    cancelAnimationFrame(resizeFrame);
-    resizeFrame = requestAnimationFrame(() => { resizeFrame = 0; setWidth(width); });
-  });
-  createEffect(() => scroller && ro.observe(scroller));
-  onCleanup(() => { ro.disconnect(); cancelAnimationFrame(resizeFrame); });
-
-  // A4 is 595pt wide; Typst SVGs carry pt-based width. "Fit" fills the
-  // pane but never grows past real size (100%), so a wide pane doesn't blow
-  // pages up. contentRect already excludes the scroller's padding.
-  const A4 = 595 * 1.333;
-  const pageWidth = () => (zoom() === "fit" ? Math.min(A4, Math.max(200, width())) : A4 * (zoom() as number));
-  const errors = () => preview().diagnostics.filter((d) => d.severity === "error");
-  const warnings = () => preview().diagnostics.filter((d) => d.severity === "warning");
-  const stale = () => preview().path !== state.active;
-
-  createEffect(on(() => state.active, () => runPreview()));
-
-  const step = (d: number) => {
-    const z = zoom() === "fit" ? pageWidth() / A4 : (zoom() as number);
-    setZoom(Math.min(3, Math.max(0.3, Math.round((z + d) * 10) / 10)));
-  };
-
-  return (
-    <div class="preview-pane">
-      <div class="preview-bar">
-        <span class="preview-status" classList={{ err: errors().length > 0 }}>
-          <Show
-            when={!preview().busy}
-            fallback={<><Loader2 size={14} class="spin" /> {t("Rendering…")}</>}
-          >
-            <Show when={errors().length} fallback={<><CheckCircle2 size={14} /> {t("{pages} pages · {ms} ms", { pages: preview().pages.length, ms: preview().millis })}</>}>
-              <AlertTriangle size={14} /> {tn(errors().length, "{n} error", "{n} errors")}
-            </Show>
-          </Show>
-        </span>
-        <div class="spacer" />
-        <button class="icon-btn" title={t("Zoom out")} onClick={() => step(-0.1)}><ZoomOut size={15} /></button>
-        <button class="zoom-label" title={t("Fit width")} onClick={() => setZoom("fit")}>
-          {zoom() === "fit" ? t("Fit") : `${Math.round((zoom() as number) * 100)}%`}
-        </button>
-        <button class="icon-btn" title={t("Zoom in")} onClick={() => step(0.1)}><ZoomIn size={15} /></button>
-        <button class="icon-btn" title={t("View generated Typst")} onClick={async () => {
-          const src = await showGeneratedTypst();
-          if (src) setDialog({ kind: "typst", source: src });
-        }}><FileCode size={15} /></button>
-        <Show when={app.commands.has("pdf.export")}>
-          <button class="icon-btn" title={t("Export")} onClick={(e) => {
-            const p = state.active;
-            if (!p) return void exportPdf();
-            const r = e.currentTarget.getBoundingClientRect();
-            openMenuAt(Math.max(8, r.right - 220), r.bottom + 4, exportItems(p));
-          }}><FileDown size={15} /></button>
-        </Show>
-      </div>
-
-      <Show when={errors().length || warnings().length || preview().notes.length}>
-        <div class="diag-list">
-          <For each={preview().notes}>{(n) => <div class="diag warning"><AlertTriangle size={13} /> {n}</div>}</For>
-          <For each={[...errors(), ...warnings()].slice(0, 6)}>
-            {(d) => (
-              <div class={`diag ${d.severity}`} onClick={() => d.line && goToLine(d.line)} classList={{ link: !!d.line }}>
-                <AlertTriangle size={13} />
-                <span>
-                  <Show when={d.line}><b>{t("Line {line}:", { line: d.line! })} </b></Show>
-                  {d.message}
-                  <Show when={d.hints.length}><em> — {d.hints[0]}</em></Show>
-                  <Show when={d.file}><small> ({d.file})</small></Show>
-                </span>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
-
-      <div class="preview-scroll" ref={scroller} classList={{ dim: stale() || errors().length > 0 }}>
-        <Show
-          when={preview().pages.length}
-          fallback={
-            <div class="preview-empty">
-              <Show when={state.active} fallback={t("Open a note to see its PDF preview")}>
-                <Show when={preview().busy} fallback={t("Nothing to show yet")}>
-                  <Loader2 size={22} class="spin" />
-                </Show>
-              </Show>
-            </div>
-          }
-        >
-          <For each={preview().pages}>
-            {(svg, i) => (
-              <div class="page-wrap">
-                <div class="page" style={{ width: `${pageWidth()}px` }}>
-                  <PageImage svg={svg} />
-                </div>
-                <div class="page-num">{i() + 1}</div>
-              </div>
-            )}
-          </For>
-        </Show>
-      </div>
-    </div>
-  );
-}
-
-/** A preview page as an <img>: the browser rasterizes it once and scrolling
- *  only moves pixels (inline SVG pages were re-painted on every frame). */
-function PageImage(props: { svg: string }) {
-  const url = URL.createObjectURL(new Blob([props.svg], { type: "image/svg+xml" }));
-  onCleanup(() => URL.revokeObjectURL(url));
-  return <img src={url} decoding="async" draggable={false} alt="" />;
-}
-
+import { t } from "../core/i18n";
 // ----------------------------------------------------------------- styles
 
 export const STYLE_LABELS: [string, string][] = [
