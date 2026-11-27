@@ -7,6 +7,7 @@ export type Attrs = Record<string, string>;
 
 /** What explicitDirs needs from a CodeMirror `Text` (1-based lines). */
 export interface Lines {
+  readonly lines?: number;
   line(n: number): { text: string };
 }
 
@@ -61,28 +62,70 @@ export function rtlLine(text: string): boolean {
 const DIV_OPEN = /^\s*:::\s*(\{.*\}|\S.*)\s*$/;
 const DIV_CLOSE = /^\s*:::\s*$/;
 
-/** Explicit `dir` of the `:::` blocks enclosing each line, from line 1 up to `last`. */
-export function explicitDirs(doc: Lines, last: number): ("rtl" | "ltr" | null)[] {
-  const out: ("rtl" | "ltr" | null)[] = [null];
-  const stack: ("rtl" | "ltr" | null)[] = [];
-  let inFence = false;
-  for (let i = 1; i <= last; i++) {
-    const text = doc.line(i).text;
-    const cur = stack.length ? stack[stack.length - 1] : null;
-    out.push(cur);
-    if (/^\s*(```|~~~)/.test(text)) inFence = !inFence;
-    if (inFence) continue;
-    if (DIV_CLOSE.test(text)) stack.pop();
-    else {
-      const m = DIV_OPEN.exec(text);
-      if (m) {
-        const a = parseAttrs(m[1]);
-        const d = a.dir === "rtl" || a.dir === "ltr" ? a.dir : a.lang ? (isRtlLang(a.lang) ? "rtl" : "ltr") : cur;
-        stack.push(d);
+export interface MarkdownDiv {
+  open: number;
+  close: number | null;
+  attrs: Attrs;
+  effective: Attrs;
+  direction: "rtl" | "ltr" | null;
+  parent: MarkdownDiv | null;
+}
+
+const divCache = new WeakMap<Lines, { at: (MarkdownDiv | null)[]; markers: Map<number, MarkdownDiv | null> }>();
+
+/** Parse once per document so formatting controls, styling and previews agree. */
+export function markdownDivs(doc: Lines, last = doc.lines ?? 0) {
+  const cached = doc.lines === undefined ? undefined : divCache.get(doc);
+  if (cached) return cached;
+  const at: (MarkdownDiv | null)[] = [null];
+  const markers = new Map<number, MarkdownDiv | null>();
+  const stack: MarkdownDiv[] = [];
+  let frontmatter = last > 0 && doc.line(1).text === "---";
+  let fence = "";
+  for (let n = 1; n <= last; n++) {
+    const text = doc.line(n).text;
+    const current = stack.at(-1) ?? null;
+    at[n] = current;
+    if (frontmatter) {
+      if (n > 1 && /^(---|\.\.\.)\s*$/.test(text)) frontmatter = false;
+      continue;
+    }
+    const code = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(text);
+    if (fence) {
+      if (code && code[1][0] === fence[0] && code[1].length >= fence.length && !code[2].trim()) fence = "";
+      continue;
+    }
+    if (code) {
+      fence = code[1];
+      continue;
+    }
+    if (DIV_CLOSE.test(text)) {
+      markers.set(n, current);
+      if (current) {
+        current.close = n;
+        stack.pop();
       }
+      continue;
+    }
+    const open = DIV_OPEN.exec(text);
+    if (open) {
+      const attrs = parseAttrs(open[1]);
+      const direction: MarkdownDiv["direction"] = attrs.dir === "rtl" || attrs.dir === "ltr" ? attrs.dir
+        : attrs.lang ? (isRtlLang(attrs.lang) ? "rtl" : "ltr") : current?.direction ?? null;
+      const div = { open: n, close: null, attrs, effective: { ...current?.effective, ...attrs }, direction, parent: current };
+      stack.push(div);
+      at[n] = div;
+      markers.set(n, div);
     }
   }
-  return out;
+  const result = { at, markers };
+  if (doc.lines === last) divCache.set(doc, result);
+  return result;
+}
+
+/** Explicit `dir` of the `:::` blocks enclosing each line, from line 1 up to `last`. */
+export function explicitDirs(doc: Lines, last: number): ("rtl" | "ltr" | null)[] {
+  return markdownDivs(doc, doc.lines ?? last).at.slice(0, last + 1).map(div => div?.direction ?? null);
 }
 
 /**
@@ -91,7 +134,7 @@ export function explicitDirs(doc: Lines, last: number): ("rtl" | "ltr" | null)[]
  * editor and the PDF agree (md.rs `directed`).
  */
 export function explicitDirAt(doc: Lines, line: number): "rtl" | "ltr" | null {
-  return explicitDirs(doc, line)[line] ?? null;
+  return markdownDivs(doc, doc.lines ?? line).at[line]?.direction ?? null;
 }
 
 /**

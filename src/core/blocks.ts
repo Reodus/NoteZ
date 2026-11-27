@@ -1,6 +1,7 @@
 // Blocks across notes: adding `^block-id`s, link text for a block, showing
 // what a link points at, and the Markdown → HTML used by embeds and previews.
-import { EditorView } from "@codemirror/view";
+import type { EditorView } from "@codemirror/view";
+import { revealEditorPosition } from "../editor/navigation";
 import { ipc, stem } from "./ipc";
 import { textChange } from "./textChange";
 import { editorView, notesList, state, updateContent } from "./store";
@@ -164,8 +165,7 @@ export function revealInOpenNote(sub: string): boolean {
   const r = findInOpenNote(sub);
   if (!view || !r) return false;
   const line = view.state.doc.line(r.start);
-  view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "center" }) });
-  view.focus();
+  revealEditorPosition(view, line.from);
   flashLines(view, r.start, sub.replace(/^#/, "").startsWith("^") ? r.end : r.start);
   return true;
 }

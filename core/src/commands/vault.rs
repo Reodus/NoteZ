@@ -6,20 +6,7 @@ pub(super) fn open_vault(state: &AppState, path: String) -> Res<Vec<vault::Entry
     let root = PathBuf::from(path);
     let tree = vault::tree(&root)?;
     *state.vault.lock().unwrap() = Some(root.clone());
-    // Build the index in the background; queries before it is done wait for it.
-    {
-        let index = state.index.clone();
-        let mut guard = index.lock().unwrap();
-        *guard = None;
-        drop(guard);
-        let r = root.clone();
-        std::thread::spawn(move || {
-            let mut g = index.lock().unwrap();
-            if g.is_none() {
-                *g = Some(vault::Index::build(&r));
-            }
-        });
-    }
+    *state.index.lock().unwrap() = None;
     state.world.lock().unwrap().set_vault(Some(root.clone()));
     state.snippets.lock().unwrap().set_vault(Some(root));
     Ok(tree)
@@ -37,8 +24,11 @@ pub(super) fn read_note(state: &AppState, path: String) -> Res<String> {
     vault::read(&state.root()?, &path)
 }
 
-pub(super) fn write_note(state: &AppState, path: String, content: String) -> Res<()> {
+pub(super) fn write_note(state: &AppState, path: String, content: String, vault: Option<String>) -> Res<()> {
     let root = state.root()?;
+    if vault.is_some_and(|path| Path::new(&path) != root) {
+        return Err("the vault changed before the write could be saved".into());
+    }
     if history::tracked(&path) {
         let old = vault::resolve(&root, &path).ok().and_then(|p| std::fs::read(p).ok());
         if let Err(e) = history::on_save(&root, &state.hist(), &path, old.as_deref(), content.as_bytes()) {

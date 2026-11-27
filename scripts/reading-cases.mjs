@@ -7,7 +7,8 @@ import path from 'node:path';
 export function readingFixture(vault) {
  const paragraph = 'این یک متن آزمایشی فارسی برای بررسی حرکت صفحه است. Reading a mixed direction paragraph with `ObjectName` and **bold text** should keep its position. '.repeat(5);
  const section = n => `## Section ${n}\n\n${Array.from({length:6},(_,i)=>`${n}.${i} ${paragraph}\n`).join('\n')}\n![[scroll-image-${n}.png]]\n\n\`\`\`cpp\n${Array.from({length:45},(_,i)=>`unsigned value_${i} = ${i};`).join('\n')}\n\`\`\`\n\n![[missing-scroll-image.png]]\n\n`;
- const text = process.env.NOTEZ_SCROLL_FILE ? readFileSync(process.env.NOTEZ_SCROLL_FILE,'utf8') : '::: {align=justify}\n![[tall-scroll.svg]]\n\n'+Array.from({length:4},(_,i)=>section(i)).join('')+'::: \n';
+ const multiline = '![Multiline image caption\nادامهٔ توضیح](tall-scroll.svg)\n\n[Multiline destination](\ntall-scroll.svg)\n\n';
+ const text = process.env.NOTEZ_SCROLL_FILE ? readFileSync(process.env.NOTEZ_SCROLL_FILE,'utf8') : '::: {align=justify}\n![[tall-scroll.svg]]\n\n'+Array.from({length:4},(_,i)=>section(i)).join(multiline)+'::: \n';
  writeFileSync(path.join(vault,'Reading.md'),text);
  if(process.env.NOTEZ_SCROLL_ASSETS_ROOT) {
   const assetsRoot = realpathSync(process.env.NOTEZ_SCROLL_ASSETS_ROOT);
@@ -35,7 +36,7 @@ export function readingFixture(vault) {
  return text;
 }
 
-export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) {
+export async function checkReading({evaluate,rpc,sleep,until,scratch,vault,original}) {
  const mode=process.env.NOTEZ_READING_MODE==='source'?'source':'live';
  await evaluate(`(async()=>{const {s}=window.test;s.setRightTab('core.outline.pane');await s.openNote('Reading.md');s.setPrefs('editorMode',${JSON.stringify(mode)})})()`);
  if(process.env.NOTEZ_READING_FONT_SIZE)await evaluate(`window.test.s.setPrefs('editorFontSize',${Math.max(10,Math.min(40,Number(process.env.NOTEZ_READING_FONT_SIZE)||16))})`);
@@ -48,14 +49,20 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
   const initialStyle=await cursorStyle();
   for(const direction of [1,-1]) {
    for(let i=0;i<500;i++) {
-    const before=await evaluate(`(()=>{const v=window.test.s.editorView(),r=v.scrollDOM.getBoundingClientRect(),x=(r.left+r.right)/2,y=r.top+r.height/2,p=v.posAtCoords({x,y},false),c=v.coordsAtPos(p);return {x,y,p,cy:c?.top,top:v.scrollDOM.scrollTop,height:v.scrollDOM.scrollHeight,client:v.scrollDOM.clientHeight,line:v.state.doc.lineAt(p).number}})()`);
+    const before=await evaluate(`(()=>{const v=window.test.s.editorView(),r=v.scrollDOM.getBoundingClientRect(),x=(r.left+r.right)/2,y=r.top+r.height/2,p=v.posAtCoords({x,y},false),c=v.coordsAtPos(p);return {x,y,p,cy:c?.top,edge:r.top,top:v.scrollDOM.scrollTop,height:v.scrollDOM.scrollHeight,client:v.scrollDOM.clientHeight,line:v.state.doc.lineAt(p).number}})()`);
     if(direction===1 ? before.top>=before.height-before.client-2 : before.top<=1)break;
-    const delta=400*direction;
+    const delta=(i%2===0 ? 230 : 400)*direction;
     await rpc('Input.dispatchMouseEvent',{type:'mouseWheel',x:before.x,y:before.y,deltaX:0,deltaY:delta});await sleep(100);
     const after=await evaluate(`(()=>{const v=window.test.s.editorView(),c=v.coordsAtPos(${before.p});return {cy:c?.top,top:v.scrollDOM.scrollTop,height:v.scrollDOM.scrollHeight}})()`);
     const expected=Math.max(-before.top,Math.min(delta,before.height-before.client-before.top));
     const error=after.cy==null||before.cy==null ? null : after.cy-before.cy+expected;
     rows.push({direction,i,before,after,error});
+    const expectedY=before.cy==null ? null : before.cy-expected;
+    const shouldStayVisible=expectedY!==null && expectedY>before.edge+24 && expectedY<before.edge+before.client-24;
+    if(shouldStayVisible && after.cy==null) {
+     writeFileSync(path.join(scratch,`reading-${width}.json`),JSON.stringify(rows,null,2));
+     assert.fail(`${mode} text on line ${before.line} disappeared at width ${width}`);
+    }
     // Compare the SAME text position on screen, not scrollTop: CM adjusts
     // offscreen height estimates as it renders, which legitimately changes it.
     if(error!==null && Math.abs(error)>24) {
@@ -74,26 +81,23 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
   const lines=await evaluate(`(()=>{const d=window.test.s.editorView().state.doc;return Array.from({length:d.lines},(_,i)=>d.line(i+1)).filter(l=>l.text.length>250&&!l.text.includes('![[')).filter((_,i)=>i%7===0).slice(0,10).map(l=>l.number)})()`);
   let edits=0;
   for(const n of lines) {
-   // Navigation must materialize the target, as the app's note/block jumps
-   // do. A scroll effect alone can center an estimated height-map gap rather
-   // than this character on platforms with different font metrics. The
-   // selection keeps this position rendered while CM measures the paragraph.
-   // We move the caret away again before the real click below.
    const target=await evaluate(`window.test.s.editorView().state.doc.line(${n}).from+20`);
+   // Exercise one application jump, including its layout correction. Retrying
+   // from the test could conceal a jump that leaves the target offscreen.
+   await evaluate(`window.test.s.goToLine(${n},20)`);
    let point=null,lastGeometry=null;
    const deadline=Date.now()+5000;
    while(Date.now()<deadline){
-    await evaluate(`(()=>{const v=window.test.s.editorView();v.dispatch({selection:{anchor:${target}},effects:v.constructor.scrollIntoView(${target},{y:'center'})})})()`);
     await sleep(100);
     lastGeometry=await evaluate(`(()=>{const v=window.test.s.editorView(),r=v.scrollDOM.getBoundingClientRect(),c=v.coordsAtPos(${target});return {rect:r.toJSON(),coords:c,viewport:v.viewport,top:v.scrollDOM.scrollTop}})()`);
-    const {rect:r,coords:c}=lastGeometry;
-    if(c&&c.top>r.top&&c.bottom<r.bottom&&c.left>=r.left&&c.left<r.right){point={x:c.left,y:(c.top+c.bottom)/2};break;}
+    const {rect:r,coords:c,viewport}=lastGeometry;
+    if(target>=viewport.from&&target<=viewport.to&&c&&c.top>=r.top&&c.bottom<=r.bottom&&c.left>=r.left&&c.left<r.right){point={x:c.left,y:(c.top+c.bottom)/2};break;}
    }
    if(!point)writeFileSync(path.join(scratch,`editing-${width}-${n}.json`),JSON.stringify(lastGeometry,null,2));
-   assert.ok(point,`character ${target} on line ${n} must be reachable for editing: ${JSON.stringify(lastGeometry)}`);
+   assert.ok(point,`character ${target} on line ${n} must be reachable for editing at width ${width}: ${JSON.stringify(lastGeometry)}`);
    await evaluate(`window.test.s.editorView().dispatch({selection:{anchor:0}})`);await sleep(100);
    const clickGeometry=await evaluate(`(()=>{const v=window.test.s.editorView(),c=v.coordsAtPos(${target}),r=v.scrollDOM.getBoundingClientRect();return {c,r:r.toJSON()}})()`);
-   assert.ok(clickGeometry.c&&clickGeometry.c.top>clickGeometry.r.top&&clickGeometry.c.bottom<clickGeometry.r.bottom,'target stays visible with caret elsewhere');
+   assert.ok(clickGeometry.c&&clickGeometry.c.top>=clickGeometry.r.top&&clickGeometry.c.bottom<=clickGeometry.r.bottom,'target stays visible with caret elsewhere');
    point={x:clickGeometry.c.left,y:(clickGeometry.c.top+clickGeometry.c.bottom)/2};
    edits++;
    await rpc('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});
@@ -110,12 +114,21 @@ export async function checkReading({evaluate,rpc,sleep,scratch,vault,original}) 
   const shot=await rpc('Page.captureScreenshot',{format:'png'});writeFileSync(path.join(scratch,`reading-${width}.png`),Buffer.from(shot.data,'base64'));
  }
  if(!process.env.NOTEZ_SCROLL_FILE && mode==='live') {
-  await evaluate(`(()=>{const v=window.test.s.editorView(),p=v.state.doc.toString().indexOf('![[missing-scroll-image.png]]');v.dispatch({selection:{anchor:0},effects:v.constructor.scrollIntoView(p,{y:'center'})})})()`);await sleep(300);
-  assert.ok(await evaluate(`Array.from(document.querySelectorAll('.cm-nz-lp-image.missing')).some(e=>e.textContent.includes('missing-scroll-image.png'))`),'missing asset has a visible placeholder');
+  // Keep the cursor on the preceding line so Live mode can render the image.
+  await evaluate(`(()=>{const {s}=window.test,d=s.editorView().state.doc,p=d.toString().indexOf('![[missing-scroll-image.png]]');s.goToLine(d.lineAt(p).number-1)})()`);
+  const visibleAsset=(selector,ready)=>evaluate(`(()=>{
+   const view=window.test.s.editorView(),bounds=view.scrollDOM.getBoundingClientRect();
+   return [...view.dom.querySelectorAll(${JSON.stringify(selector)})].some(el=>{
+    const box=el.getBoundingClientRect();
+    return box.top<bounds.bottom&&box.bottom>bounds.top&&box.left<bounds.right&&box.right>bounds.left&&(${ready});
+   });
+  })()`);
+  await until(()=>visibleAsset('.cm-nz-lp-image.missing',`el.textContent.includes('missing-scroll-image.png')`),'missing asset has a visible placeholder');
   writeFileSync(path.join(vault,'missing-scroll-image.png'),readFileSync('build/icon.png'));
-  await evaluate(`window.test.s.setPrefs('editorMode','source')`);await sleep(50);
-  await evaluate(`window.test.s.setPrefs('editorMode','live')`);await sleep(500);
-  assert.ok(await evaluate(`Array.from(document.querySelectorAll('.cm-nz-lp-image img')).some(i=>i.src.includes('missing-scroll-image.png')&&i.complete&&i.naturalWidth>0&&!i.closest('.missing'))`),'a previously missing asset must recover after it is added');
+  await evaluate(`window.test.s.setPrefs('editorMode','source')`);
+  await until(()=>evaluate(`!document.querySelector('.cm-nz-lp-image')`),'Source mode removes Live image widgets');
+  await evaluate(`window.test.s.setPrefs('editorMode','live')`);
+  await until(()=>visibleAsset('.cm-nz-lp-image img[src*="missing-scroll-image.png"]',`el.complete&&el.naturalWidth>0&&!el.closest('.missing')`),'a previously missing asset must recover in view after it is added');
  }
  await evaluate(`window.test.s.saveAll()`);
  assert.equal(readFileSync(path.join(vault,'Reading.md'),'utf8'),original,'reading/edit/undo must preserve the saved source');

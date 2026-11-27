@@ -94,7 +94,7 @@ export async function clipboard(view: EditorView, op: "cut" | "copy" | "paste" |
   view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length }, userEvent: "input.paste" });
 }
 
-function linkItems(view: EditorView, hit: Hit, openLink: (t: string) => boolean): Item[] {
+function linkItems(view: EditorView, hit: Hit, openLink: (target: string, markdown?: boolean) => boolean): Item[] {
   const isImage = hit.kind === "wikiImage" || hit.kind === "mdImage";
   const absOf = async () => {
     if (/^https?:/.test(hit.target)) return hit.target;
@@ -116,14 +116,14 @@ function linkItems(view: EditorView, hit: Hit, openLink: (t: string) => boolean)
   }
   const external = hit.kind === "url" || /^[a-z]+:/i.test(hit.target);
   return [
-    { label: external ? t("Open link in browser") : t("Open link"), run: () => (external ? window.open(hit.target) : void openLink(hit.target)) },
+    { label: external ? t("Open link in browser") : t("Open link"), run: () => (external ? window.open(hit.target) : void openLink(hit.target, hit.kind === "md")) },
     { label: t("Copy link"), run: () => void navigator.clipboard.writeText(hit.target) },
     ...view.state.readOnly ? [] : [{ label: t("Edit link"), run: () => view.dispatch({ selection: { anchor: hit.from, head: hit.to } }) }],
     "-",
   ];
 }
 
-function buildMenu(view: EditorView, pos: number, openLink: (t: string) => boolean, spell?: SpellInfo | null): Item[] {
+function buildMenu(view: EditorView, pos: number, openLink: (target: string, markdown?: boolean) => boolean, spell?: SpellInfo | null): Item[] {
   const typ = isTypst();
   const sel = view.state.selection.main;
   const items: Item[] = [];
@@ -255,7 +255,7 @@ onSpellMenu((info) => {
   }
 });
 
-export function editorContextMenu(openLink: (t: string) => boolean) {
+export function editorContextMenu(openLink: (target: string, markdown?: boolean) => boolean) {
   return EditorView.domEventHandlers({
     contextmenu(e, view) {
       // Table cells, properties etc. have their own menus.

@@ -3,7 +3,7 @@ import { initUpdates } from "./core/updates";
 import { Copy, Minimize2 } from "lucide-solid";
 import { app, notify } from "./core/app";
 import {
-  root, prefs, isDark, openVault, openNote, openOsPath, dialog, setDialog, sidebarOpen, saveAll, state,
+  root, prefs, isDark, openVault, openNote, openOsPath, dialog, setDialog, sidebarOpen, saveAll, state, vaultChanging,
   focusMode, setFocusMode, viewLayout, activeThemeKey, refreshActiveTheme, compactWorkspace, compactPanel, setCompactPanel, rightPanelOpen, readingTypst, documentPreviewOpen,
 } from "./core/store";
 import { fileKind, ipc } from "./core/ipc";
@@ -138,7 +138,7 @@ export default function App() {
   };
 
   const onKey = (e: KeyboardEvent) => {
-    if (e.defaultPrevented || dialog() || modalOpen()) return;
+    if (e.defaultPrevented || vaultChanging() || dialog() || modalOpen()) return;
     if (e.key === "Escape" && focusMode()) {
       e.preventDefault();
       setFocusMode(false);
@@ -183,7 +183,7 @@ export default function App() {
   return (
     <>
       <Show when={root()} fallback={<Welcome />}>
-        <div class="shell" classList={{ focus: focusMode(), "compact-workspace": compactWorkspace() }}>
+        <div class="shell" inert={vaultChanging()} classList={{ focus: focusMode(), "compact-workspace": compactWorkspace() }}>
           <Show when={!focusMode()}>
             <WorkspaceRail />
           </Show>

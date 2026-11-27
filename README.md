@@ -140,7 +140,7 @@ git push origin main v0.4.0
 
 The Linux packages, the Windows installer/portable `.exe` and the macOS `.dmg`/`.zip` appear on the
 Releases page a few minutes later.
-An existing tag can be rebuilt from the Actions tab (Release → Run workflow).
+The Actions tab (Release → Run workflow) can test the selected branch, or rebuild an existing tag. Enable **Publish the verified packages** when you want to publish the rebuilt tag.
 
 ## Layout
 

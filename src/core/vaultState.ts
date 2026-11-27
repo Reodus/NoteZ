@@ -1,10 +1,11 @@
 // Reactive data shared by the vault, editor, and workspace.
 import { createSignal } from "solid-js";
-import { createStore } from "solid-js/store";
+import { createStore, produce } from "solid-js/store";
 import type { EditorView } from "@codemirror/view";
 import { frontmatterRange } from "./frontmatter";
 import { ipc, isNotePath, type Entry, type Theme } from "./ipc";
 
+export const [vaultChanging, setVaultChanging] = createSignal(false);
 export const [root, setRoot] = createSignal<string | null>(null);
 export const [tree, setTree] = createSignal<Entry[]>([]);
 export const [notesList, setNotesList] = createSignal<string[]>([]);
@@ -66,3 +67,21 @@ export const isDirty = (path: string) => {
 
 /** Bumped when files change on disk, so image/PDF tabs reload. */
 export const [fileRev, setFileRev] = createSignal(0);
+
+// Invalidate deferred navigation when a note or vault closes.
+let noteOpenSequence = 0;
+export const nextNoteOpen = () => ++noteOpenSequence;
+export const isCurrentNoteOpen = (request: number) => request === noteOpenSequence;
+
+export function removeTab(path: string) {
+  if (state.active === path) nextNoteOpen();
+  setState(
+    produce((s) => {
+      const i = s.tabs.indexOf(path);
+      if (i < 0) return;
+      s.tabs.splice(i, 1);
+      delete s.buffers[path];
+      if (s.active === path) s.active = s.tabs[Math.min(i, s.tabs.length - 1)] ?? null;
+    }),
+  );
+}

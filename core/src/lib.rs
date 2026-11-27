@@ -14,14 +14,15 @@ mod vault;
 
 use render::world::NoteWorld;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Mutex, RwLock};
 
 pub use commands::dispatch;
 
 pub struct AppState {
+    vault_session: RwLock<()>,
     vault: Mutex<Option<PathBuf>>,
-    /// Text of every note (search, backlinks, graph); built when a vault opens.
-    index: Arc<Mutex<Option<vault::Index>>>,
+    /// Text of every note (search, backlinks, graph); built on first use.
+    index: Mutex<Option<vault::Index>>,
     /// Long-lived world for the open note: incremental compiles are fast.
     world: Mutex<NoteWorld>,
     /// Separate world for small snippets (inline diagram previews).
@@ -71,8 +72,9 @@ impl AppState {
     pub fn new(packages: Option<PathBuf>) -> Self {
         let bundled = packages.filter(|d| d.is_dir()).unwrap_or_else(render::world::dev_packages_dir);
         AppState {
+            vault_session: RwLock::new(()),
             vault: Mutex::new(None),
-            index: Arc::new(Mutex::new(None)),
+            index: Mutex::new(None),
             world: Mutex::new(NoteWorld::new(bundled.clone())),
             snippets: Mutex::new(NoteWorld::new(bundled)),
             history: Mutex::new(history::Config::default()),

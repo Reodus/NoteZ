@@ -1,18 +1,20 @@
 // Vault and tab operations. Re-exports keep existing UI and plugin consumers working.
+import { batch } from "solid-js";
 import { produce } from "solid-js/store";
 import { app, notify } from "./app";
 import { renameBookmarkPaths } from "./bookmarks";
 import { flushComments, renameComments } from "./comments";
 import { t, tn } from "./i18n";
-import { dirname, fileKind, ipc, join } from "./ipc";
+import { dirname, fileKind, ipc, join, type Entry } from "./ipc";
 import { ask, onVaultFs, openPath, trashPath } from "./native";
-import { cancelAutosave, reloadFromDisk, replaceSavedBuffer, save, saveAll } from "./noteBuffers";
+import { acceptDiskDeletion, acceptDiskText, clearDiskConflicts, isSavingNote, missingNote, reloadFromDisk, save, saveAll, waitForNoteSaves } from "./noteBuffers";
 import { prefs, rememberVault, setPrefs } from "./preferences";
 import { flushSaveParticipants } from "./saveParticipants";
-import { type Buffer, editorView, isDirty, notesList, root, setFileRev, setNotesList, setRoot, setState, setTree, state, tree } from "./vaultState";
+import { type Buffer, editorView, isCurrentNoteOpen, isDirty, nextNoteOpen, notesList, removeTab, root, setFileRev, setNotesList, setRoot, setState, setTree, setVaultChanging, state, tree, vaultChanging } from "./vaultState";
+import { revealEditorPosition } from "../editor/navigation";
 import { readingTypst, setWorkspaceLayout, viewLayout } from "./workspace";
 
-export { reloadFromDisk, save, saveAll, updateContent } from "./noteBuffers";
+export { acceptDiskDeletion, pauseNoteSaves, reloadFromDisk, save, saveAll, updateContent, waitForNoteSaves } from "./noteBuffers";
 export * from "./preferences";
 export * from "./vaultState";
 export * from "./workspace";
@@ -24,8 +26,11 @@ export * from "./workspace";
  * "vault:changed" still fires: plugins may care about content changes.
  */
 export async function refreshTree() {
+  const vault = root();
+  if (!vault || vaultChanging()) return;
   try {
     const [t, n] = await Promise.all([ipc.tree(), ipc.notes()]);
+    if (root() !== vault || vaultChanging()) return;
     const sameTree = JSON.stringify(t) === JSON.stringify(tree());
     const sameNotes = JSON.stringify(n) === JSON.stringify(notesList());
     if (!sameTree) setTree(t);
@@ -37,29 +42,57 @@ export async function refreshTree() {
 }
 
 export async function openVault(path: string) {
-  noteOpenSeq++;
-  await saveAll();
+  if (vaultChanging()) return;
+  setVaultChanging(true);
+  nextNoteOpen();
   try {
-    setTree(await ipc.openVault(path));
-    setNotesList(await ipc.notes());
-  } catch (e) {
-    notify(t("Cannot open vault: {error}", { error: e }), "error");
-    setPrefs("recentVaults", (r) => r.filter((p) => p !== path));
-    if (prefs.lastVault === path) setPrefs("lastVault", null);
-    return;
+    await saveAll();
+    let entries: Entry[];
+    try {
+      entries = await ipc.openVault(path);
+    } catch (e) {
+      notify(t("Cannot open vault: {error}", { error: e }), "error");
+      setPrefs("recentVaults", (r) => r.filter((p) => p !== path));
+      if (prefs.lastVault === path) setPrefs("lastVault", null);
+      return;
+    }
+    const notes: string[] = [];
+    const visit = (children: Entry[]) => {
+      for (const entry of children) {
+        if (entry.is_dir) visit(entry.children);
+        else if (/\.(md|typ)$/.test(entry.path)) notes.push(entry.path);
+      }
+    };
+    visit(entries);
+    batch(() => {
+      setTree(entries);
+      setNotesList(notes.sort());
+      setState({ tabs: [], active: null, buffers: {} });
+      setRoot(path);
+      rememberVault(path);
+    });
+    clearDiskConflicts();
+  } finally {
+    setVaultChanging(false);
   }
-  setState({ tabs: [], active: null, buffers: {} });
-  setRoot(path);
-  rememberVault(path);
   app.events.emit("vault:opened", { root: path });
 }
 
 export async function closeVault() {
-  noteOpenSeq++;
-  await saveAll();
-  setRoot(null);
-  setState({ tabs: [], active: null, buffers: {} });
-  setPrefs("lastVault", null);
+  if (vaultChanging()) return;
+  setVaultChanging(true);
+  nextNoteOpen();
+  try {
+    await saveAll();
+    batch(() => {
+      setRoot(null);
+      setState({ tabs: [], active: null, buffers: {} });
+      setPrefs("lastVault", null);
+    });
+    clearDiskConflicts();
+  } finally {
+    setVaultChanging(false);
+  }
 }
 
 /**
@@ -77,7 +110,6 @@ export async function openOsPath(p: string) {
   if (now && path.startsWith(now + "/")) await openNote(path.slice(now.length + 1));
 }
 
-let noteOpenSeq = 0;
 let keepFocusFor: string | null = null;
 
 export function keepFocusOnOpen(path: string) {
@@ -88,7 +120,8 @@ export function keepFocusOnOpen(path: string) {
 
 /** Open a vault file: notes in the editor, images and PDFs in a viewer tab, anything else in its default app. */
 export async function openNote(path: string, opts: { line?: number; keepFocus?: boolean } = {}) {
-  const request = ++noteOpenSeq, vault = root();
+  if (!root() || vaultChanging()) return;
+  const request = nextNoteOpen(), vault = root();
   const kind = fileKind(path);
   if (kind === "other") {
     if (root()) await openPath(`${root()}/${path}`).catch((e) => notify(String(e), "error"));
@@ -97,7 +130,7 @@ export async function openNote(path: string, opts: { line?: number; keepFocus?: 
   if (kind === "note" && !state.buffers[path]) {
     try {
       const content = await ipc.read(path);
-      if (request !== noteOpenSeq || vault !== root()) return;
+      if (!isCurrentNoteOpen(request) || vault !== root()) return;
       setState("buffers", path, { content, saved: content });
     } catch (e) {
       notify(String(e), "error");
@@ -116,7 +149,7 @@ export async function openNote(path: string, opts: { line?: number; keepFocus?: 
   );
   app.events.emit("note:opened", { path });
   if (opts.line) queueMicrotask(() => setTimeout(() => {
-    if (request === noteOpenSeq && root() === vault && state.active === path) goToLine(opts.line!);
+    if (isCurrentNoteOpen(request) && root() === vault && state.active === path) goToLine(opts.line!);
   }, 30));
 }
 
@@ -129,32 +162,23 @@ export function goToPreviewDiagnostic(line: number) {
   } else goToLine(line);
 }
 
-export function goToLine(line: number) {
+export function goToLine(line: number, column = 0) {
   const view = editorView();
   if (!view) return;
   const l = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines)));
-  view.dispatch({ selection: { anchor: l.from }, scrollIntoView: true });
-  view.focus();
+  revealEditorPosition(view, Math.max(l.from, Math.min(l.to, l.from + column)), "nearest");
 }
 
 export async function closeTab(path: string) {
+  await waitForNoteSaves();
   await flushSaveParticipants();
   await flushComments();
   do { await save(path); } while (isDirty(path));
-  if (state.active === path) noteOpenSeq++;
-  setState(
-    produce((s) => {
-      const i = s.tabs.indexOf(path);
-      if (i < 0) return;
-      s.tabs.splice(i, 1);
-      delete s.buffers[path];
-      if (s.active === path) s.active = s.tabs[Math.min(i, s.tabs.length - 1)] ?? null;
-    }),
-  );
+  removeTab(path);
 }
 
 const TEMPLATE_MD = (title: string, theme: string) =>
-  `---\ntitle: ${title}\ntheme: ${theme}\n${prefs.defaultLanguage ? `lang: ${prefs.defaultLanguage}\n` : ""}---\n\n`;
+  `---\ntitle: ${JSON.stringify(title)}\ntheme: ${JSON.stringify(theme)}\n${prefs.defaultLanguage ? `lang: ${JSON.stringify(prefs.defaultLanguage)}\n` : ""}---\n\n`;
 
 export async function createNote(dir = "", name?: string, ext: "md" | "typ" = "md", content?: (title: string) => string) {
   let base = name ?? "Untitled";
@@ -285,7 +309,8 @@ let fsTreeTimer: number | undefined;
 
 /** Files changed outside the app: refresh the tree and open notes. */
 async function vaultChanged(paths: string[]) {
-  if (!root()) return;
+  const vault = root();
+  if (!vault || vaultChanging()) return;
   if (paths.some((p) => !p.startsWith("."))) {
     clearTimeout(fsTreeTimer);
     fsTreeTimer = window.setTimeout(refreshTree, 100);
@@ -298,23 +323,12 @@ async function vaultChanged(paths: string[]) {
     let disk: string;
     try {
       disk = await ipc.read(tab);
-    } catch {
-      // Deleted (or moved) outside the app.
-      if (b.content === b.saved) await closeTab(tab);
-      else notify(t("\"{name}\" was deleted on disk. Save (Ctrl+S) to keep your version.", { name: tab }), "error", undefined, 15000);
-      if (b.content !== b.saved) setState("buffers", tab, "saved", "");
+    } catch (e) {
+      if (root() !== vault || state.buffers[tab] !== b || vaultChanging()) continue;
+      if (missingNote(e)) acceptDiskDeletion(tab);
       continue;
     }
-    if (disk === b.saved || disk === b.content) {
-      if (disk !== b.saved) setState("buffers", tab, "saved", disk);
-      continue; // our own save, or nothing new
-    }
-    const reload = () => replaceSavedBuffer(tab, disk);
-    if (b.content === b.saved) reload();
-    else {
-      cancelAutosave(tab); // don't overwrite the disk version silently
-      notify(t("\"{name}\" changed on disk while you were editing.", { name: tab }), "error", { label: t("Reload from disk"), run: reload }, 20000);
-    }
+    if (root() === vault && state.buffers[tab] === b && !vaultChanging() && !isSavingNote(tab)) acceptDiskText(tab, disk);
   }
 }
 

@@ -1049,7 +1049,7 @@ function wire(wrap: HTMLElement) {
     const cell = (e.target as HTMLElement).closest?.(".nz-cell");
     if (link && cell && !cell.classList.contains("editing") && e.button === 0 && link.dataset.target) {
       e.preventDefault();
-      getLiveOpts()?.openLink(link.dataset.target);
+      getLiveOpts()?.openLink(link.dataset.target, !!link.dataset.markdown);
     }
   });
 

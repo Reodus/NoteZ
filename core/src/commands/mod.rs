@@ -7,6 +7,7 @@ mod vault;
 use crate::{annotations, bases, blockidx, history, links, query, srs, sync, AppState};
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::path::Path;
 
 fn arg<T: serde::de::DeserializeOwned>(args: &Value, key: &str) -> Result<T, Value> {
     serde_json::from_value(args.get(key).cloned().unwrap_or(Value::Null)).map_err(|e| json!(format!("bad argument `{key}`: {e}")))
@@ -30,12 +31,16 @@ fn ok<T: Serialize>(v: T) -> Result<Value, Value> {
 
 /// Run one command from the UI.
 pub fn dispatch(state: &AppState, cmd: &str, a: &Value) -> Result<Value, Value> {
+    if cmd == "open_vault" {
+        let _session = state.vault_session.write().unwrap();
+        return out(vault::open_vault(state, arg(a, "path")?));
+    }
+    let _session = state.vault_session.read().unwrap();
     match cmd {
-        "open_vault" => out(vault::open_vault(state, arg(a, "path")?)),
         "list_tree" => out(vault::list_tree(state)),
         "list_notes" => out(vault::list_notes(state)),
         "read_note" => out(vault::read_note(state, arg(a, "path")?)),
-        "write_note" => out(vault::write_note(state, arg(a, "path")?, arg(a, "content")?)),
+        "write_note" => out(vault::write_note(state, arg(a, "path")?, arg(a, "content")?, opt(a, "vault"))),
         "create_note" => out(vault::create_note(state, arg(a, "path")?)),
         "create_folder" => out(vault::create_folder(state, arg(a, "path")?)),
         "rename_entry" => out(vault::rename_entry(state, arg(a, "from")?, arg(a, "to")?, opt(a, "update_links"))),
@@ -45,7 +50,7 @@ pub fn dispatch(state: &AppState, cmd: &str, a: &Value) -> Result<Value, Value> 
         "duplicate_entry" => out(vault::duplicate_entry(state, arg(a, "path")?)),
         "search" => out(catalog::search(state, arg(a, "query")?, opt(a, "exclude"))),
         "replace_preview" => out(catalog::replace_preview(state, arg(a, "opts")?, opt(a, "exclude"))),
-        "replace_apply" => out(catalog::replace_apply(state, arg(a, "opts")?, arg(a, "paths")?)),
+        "replace_apply" => out(catalog::replace_apply(state, arg(a, "opts")?, arg(a, "paths")?, opt(a, "expected"))),
         "rename_tag" => out(catalog::rename_tag(state, arg(a, "from")?, arg(a, "to")?)),
         "list_tags" => out(state.with_index(|i, _| query::list_tags(i, &opt::<Vec<String>>(a, "exclude")))),
         "note_meta" => out(state.with_index(|i, _| query::note_meta(i))),
@@ -76,7 +81,14 @@ pub fn dispatch(state: &AppState, cmd: &str, a: &Value) -> Result<Value, Value> 
         "property_names" => out(state.with_index(|i, _| bases::property_names(i, &opt::<Vec<String>>(a, "exclude")))),
         "property_values" => out(state.with_index(|i, _| bases::property_values(i, &opt::<String>(a, "name"), &opt::<Vec<String>>(a, "exclude")))),
         "graph_links" => out(state.with_index(|i, r| links::graph(i, r, &opt::<Vec<String>>(a, "exclude")))),
-        "index_update" => out(vault::index_update(state, arg(a, "paths")?)),
+        "index_update" => {
+            if let Some(vault) = opt::<Option<String>>(a, "vault") {
+                if state.root_opt().as_deref() != Some(Path::new(&vault)) {
+                    return ok(());
+                }
+            }
+            out(vault::index_update(state, arg(a, "paths")?))
+        },
         "history_config" => {
             *state.history.lock().unwrap() = arg(a, "config")?;
             ok(true)

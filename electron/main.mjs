@@ -77,7 +77,7 @@ ipcMain.handle("core", wrap(async (cmd, args) => {
     stopWatchingVault?.();
     stopWatchingVault = watchVault(args.path, async (paths, signal) => {
       const notes = paths.filter((p) => !p.startsWith("."));
-      if (notes.length) await core.call("index_update", { paths: notes }).catch(() => {});
+      if (notes.length) await core.call("index_update", { paths: notes, vault: args.path }).catch(() => {});
       if (signal.aborted) return;
       for (const w of BrowserWindow.getAllWindows()) w.webContents.send("vault-fs", paths);
     });

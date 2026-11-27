@@ -15,14 +15,18 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)build, e.g. v0.4.2"
-        required: true
+        description: "Optional existing release tag. Leave blank to test the selected branch."
+        required: false
+      publish:
+        description: "Publish the verified packages"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 env:
-  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
 
 jobs:
   build:
@@ -61,15 +65,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ env.TAG || github.sha }}
 
       - name: Check tag matches package.json
+        env:
+          PUBLISH: ${{ inputs.publish }}
         run: |
           version="$(node -p 'require("./package.json").version')"
-          if [ "v$version" != "$TAG" ]; then
+          if [[ -n "$TAG" && "v$version" != "$TAG" ]] || [[ -z "$TAG" && "$PUBLISH" == true ]]; then
             echo "::error::Tag $TAG does not match package.json version $version"
             exit 1
           fi
+          echo "NOTEZ_VERSION=$version" >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
         with:
@@ -93,9 +100,62 @@ jobs:
         run: npm run build
 
       - name: Package
+        if: matrix.platform != 'mac'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false" # unsigned builds
         run: npx electron-builder --${{ matrix.platform }} ${{ matrix.arch && format('--{0}', matrix.arch) || '' }} --publish never
+
+      - name: Package macOS app
+        if: matrix.platform == 'mac'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          ARCH: ${{ matrix.arch }}
+        run: |
+          npx electron-builder --mac --"$ARCH" --dir --publish never
+          apps=(release/mac*/NoteZ.app)
+          test "${#apps[@]}" -eq 1
+          test -d "${apps[0]}"
+          echo "NOTEZ_MAC_APP=${apps[0]}" >> "$GITHUB_ENV"
+          expected="$ARCH"
+          if [[ "$ARCH" == x64 ]]; then expected=x86_64; fi
+          executable="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "${apps[0]}/Contents/Info.plist")"
+          test "$(lipo -archs "${apps[0]}/Contents/MacOS/$executable")" = "$expected"
+          test "$(lipo -archs "${apps[0]}/Contents/Resources/notez-core")" = "$expected"
+
+      - name: Build macOS ZIP
+        if: matrix.platform == 'mac'
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: npx electron-builder --mac zip --"$ARCH" --prepackaged "$NOTEZ_MAC_APP" --publish never
+
+      - name: Build and verify macOS DMG
+        if: matrix.platform == 'mac'
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -o pipefail
+          package="release/NoteZ-$NOTEZ_VERSION-mac-$ARCH"
+          for attempt in 1 2 3; do
+            log="$RUNNER_TEMP/notez-dmg-$attempt.log"
+            if npx electron-builder --mac dmg --"$ARCH" --prepackaged "$NOTEZ_MAC_APP" --publish never 2>&1 | tee "$log"; then
+              break
+            fi
+            if [[ "$attempt" == 3 ]] || ! grep -q 'Unable to detach device cleanly' "$log" || ! grep -q 'Resource busy' "$log"; then
+              hdiutil info | tee "$RUNNER_TEMP/notez-dmg-devices.log"
+              exit 1
+            fi
+            rm -f -- "$package.dmg"
+            sleep "$((attempt * 5))"
+          done
+          hdiutil verify "$package.dmg"
+          unzip -tq "$package.zip"
+
+      - uses: actions/upload-artifact@v4
+        if: failure() && matrix.platform == 'mac'
+        with:
+          name: dmg-logs-${{ matrix.arch }}
+          path: ${{ runner.temp }}/notez-dmg-*.log
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
@@ -104,6 +164,7 @@ jobs:
           if-no-files-found: error
 
   publish:
+    if: github.event_name == 'push' || inputs.publish
     needs: build
     runs-on: ubuntu-22.04
     steps:
@@ -111,6 +172,14 @@ jobs:
         with:
           path: release
           merge-multiple: true
+
+      - name: Check both macOS architectures
+        run: |
+          for arch in x64 arm64; do
+            for ext in dmg zip; do
+              test -s "release/NoteZ-${TAG#v}-mac-$arch.$ext"
+            done
+          done
 
       - name: Publish release
         uses: softprops/action-gh-release@v2

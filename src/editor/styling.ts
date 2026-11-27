@@ -6,7 +6,7 @@ import { Decoration, DecorationSet, EditorView } from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 import type { Theme, TextStyle } from "../core/ipc";
-import { parseAttrs } from "./format";
+import { markdownDivs, parseAttrs } from "./dirrules";
 
 export const markdownHighlight = HighlightStyle.define([
   { tag: t.heading, fontWeight: "inherit" },
@@ -103,8 +103,7 @@ function spanStyle(attrs: Record<string, string>): string {
 function build(state: EditorState, typstMode: boolean): DecorationSet {
   const b = new RangeSetBuilder<Decoration>();
   const doc = state.doc;
-  // Div context must be computed from the top (cheap: line scan).
-  const divStack: Record<string, string>[] = [];
+  const divs = typstMode ? null : markdownDivs(doc);
   let inFence = false;
   let inFrontmatter = doc.lines > 0 && doc.line(1).text === "---" && !typstMode;
 
@@ -138,22 +137,14 @@ function build(state: EditorState, typstMode: boolean): DecorationSet {
       continue;
     }
 
-    const divOpen = /^\s*:::\s*(\{.*\}|\S.*)\s*$/.exec(text);
-    const divClose = /^\s*:::\s*$/.test(text);
-    if (divOpen && !divClose) {
-      divStack.push(parseAttrs(divOpen[1]));
-      b.add(line.from, line.from, lineDeco("cm-nz-div-marker"));
-      styledText();
-      continue;
-    }
-    if (divClose) {
-      divStack.pop();
+    if (divs?.markers.has(i)) {
       b.add(line.from, line.from, lineDeco("cm-nz-div-marker"));
       styledText();
       continue;
     }
 
-    const merged: Record<string, string> = Object.assign({}, ...divStack);
+    const div = divs?.at[i];
+    const merged = div?.effective ?? {};
     const classes: string[] = [];
     const style: string[] = [];
     const h = /^(#{1,6})\s/.exec(text);
@@ -166,7 +157,7 @@ function build(state: EditorState, typstMode: boolean): DecorationSet {
     const attrs: Record<string, string> = {};
     if (style.length) attrs.style = style.join(";");
     if (merged.dir === "rtl" || merged.dir === "ltr") attrs.dir = merged.dir;
-    if (divStack.length) classes.push("cm-nz-in-div");
+    if (div) classes.push("cm-nz-in-div");
     if (classes.length || Object.keys(attrs).length) b.add(line.from, line.from, lineDeco(classes.join(" "), attrs));
 
     if (h || merged.font) styledText();

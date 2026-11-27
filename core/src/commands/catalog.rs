@@ -22,9 +22,21 @@ pub(super) fn rename_tag(state: &AppState, from: String, to: String) -> Res<Vec<
 }
 
 /// Replace in `paths` and write them; returns the paths changed.
-pub(super) fn replace_apply(state: &AppState, opts: query::ReplaceOpts, paths: Vec<String>) -> Res<Vec<String>> {
+pub(super) fn replace_apply(state: &AppState, opts: query::ReplaceOpts, paths: Vec<String>, expected: Option<std::collections::BTreeMap<String, String>>) -> Res<Vec<String>> {
     let root = state.root()?;
-    let writes = state.with_index(|i, _| query::replace_apply(i, &opts, &paths))??;
+    let writes = state.with_index(|i, _| {
+        // Validate the full preview selection before changing any file.
+        if let Some(expected) = expected {
+            for path in &paths {
+                let text = vault::read(&root, path)?;
+                if expected.get(path) != Some(&history::hash(text.as_bytes())) {
+                    return Err(format!("{} changed since the replace preview", path));
+                }
+                i.put(path, &text);
+            }
+        }
+        query::replace_apply(i, &opts, &paths)
+    })??;
     let mut done = vec![];
     for (p, text) in writes {
         state.rewrite(&root, &p, &text, "before-replace")?;

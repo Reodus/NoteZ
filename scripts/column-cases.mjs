@@ -121,10 +121,17 @@ export async function checkTableColumns({ evaluate, rpc, until, sleep }) {
     assert.ok(await classGone(), cancel + ' clears the drag indicator');
   }
   const beforeMenu = await results(0);
-  const label = await evaluate(`(()=>{
-    const grip=document.querySelector('.nz-column-grip');grip.focus();return grip.getAttribute('aria-label');
+  const label = await evaluate(`(async()=>{
+    const {s}=window.test;
+    await s.openNote('WideColumns.md');
+    await s.openNote('Columns.md');
+    const grip=document.querySelector('.nz-column-grip');
+    grip.focus({preventScroll:true});
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    if(document.activeElement!==grip) throw Error('Opening the tab must not steal focus from its column grip');
+    return grip.getAttribute('aria-label');
   })()`);
-  assert.equal(label, process.env.NOTEZ_TEST_LANGUAGE === 'fa' ? 'جابه‌جایی ستون ۱' : 'Move column 1');
+  assert.equal(label, await evaluate('document.documentElement.lang') === 'fa' ? 'جابه‌جایی ستون ۱' : 'Move column 1');
   await key('Enter', 'Enter');
   await until(() => evaluate(`document.activeElement?.matches('.context-menu')`), 'column grip keyboard menu');
   await key('ArrowDown', 'ArrowDown');

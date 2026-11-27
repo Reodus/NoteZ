@@ -132,6 +132,7 @@
         "dmg",
         "zip"
       ],
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "category": "public.app-category.productivity",
       "icon": "build/icon.png",
       "hardenedRuntime": false,

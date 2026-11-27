@@ -640,6 +640,7 @@ pub struct Edit {
 #[derive(Serialize)]
 pub struct FileChanges {
     pub path: String,
+    pub hash: String,
     pub lines: Vec<LineChange>,
     pub count: usize,
 }
@@ -705,7 +706,7 @@ pub fn replace_preview(idx: &Index, o: &ReplaceOpts, exclude: &[String]) -> Resu
         let (_, lines) = replace_text(&re, o, &doc.text);
         let count = lines.iter().map(|l| l.count).sum();
         if count > 0 {
-            out.push(FileChanges { path: rel.clone(), lines, count });
+            out.push(FileChanges { path: rel.clone(), hash: crate::history::hash(doc.text.as_bytes()), lines, count });
         }
     }
     Ok(out)

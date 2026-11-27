@@ -6,7 +6,7 @@ import { render } from "solid-js/web";
 import { ChevronLeft, ChevronRight } from "lucide-solid";
 import type { BuiltinPlugin } from "../core/plugins";
 import { ipc, stem } from "../core/ipc";
-import { CALENDAR_PANEL, root, prefs, notesList, openNote, refreshTree, state, editorView, updateContent, showRightPanel, setWorkspaceLayout, setGraphOpen, setCompactPanel } from "../core/store";
+import { CALENDAR_PANEL, root, prefs, notesList, openNote, refreshTree, state, editorView, updateContent, showRightPanel, setWorkspaceLayout, setGraphOpen, setCompactPanel, waitForNoteSaves } from "../core/store";
 import { registerSaveParticipant } from "../core/saveParticipants";
 import { notify } from "../core/app";
 import { fillTemplate, formatDate, parseDate, isoWeek } from "./templates";
@@ -123,20 +123,34 @@ function step(dir: -1 | 1) {
 export const captureNote = () => (prefs.captureTarget === "daily" || !prefs.captureTarget.trim() ? dailyPath(new Date()) : prefs.captureTarget.trim().replace(/^\/+/, "").replace(/(?<!\.(md|typ))$/, ".md"));
 
 /** Add captured text to the capture note (created if needed) as one line. */
-export async function captureText(text: string) {
+let captures = Promise.resolve();
+export function captureText(text: string) {
+  const vault = root();
   const now = new Date();
   const line = (prefs.captureFormat || "- {{time}} {{text}}")
     .replace(/\{\{\s*text\s*\}\}/g, () => text.replace(/\n/g, "\n  "));
   const entry = fillTemplate(line, "", now);
   const path = captureNote();
+  const daily = prefs.captureTarget === "daily" || !prefs.captureTarget.trim();
+  const operation = captures.then(() => appendCapture(vault, path, daily, now, entry));
+  captures = operation.catch(() => {});
+  const unregister = registerSaveParticipant(() => operation);
+  return operation.finally(unregister);
+}
+
+async function appendCapture(vault: string | null, path: string, daily: boolean, now: Date, entry: string) {
   try {
+    await waitForNoteSaves();
+    if (!vault || root() !== vault) throw new Error(t("Open a vault first."));
     if (!notesList().includes(path)) {
-      if (prefs.captureTarget === "daily") {
+      if (daily) {
         const cur = state.active;
         await openDaily(now);
         if (cur && cur !== path) await openNote(cur);
       } else {
-        await ipc.createNote(path);
+        await ipc.createNote(path).catch(async error => {
+          await ipc.read(path).catch(() => { throw error; });
+        });
         await refreshTree();
       }
     }
@@ -149,7 +163,7 @@ export async function captureText(text: string) {
       const doc = state.buffers[path]?.content ?? (await ipc.read(path));
       const next = `${doc}${doc.length && !doc.endsWith("\n") ? "\n" : ""}${entry}\n`;
       if (state.buffers[path]) updateContent(path, next);
-      else await ipc.write(path, next);
+      else await ipc.write(path, next, vault);
     }
     notify(t("Captured to {x}", { x: stem(path) }), "success", { label: t("Open"), run: () => void openNote(path) });
   } catch (e) {

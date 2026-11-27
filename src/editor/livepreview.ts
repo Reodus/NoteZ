@@ -7,7 +7,9 @@ import { BlockInfo, BlockType, Decoration, DecorationSet, EditorView, ViewPlugin
 import { syntaxTree } from "@codemirror/language";
 import { fileSrc } from "../core/native";
 import { coverField } from "./cover";
-import { blockAttr, parseAttrs, setBlockAttr } from "./format";
+import { blockAttr, setBlockAttr } from "./format";
+import { markdownDivs } from "./dirrules";
+import { isolateHistory } from "@codemirror/commands";
 import { pushLayer } from "../ui/primitives";
 import { canRender, previewsEnabled } from "./widgets";
 import { explicitDirAt } from "./bidi";
@@ -20,7 +22,7 @@ import { imageCaption, markdownImages } from "./imageSyntax";
 import { footnoteNumbers } from "./footnotes";
 export interface LiveOptions {
   /** Open a link target (note name, path or URL). */
-  openLink: (target: string) => void;
+  openLink: (target: string, markdown?: boolean) => void;
   /** Vault-relative path of the note being edited (for images). */
   notePath: () => string | null;
   vaultRoot: () => string | null;
@@ -131,11 +133,42 @@ class ChipWidget extends WidgetType {
   eq(o: ChipWidget) {
     return o.label === this.label && o.kind === this.kind;
   }
-  toDOM() {
+  toDOM(view: EditorView) {
     const s = document.createElement("span");
     s.className = `cm-nz-lp-chip ${this.kind}`;
     s.textContent = this.label;
+    editOnClick(s, view, (from) => view.state.doc.lineAt(from).to);
     return s;
+  }
+}
+
+class UnclosedDivWidget extends WidgetType {
+  constructor(readonly read: boolean) { super(); }
+  eq(other: UnclosedDivWidget) { return this.read === other.read; }
+  toDOM(view: EditorView) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.disabled = this.read;
+    button.className = "cm-nz-lp-chip div-warning";
+    button.textContent = t("Formatting block has no closing :::");
+    button.title = t("Close formatting block at end of note");
+    button.addEventListener("mousedown", e => e.preventDefault());
+    button.addEventListener("click", () => {
+      const { doc } = view.state;
+      const line = doc.lineAt(view.posAtDOM(button));
+      const { at, markers } = markdownDivs(doc);
+      const div = markers.get(line.number);
+      if (!div || div.close !== null) return;
+      if (at[doc.lines] !== div) {
+        view.dispatch({ selection: { anchor: line.to }, scrollIntoView: true });
+      } else {
+        const newline = doc.line(doc.lines).length ? "\n" : "";
+        view.dispatch({ changes: { from: doc.length, insert: newline + ":::\n" },
+          selection: { anchor: line.to }, annotations: isolateHistory.of("full") });
+      }
+      view.focus();
+    });
+    return button;
   }
 }
 
@@ -144,14 +177,27 @@ const loadKatex = () =>
   (katexP ??= Promise.all([import("katex"), import("katex/dist/katex.min.css")]).then(([k]) => k.default));
 const mathCache = new Map<string, string>();
 
-/** Clicking a rendered formula puts the cursor inside its source. */
+/** Let the user reveal the range that a widget replaced. */
 function editOnClick(el: HTMLElement, view: EditorView, offset: (from: number) => number) {
+  if (view.state.readOnly) return;
+  el.tabIndex = 0;
+  el.setAttribute("role", "button");
+  el.title ||= t("Edit source");
+  const reveal = () => {
+    if (view.state.readOnly) return;
+    const from = view.posAtDOM(el);
+    view.dispatch({ selection: { anchor: Math.min(view.state.doc.length, offset(from)) }, scrollIntoView: true });
+    view.focus();
+  };
   el.addEventListener("mousedown", (e) => {
     if (view.state.readOnly || e.button !== 0) return;
     e.preventDefault();
-    const from = view.posAtDOM(el);
-    view.dispatch({ selection: { anchor: Math.min(view.state.doc.length, offset(from)) } });
-    view.focus();
+    reveal();
+  });
+  el.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    reveal();
   });
 }
 
@@ -450,11 +496,12 @@ class FootnoteWidget extends WidgetType {
   eq(o: FootnoteWidget) {
     return o.label === this.label && o.def === this.def;
   }
-  toDOM() {
+  toDOM(view: EditorView) {
     const s = document.createElement("sup");
     s.className = this.def ? "cm-nz-lp-fn def" : "cm-nz-lp-fn";
     s.dir = "ltr";
     s.textContent = this.label;
+    editOnClick(s, view, (from) => from + 2);
     return s;
   }
 }
@@ -573,7 +620,7 @@ function renderInline(src: string): string {
     .replace(/(^|[^*])\*([^*]+)\*/g, "$1<i>$2</i>")
     .replace(/~~([^~]+)~~/g, "<s>$1</s>")
     .replace(/\[\[([^\]|]+)\|?([^\]]*)\]\]/g, (_, t, a) => `<span class="cm-nz-lp-link internal" data-target="${t}">${a || t}</span>`)
-    .replace(/\[([^\]]+)\]\(([^)\s]+)[^)]*\)/g, '<span class="cm-nz-lp-link" data-target="$2">$1</span>')
+    .replace(/\[([^\]]+)\]\(([^)\s]+)[^)]*\)/g, '<span class="cm-nz-lp-link" data-target="$2" data-markdown="true">$1</span>')
     .replace(/\[([^\]]*)\]\{[^}]*\}/g, "$1")
     .replace(/\u0002(\d+)\u0002/g, (token, i) => html[+i] ?? token);
 }
@@ -743,8 +790,12 @@ function build(view: EditorView): DecorationSet {
   const onMark = (from: number, to: number) => ranges.some((r) => r.to >= from && r.from < to);
   /** The element being decorated: when it is revealed, nothing of it is hidden. */
   let reveal = false;
+  const crossesLine = (from: number, to: number) => to > doc.lineAt(from).to;
   const add = (from: number, to: number, deco: Decoration) => {
-    if (from > to || (from < to && (!free(from, to) || (deco.point && doc.lineAt(from).to < to)))) return;
+    if (from > to || (from < to && !free(from, to))) return;
+    // Viewport decorations cannot replace a line break. Multi-line
+    // constructs that have no block widget keep their source visible.
+    if (deco.point && crossesLine(from, to)) return;
     if (from < to) taken.push([from, to]);
     if (reveal) return;
     decos.push(deco.range(from, to));
@@ -753,7 +804,7 @@ function build(view: EditorView): DecorationSet {
    * rendered with a ring; with the cursor in its source, the source shows and
    * the image is previewed under it. */
   const addImage = (from: number, to: number, src: string, caption: string, width: string | null, editOffset: number) => {
-    if (!free(from, to)) return;
+    if (!free(from, to) || crossesLine(from, to)) return;
     const source = doc.sliceString(from, to);
     const exact = ranges.some((r) => r.from === from && r.to === to);
     if (reveal && !exact) {
@@ -827,12 +878,16 @@ function build(view: EditorView): DecorationSet {
     decos.push(Decoration.mark({ class: "cm-nz-lp-prefix", attributes: { style: `width:${w}` } }).range(line.from, end));
   };
 
+  const divs = markdownDivs(doc);
+  let lastLine = 0;
   for (const { from, to } of view.visibleRanges) {
     // ----- regex-based syntax (NoteZ extensions, wikilinks, math, comments)
     let pos = Math.max(from, fmEnd + 1);
     while (pos <= to && pos <= doc.length) {
       const line = doc.lineAt(pos);
       pos = line.to + 1;
+      if (line.number <= lastLine) continue;
+      lastLine = line.number;
       if (line.from <= fmEnd) continue;
       reveal = near(line.from, line.to);
       const text = line.text;
@@ -848,15 +903,17 @@ function build(view: EditorView): DecorationSet {
       }
       if (/^\s*<center>/i.test(text)) decos.push(Decoration.line({ attributes: { style: "text-align:center" } }).range(line.from));
       // Fenced divs.
-      const div = /^\s*:::\s*(.*)$/.exec(text);
-      if (div) {
-        const attrs = div[1].trim().replace(/^\{|\}$/g, "");
-        const label = attrs
-          ? Object.entries(parseAttrs(div[1].trim()))
-              .map(([k, v]) => (v ? `${k}: ${v}` : k))
-              .join(" · ")
-          : "";
-        add(line.from, line.to, Decoration.replace({ widget: new ChipWidget(label || "end", label ? "div" : "div-end") }));
+      if (divs.markers.has(line.number)) {
+        const div = divs.markers.get(line.number);
+        if (div && div.close === null) {
+          decos.push(Decoration.widget({ widget: new UnclosedDivWidget(state.readOnly), side: 1 }).range(line.to));
+        } else if (div) {
+          const opening = div.open === line.number;
+          const label = opening
+            ? Object.entries(div.attrs).map(([k, v]) => v ? `${k}: ${v}` : k).join(" · ") || t("Formatting block")
+            : t("End of formatting block");
+          add(line.from, line.to, Decoration.replace({ widget: new ChipWidget(label, opening ? "div" : "div-end") }));
+        }
         continue;
       }
       // Display math on one line: $$ … $$
@@ -1068,10 +1125,10 @@ function build(view: EditorView): DecorationSet {
             if (marks.length < 2) return;
             const textFrom = marks[0].to;
             const textTo = marks[1].from;
-            if (!free(node.from, node.to)) return false;
+            if (!free(node.from, node.to) || crossesLine(node.from, textFrom) || crossesLine(textTo, node.to)) return false;
             add(node.from, textFrom, HIDE);
             const target = url ? doc.sliceString(url.from, url.to).replace(/^<|>$/g, "") : "";
-            add(textFrom, textTo, Decoration.mark({ class: "cm-nz-lp-link", attributes: { "data-target": target } }));
+            add(textFrom, textTo, Decoration.mark({ class: "cm-nz-lp-link", attributes: { "data-target": target, "data-markdown": "true" } }));
             add(textTo, node.to, HIDE);
             return false;
           }
@@ -1151,14 +1208,15 @@ export function livePreview(enabled: boolean, typstMode: boolean, opts: LiveOpti
       const target = el.dataset.target;
       if (!target) return false;
       e.preventDefault();
-      opts.openLink(target);
+      opts.openLink(target, !!el.dataset.markdown);
       return true;
     },
     click(e, view) {
       if (!view.state.readOnly || e.button !== 0 || e.shiftKey || !window.getSelection()?.isCollapsed) return false;
-      const target = (e.target as HTMLElement).closest?.<HTMLElement>(".cm-nz-lp-link")?.dataset.target;
+      const link = (e.target as HTMLElement).closest?.<HTMLElement>(".cm-nz-lp-link");
+      const target = link?.dataset.target;
       if (!target) return false;
-      opts.openLink(target);
+      opts.openLink(target, !!link.dataset.markdown);
       return true;
     },
   });

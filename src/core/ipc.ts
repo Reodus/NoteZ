@@ -124,6 +124,7 @@ export interface SyncReport {
   deleted_there: string[];
   conflicts: string[];
   changed: string[];
+  deferred?: string[];
   t: number;
   millis: number;
 }
@@ -141,6 +142,7 @@ export interface ReplaceOpts {
 }
 
 export interface FileChanges {
+  hash: string;
   path: string;
   lines: {
     line: number;
@@ -268,15 +270,23 @@ export interface PluginManifest {
   author: string;
 }
 
-const writes = createWriteQueue((path, content) => invoke<void>("write_note", { path, content }));
+let writeVault: string | null = null;
+const writes = createWriteQueue((key, content) => {
+  const [vault, path] = JSON.parse(key) as [string | null, string];
+  return invoke<void>("write_note", { path, content, vault });
+});
 export const flushWrites = writes.flush;
 
 export const ipc = {
-  openVault: (path: string) => invoke<Entry[]>("open_vault", { path }),
+  openVault: async (path: string) => {
+    const entries = await invoke<Entry[]>("open_vault", { path });
+    writeVault = path;
+    return entries;
+  },
   tree: () => invoke<Entry[]>("list_tree"),
   notes: () => invoke<string[]>("list_notes"),
   read: (path: string) => invoke<string>("read_note", { path }),
-  write: writes.write,
+  write: (path: string, content: string, vault = writeVault) => writes.write(JSON.stringify([vault, path]), content),
   createNote: (path: string) => invoke<void>("create_note", { path }),
   createFolder: (path: string) => invoke<void>("create_folder", { path }),
   /** Rename/move; with `updateLinks`, rewrites links to it. Returns the notes rewritten. */
@@ -323,7 +333,7 @@ export const ipc = {
   noteSection: (from: string, link: string) => invoke<Section | null>("note_section", { from, link }),
   replacePreview: (opts: ReplaceOpts, exclude: string[] = []) => invoke<FileChanges[]>("replace_preview", { opts, exclude }),
   /** Replace in `paths` and write them; returns the paths changed. */
-  replaceApply: (opts: ReplaceOpts, paths: string[]) => invoke<string[]>("replace_apply", { opts, paths }),
+  replaceApply: (opts: ReplaceOpts, paths: string[], expected: Record<string, string>) => invoke<string[]>("replace_apply", { opts, paths, expected }),
   /** Rename a tag (and nested tags) in every note; returns the paths changed. */
   renameTag: (from: string, to: string) => invoke<string[]>("rename_tag", { from, to }),
   tags: (exclude: string[] = []) => invoke<TagCount[]>("list_tags", { exclude }),

@@ -92,6 +92,8 @@ export function pickAsset(assets) {
   const names = assets.map((a) => a.name);
   let re;
   if (process.platform === "darwin") {
+    const exact = assets.find((a) => a.name.toLowerCase().endsWith(`-mac-${process.arch}.dmg`));
+    if (exact) return exact;
     re = process.arch === "arm64" ? /-arm64\.dmg$/i : /^(?!.*arm64).*\.dmg$/i;
   } else if (process.platform === "win32") {
     // NoteZ-1.2.3-portable.exe (and the older "NoteZ.1.2.3.exe": an .exe that isn't the Setup one)
